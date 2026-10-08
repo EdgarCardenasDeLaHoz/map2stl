@@ -51,6 +51,18 @@ button.ghost:hover { border-color: var(--accent); color: var(--accent); }
 
 .body { flex: 1 1 auto; display: flex; min-height: 0; }
 
+/* Verification tiers (F-SKY26 2f); colours come from the API (tier_display, Okabe-Ito). */
+.tierbar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; max-width: 640px;
+           margin: 6px 0; background: var(--line); }
+.tierbar span { display: block; height: 100%; }
+.tchips { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.tchip { cursor: help; }
+.tsw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px;
+       vertical-align: -1px; }
+.muted, .attr { color: var(--muted); }
+.attr { font-size: 12px; margin-top: 6px; }
+.ink { color: var(--ink); }
+
 aside {
   width: 268px; flex: 0 0 268px; overflow-y: auto;
   background: var(--panel); border-right: 1px solid var(--line); padding: 10px;

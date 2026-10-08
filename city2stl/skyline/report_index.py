@@ -18,13 +18,18 @@ CURATED_REGIONS = {"cartagena", "chicago", "miami"}
 #       <td>corr</td><td>nseg</td><td>nm</td>
 #       <td>rate%</td><td>ncov</td>
 #       <td style="background:rgba(...)">quality_label</td></tr>
+# Since 2026-10-08 (F-SKY26 2f) the row also has a kind cell (street / drone) after the seed,
+# "used" and "tag within 25 %" cells after coverage, and a drone seed's match rate is "n/a" in a
+# span; older reports, without them, still parse.
 ROW_RE = re.compile(
     r'<tr><td><a href="([^"]+)">([^<]+)</a></td>'   # (url, name)
-    r'<td>.*?</td>'                                   # heading correction
+    r'(?:<td>(?:street|drone)</td>)?'                 # kind (2026-10-08)
+    r'<td>[^\n]*?</td>'                               # heading correction
     r'<td>(\d+)</td>'                                 # detected
     r'<td>(\d+)</td>'                                 # matched
-    r'<td>([^<]+)</td>'                               # match rate  e.g. "84%"
+    r'<td>((?:[^<]|<span[^>]*>[^<]*</span>)+)</td>'   # match rate  e.g. "84%", drone "n/a"
     r'<td>(\d+)</td>'                                 # coverage
+    r'(?:<td>\d+</td><td>(?:[^<]|<span[^>]*>[^<]*</span>)*</td>)?'  # used, tag within 25 %
     r'<td[^>]*?background:([^"]+)"[^>]*>([^<]+)</td>'# bgcolor, quality label
     r'</tr>',
     re.DOTALL,
@@ -37,6 +42,7 @@ BG_TO_QUALITY = {
     "rgba(214,40,40":  "weak",    # original red + F-DET3 "no detection"
     "rgba(200,60,20":  "weak",    # F-DET3 "mismatch"
     "rgba(200,130,20": "weak",    # F-DET3 "low coverage"
+    "rgba(160,160,160": "weak",   # drone seed with fewer than 3 tagged readings (2026-10-08)
 }
 
 
@@ -71,7 +77,7 @@ def parse_pano_rows(txt: str) -> list[dict]:
             "seed": seed_name,
             "detected": int(nseg),
             "matched": int(nm),
-            "match_rate": rate.strip(),
+            "match_rate": re.sub(r"<[^>]+>", "", rate).strip(),
             "coverage": int(ncov),
             "quality": next((v for k, v in BG_TO_QUALITY.items() if k in bgcolor), "weak"),
             "quality_label": qlabel.strip(),

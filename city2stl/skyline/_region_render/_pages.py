@@ -495,6 +495,167 @@ def _load_known_heights(
         })
     return out
 
+def _row_ring(row: dict, records_by_id: dict | None):
+    """A row's footprint ring as (lon, lat) pairs: ``footprint_lonlat`` (heights.json rows) or
+    its record's exterior; None when neither exists."""
+    ring = row.get("footprint_lonlat")
+    if ring:
+        return ring
+    rec = (records_by_id or {}).get(row.get("feature_id"))
+    g = getattr(rec, "geometry", None)
+    if g is None:
+        return None
+    try:
+        g = g if g.geom_type == "Polygon" else max(g.geoms, key=lambda q: q.area)
+        return list(g.exterior.coords)
+    except Exception:
+        return None
+
+
+def _draw_tier_map(ax, rows: list[dict], records_by_id: dict | None = None,
+                   title: str | None = "Published heights by verification tier") -> bool:
+    """Footprints filled by verification tier (``tier_display`` colours, Okabe-Ito), best tier
+    drawn last so it stays on top, with a legend of tier counts (F-SKY26 2f). A row without a
+    footprint is a dot at its centroid. Returns False when nothing could be drawn."""
+    from matplotlib.collections import PolyCollection
+    from matplotlib.patches import Patch
+
+    from ..tier_display import TIER_COLORS, TIER_LABELS, TIERS, row_tier, tier_counts
+
+    order = ["unlabelled", *reversed(TIERS)]  # best tier drawn last, on top
+    polys: dict[str, list] = {t: [] for t in order}
+    dots: dict[str, list] = {t: [] for t in order}
+    for r in rows:
+        t = row_tier(r)
+        ring = _row_ring(r, records_by_id)
+        if ring and len(ring) >= 3:
+            polys[t].append([(float(x), float(y)) for x, y in ring])
+        elif r.get("centroid_lon") is not None and r.get("centroid_lat") is not None:
+            dots[t].append((float(r["centroid_lon"]), float(r["centroid_lat"])))
+    pts = [p for t in order for poly in polys[t] for p in poly] + [p for t in order
+                                                                    for p in dots[t]]
+    if not pts:
+        return False
+    xs = np.array([p[0] for p in pts])
+    ys = np.array([p[1] for p in pts])
+    for t in order:
+        if polys[t]:
+            ax.add_collection(PolyCollection(polys[t], facecolors=TIER_COLORS[t],
+                                             edgecolors=TIER_COLORS[t], linewidths=0.6))
+        if dots[t]:
+            ax.scatter([d[0] for d in dots[t]], [d[1] for d in dots[t]], s=10,
+                       color=TIER_COLORS[t], edgecolors="none")
+    pad_x = max(1e-4, 0.03 * float(xs.max() - xs.min()))
+    pad_y = max(1e-4, 0.03 * float(ys.max() - ys.min()))
+    ax.set_xlim(float(xs.min()) - pad_x, float(xs.max()) + pad_x)
+    ax.set_ylim(float(ys.min()) - pad_y, float(ys.max()) + pad_y)
+    ax.set_aspect(1.0 / max(0.1, float(np.cos(np.radians(float(ys.mean()))))))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for s in ax.spines.values():
+        s.set_color("#bbbbbb")
+    counts = tier_counts(rows)
+    ax.legend(handles=[Patch(facecolor=TIER_COLORS[t], edgecolor=TIER_COLORS[t],
+                             label=f"{TIER_LABELS[t]} ({n})") for t, n in counts.items()],
+              loc="upper left", bbox_to_anchor=(0.0, -0.01), ncol=3, fontsize=8,
+              frameon=False, title="Verification tier", title_fontsize=8,
+              alignment="left")
+    if title:
+        ax.set_title(title, fontsize=10)
+    return True
+
+
+def render_tier_map_png(path: Path, rows: list[dict], records_by_id: dict | None = None,
+                        size_in: float = 6.0) -> bool:
+    """``_draw_tier_map`` as a PNG (the HTML report's headline map). False when no footprint."""
+    fig, ax = plt.subplots(figsize=(size_in, size_in))
+    try:
+        if not _draw_tier_map(ax, rows, records_by_id):
+            return False
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=130, bbox_inches="tight")
+        return True
+    finally:
+        plt.close(fig)
+
+
+def _render_heights_page(pdf, building_heights: list[dict],
+                         building_records: list[BuildingRecord] | None,
+                         pano_only: bool = False) -> None:
+    """The "Seed-Derived Building Heights" page: footprints coloured by verification tier with
+    a legend (F-SKY26 2f), the tier counts, the cross-seed agreement metric and (unless
+    ``pano_only``) the best cross-seed rows; survey licence lines at the foot when survey rows
+    exist. Always written now that it carries a map (it was text-only and skipped under
+    ``pano_only``)."""
+    from ..tier_display import (
+        TIER_LABELS,
+        TIER_SHORT,
+        VERIFIED_TIERS,
+        drone_disagreements,
+        drone_seeds,
+        row_tier,
+        survey_attributions,
+        survey_providers,
+        tier_counts,
+        with_unmeasured_tags,
+    )
+
+    records_by_id = {b.feature_id: b for b in (building_records or ())}
+    rows = with_unmeasured_tags(building_heights, building_records or ())
+    measured = [r for r in building_heights if r.get("measured", True) is not False]
+    fig = plt.figure(figsize=(11, 8.5))
+    fig.suptitle("Seed-Derived Building Heights", fontsize=16, fontweight="bold")
+    ax_map = fig.add_axes([0.02, 0.16, 0.50, 0.76])
+    if not _draw_tier_map(ax_map, rows, records_by_id, title=None):
+        ax_map.axis("off")
+        ax_map.text(0.5, 0.5, "No footprints to map.", ha="center", va="center")
+    ax = fig.add_axes([0.55, 0.10, 0.43, 0.80])
+    ax.axis("off")
+
+    counts = tier_counts(rows)
+    total = sum(counts.values()) or 1
+    n_ver = sum(counts.get(t, 0) for t in VERIFIED_TIERS)
+    lines = [f"Published heights: {sum(counts.values())}",
+             f"  verified: {n_ver} ({100.0 * n_ver / total:.0f} %)",
+             f"  unverified: {total - n_ver}", ""]
+    lines += [f"  {TIER_LABELS[t]:<22}{n:5d}  {100.0 * n / total:4.0f} %"
+              for t, n in counts.items()]
+    cross_seed = [r for r in measured if r.get("n_seeds", 1) >= 2]
+    single_seed = [r for r in measured if r.get("n_seeds", 1) < 2]
+    dis = np.asarray([r.get("seed_disagreement_m", 0.0) or 0.0 for r in cross_seed],
+                     dtype=np.float32)
+    lines += ["", f"Seen by a seed: {len(measured)}",
+              f"  cross-seed (>=2 seeds): {len(cross_seed)}",
+              f"  single-seed only:       {len(single_seed)}", "",
+              "Cross-seed disagreement (all seeds; lower is better):"]
+    if dis.size:
+        lines += [f"  median {float(np.median(dis)):5.1f} m   p90 "
+                  f"{float(np.percentile(dis, 90)):5.1f} m   max {float(dis.max()):5.1f} m"]
+    else:
+        lines.append("  (no buildings seen from >= 2 seeds yet)")
+    dd = drone_disagreements(measured, drone_seeds(rows))
+    lines.append("Drone seeds only (trusted readings):")
+    if dd:
+        lines.append(f"  median {float(np.median(dd)):5.1f} m   p90 "
+                     f"{float(np.percentile(dd, 90)):5.1f} m   max {dd[-1]:5.1f} m  (n {len(dd)})")
+    else:
+        lines.append("  (no building read by >= 2 drone seeds)")
+    if not pano_only:
+        lines += ["", "Lowest-disagreement cross-seed rows:"]
+        for r in sorted(cross_seed, key=lambda r: (r.get("seed_disagreement_m", 0.0) or 0.0,
+                                                   -r.get("n_seeds", 0)))[:18]:
+            h = r.get("effective_height_m", r.get("weighted_height_m"))
+            lines.append(f"  {str(r.get('name'))[:16]:<16} {float(h or 0):5.0f} m  "
+                         f"{TIER_SHORT[row_tier(r)]:<9}"
+                         f"d={float(r.get('seed_disagreement_m', 0.0) or 0.0):4.0f}")
+    ax.text(0.0, 1.0, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=8.5)
+    attributions = survey_attributions(survey_providers(rows))
+    if attributions:
+        fig.text(0.02, 0.03, "\n".join(attributions), fontsize=7.5, va="bottom", color="#333333")
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _render_pdf(
     out_pdf: Path,
     bbox: RegionBBox,
@@ -617,73 +778,8 @@ def _render_pdf(
                     pdf, pr, osm_data, buildings_by_id=buildings_by_id,
                     seed_views=seed_views)
 
-        # Extracted heights summary page — text-only per-building dump.
-        # Skipped under `pano_only`: the same data lives in the HTML
-        # report (html_report.py) where tables are first-class; the PDF
-        # is the orientation / visual artefact, not the data store.
-        fig = plt.figure(figsize=(11, 8.5))
-        fig.suptitle("Seed-Derived Building Heights",
-                     fontsize=16, fontweight="bold")
-        ax = fig.add_subplot(111)
-        ax.axis("off")
-        cross_seed = [r for r in building_heights if r.get("n_seeds", 1) >= 2]
-        single_seed = [r for r in building_heights if r.get("n_seeds", 1) < 2]
-
-        # Cross-seed disagreement: the same OSM building seen from multiple
-        # seeds should produce similar heights. Large spread = matcher is
-        # picking different physical structures in different seeds (or one
-        # seed's heading is off). This is our headline "are matches even
-        # pointing at the same building?" sanity metric.
-        cs_disagreements = np.asarray(
-            [r.get("seed_disagreement_m", 0.0) for r in cross_seed], dtype=np.float32)
-        cs_lines = [
-            "Cross-seed agreement metric (lower is better — same building seen from different",
-            "seeds should produce similar heights):",
-        ]
-        if cs_disagreements.size:
-            cs_lines.extend([
-                f"  n cross-seed buildings : {cs_disagreements.size}",
-                f"  median disagreement    : {float(np.median(cs_disagreements)):6.1f} m",
-                f"  p75 disagreement       : {float(np.percentile(cs_disagreements, 75)):6.1f} m",
-                f"  p90 disagreement       : {float(np.percentile(cs_disagreements, 90)):6.1f} m",
-                f"  max disagreement       : {float(np.max(cs_disagreements)):6.1f} m",
-            ])
-        else:
-            cs_lines.append("  (no buildings seen from >= 2 seeds yet)")
-
-        lines = [
-            f"Buildings with aggregated estimates: {len(building_heights)}",
-            f"  - cross-seed (>=2 distinct seeds): {len(cross_seed)}",
-            f"  - single-seed only: {len(single_seed)}",
-            "",
-            *cs_lines,
-            "",
-            "Top cross-seed extracted heights (sorted by lowest disagreement first):",
-        ]
-
-        # Sort cross-seed buildings by disagreement (best matches first)
-        cross_seed_sorted = sorted(
-            cross_seed,
-            key=lambda r: (r.get("seed_disagreement_m",
-                           0.0), -r.get("n_seeds", 0)),
-        )
-        for row in cross_seed_sorted[:30]:
-            per_seed = row.get("per_seed_median_m", {})
-            per_seed_str = ", ".join(
-                f"{s}:{h:.1f}" for s, h in sorted(per_seed.items())
-            )
-            lines.append(
-                f"- {row['name']}: med={row['median_height_m']:5.1f}m "
-                f"weighted={row['weighted_height_m']:5.1f}m "
-                f"n_seeds={row['n_seeds']} n_views={row['n_views']:2d} "
-                f"disagree={row.get('seed_disagreement_m', 0.0):5.1f}m "
-                f"[{per_seed_str}]"
-            )
-        ax.text(0.03, 0.96, "\n".join(lines), va="top",
-                ha="left", family="monospace", fontsize=8)
-        if not pano_only:
-            pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
+        # Heights page: tier map + counts (F-SKY26 2f); the per-row dump lives in the HTML.
+        _render_heights_page(pdf, building_heights, building_records, pano_only=pano_only)
 
         # Residuals page: predicted vs OSM-tagged height
         tagged_by_id = {

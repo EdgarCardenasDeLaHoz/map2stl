@@ -37,6 +37,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from city2stl.skyline.report_index import parse_pano_rows, seed_source, stat
+from city2stl.skyline.tier_display import (
+    TIER_COLORS,
+    TIER_HINTS,
+    TIER_LABELS,
+    VERIFIED_TIERS,
+    survey_attributions,
+    survey_providers,
+    tier_counts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +328,12 @@ async def reports_heights(region_dir: str):
 
     Returns the header fields plus per-building height sources counted, not the building list
     itself; the raw file stays available through ``/reports/files``.
+
+    Verification tiers (F-SKY26 2f): ``tier_counts`` (the file's own, else counted; schema 1
+    files count as ``unlabelled``), ``n_verified``, ``n_withheld`` (single readings replaced by
+    the prior), ``tiers`` (label, colour and hint per tier, so the page draws the same legend
+    as the reports) and ``survey`` ({provider: rows} plus the licence ``attributions`` the
+    page must show when survey heights are published).
     """
     path = _safe_path("region", f"{region_dir}/heights.json")
     try:
@@ -336,6 +351,8 @@ async def reports_heights(region_dir: str):
         if isinstance(h, (int, float)):
             heights.append(float(h))
     heights.sort()
+    counts = tier_counts(buildings, data.get("tier_counts"))
+    providers = survey_providers(buildings)
 
     def _pct(frac: float) -> float | None:
         if not heights:
@@ -347,6 +364,16 @@ async def reports_heights(region_dir: str):
         "bbox_nsew": data.get("bbox_nsew"),
         "n_building_records": data.get("n_building_records"),
         "known_heights": data.get("known_heights"),
+        "n_known_heights": len(data.get("known_heights") or []),
+        "schema_version": data.get("schema_version", 1),
+        "tier_counts": counts,
+        "n_verified": sum(counts.get(t, 0) for t in VERIFIED_TIERS),
+        "n_withheld": sum(1 for b in buildings
+                          if b.get("withheld_reason") or b.get("single_reading_m") is not None),
+        "tiers": {t: {"label": TIER_LABELS[t], "color": TIER_COLORS[t], "hint": TIER_HINTS[t]}
+                  for t in counts},
+        "survey": {"providers": providers,
+                   "attributions": survey_attributions(providers)},
         "n_buildings": len(buildings),
         "height_sources": sources,
         "height_p10": _pct(0.10),

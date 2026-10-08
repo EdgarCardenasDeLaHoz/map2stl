@@ -68,18 +68,92 @@ from ._report_plots._view_plots import (  # noqa: E402
     _render_view_reconstruction_png,
     _save_view_image_png,
 )
+from .tier_display import (  # noqa: E402
+    TIER_COLORS,
+    TIER_HINTS,
+    TIER_LABELS,
+    TIERS,
+    VERIFIED_TIERS,
+    drone_disagreements,
+    drone_seeds,
+    is_unverified,
+    row_tier,
+    source_label,
+    survey_attributions,
+    survey_providers,
+    tier_counts,
+    tier_hover,
+    with_unmeasured_tags,
+    withheld_note,
+)
+
+#: Light/dark colour tokens for every report page (2026-10-08: in a dark-scheme browser the pages
+#: had no background and #222 text, near-black on black). Appended last in each page's <style>,
+#: so it overrides the element colours above it; rules with their own light background (the
+#: selected tab, tinted table rows) keep dark text and stay readable.
+_THEME_CSS = """
+  :root { color-scheme: light dark; --bg: #ffffff; --ink: #222222; --muted: #666666;
+          --line: #dddddd; --th: #f4f6fa; --accent: #0a3070; --stat: #f4f6fa;
+          --bad-bg: #fdecec; --track: #eef1f6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15171c; --ink: #e8eaed; --muted: #a9adb4; --line: #3a3f47;
+            --th: #242a33; --accent: #9dbcff; --stat: #242a33; --bad-bg: #4a2427;
+            --track: #2a2f37; }
+  }
+  body { background: var(--bg); color: var(--ink); }
+  h1 { border-bottom-color: var(--accent); }
+  h2, .talloc-title { color: var(--accent); }
+  th, td { border-color: var(--line); }
+  th { background: var(--th); }
+  a, nav.breadcrumb a { color: var(--accent); }
+  .small, .missing, td.note, .talloc-num { color: var(--muted); }
+  .talloc-label { color: var(--ink); }
+  .talloc-track { background: var(--track); }
+  .stat { background: var(--stat); }
+  .stat .num { color: var(--accent); }
+  figure.tabs .tab-labels label { background: var(--th); border-color: var(--line); }
+  .estimates tr.disagree { background: var(--bad-bg); }
+  details > summary { cursor: pointer; font-weight: 600; margin: 0.6em 0; }
+  .tsw { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+         margin-right: 5px; vertical-align: -1px; }
+  .tier { white-space: nowrap; cursor: help; border-bottom: 1px dotted var(--muted); }
+  td.unused { color: var(--muted); }
+"""
 
 
-def _segments_table_html(primary_sv, pano_result) -> str:
+def _reading_status(seg: dict, row: dict | None, seed: str) -> tuple[str, str]:
+    """(used, reason) for one seed's reading of one building. Used = the seed's reading is in
+    the building's published aggregate (``per_seed_median_m``), so it was trusted and not left
+    out by the tower-behind check. The reason comes from the segment when the pipeline wrote it
+    (``untrusted_reason`` / ``top_edge`` / ``behind``); otherwise only "not used" is known."""
+    if row is None:
+        return "no", "no published row"
+    used = seed in (row.get("per_seed_median_m") or {})
+    if used:
+        return "yes", ""
+    reason = seg.get("untrusted_reason") or ""
+    if not reason and seg.get("behind"):
+        reason = "tower behind"
+    if not reason and seg.get("top_edge") and seg.get("top_edge") != "sky":
+        reason = f"top edge: {seg.get('top_edge')}"
+    return "no", reason
+
+
+def _segments_table_html(primary_sv, pano_result, published_by_id: dict | None = None) -> str:
     """The numbered badges on the pano images, as a table: badge -> building (record id, name),
     measured height, distance, bearing and a map link at the building's position, so a number
-    seen on an image is looked up directly (user, 2026-10-06)."""
+    seen on an image is looked up directly (user, 2026-10-06). With ``published_by_id``
+    (coordinator review, 2026-10-08) each reading also says whether it was used, and shows the
+    building's published value and tier, so a wrong-looking reading is not read as the
+    answer."""
     import math
 
     segs = [s for s in (getattr(pano_result, "matched_segments", None) or [])
             if s.get("matched_projection")]
     if not segs:
         return ""
+    pub = published_by_id or {}
+    seed = str(getattr(pano_result, "seed_name", "") or getattr(primary_sv, "seed_name", ""))
     lat0 = float(getattr(pano_result, "seed_lat", primary_sv.seed_lat))
     lon0 = float(getattr(pano_result, "seed_lon", primary_sv.seed_lon))
     rows = []
@@ -94,18 +168,35 @@ def _segments_table_html(primary_sv, pano_result) -> str:
         fid = str(m.get("feature_id") or "")
         n = int(s.get("seed_index") or 0)
         base = "yes" if s.get("base_visible") else ("no" if "base_visible" in s else "")
+        extra = ""
+        if published_by_id is not None:
+            row = pub.get(fid)
+            used, reason = _reading_status(s, row, seed)
+            ph = (row or {}).get("effective_height_m")
+            t = row_tier(row) if row else None
+            extra = (f'<td class="{"used" if used == "yes" else "unused"}">{used}'
+                     f'{f" <span class=small>({html.escape(reason)})</span>" if reason else ""}'
+                     f"</td><td>{'' if ph is None else f'{float(ph):.0f}'}</td>"
+                     + (f'<td><span class="tier" title="{html.escape(tier_hover(row))}">'
+                        f'<span class="tsw" style="background:{TIER_COLORS[t]}"></span>'
+                        f"{html.escape(TIER_LABELS[t])}</span></td>" if t else "<td></td>"))
         rows.append(
             f'<tr id="seg-{n}"><td>{n}</td><td>{html.escape(fid)}</td>'
             f"<td>{html.escape(name if name != fid else '')}</td>"
             f"<td>{'' if h is None else f'{float(h):.0f}'}</td><td>{d:.0f}</td><td>{b:.0f}°</td>"
-            f"<td>{base}</td>"
+            f"<td>{base}</td>{extra}"
             f'<td><a href="https://www.openstreetmap.org/?mlat={lat:.5f}&mlon={lon:.5f}'
             f'#map=18/{lat:.5f}/{lon:.5f}">{lat:.5f}, {lon:.5f}</a></td></tr>')
+    extra_head = ("<th title='whether this reading is in the published value'>used</th>"
+                  "<th>published m</th><th>tier</th>") if published_by_id is not None else ""
+    note = (" <b>Height m</b> is this seed's reading; <b>published m</b> is the building's "
+            "answer from all evidence. A reading not used (untrusted, or a tower behind) is "
+            "not the answer.") if published_by_id is not None else ""
     return ("<section class=\"segments\">\n  <h2>Numbered buildings</h2>\n"
             "  <p class=\"small\">The numbers drawn on the pano images. Position = the camera plus the "
-            "building's distance along its bearing.</p>\n  <table>\n"
+            f"building's distance along its bearing.{note}</p>\n  <table>\n"
             "    <tr><th>#</th><th>building</th><th>name</th><th>height m</th><th>distance m</th>"
-            "<th>bearing</th><th>base visible</th><th>position</th></tr>\n    "
+            f"<th>bearing</th><th>base visible</th>{extra_head}<th>position</th></tr>\n    "
             + "\n    ".join(rows) + "\n  </table>\n</section>")
 
 
@@ -117,6 +208,7 @@ def render_seed_pano_page(
     minimap_rel_path: str | None,
     *,
     pano_rel_paths: dict | None = None,
+    published_by_id: dict | None = None,
 ) -> str:
     """Render the per-seed HTML page with ONE big 6-layer pano tab block.
 
@@ -145,7 +237,7 @@ def render_seed_pano_page(
         f"    <tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
         for k, v in summary_rows
     )
-    segments_html = _segments_table_html(primary_sv, pano_result)
+    segments_html = _segments_table_html(primary_sv, pano_result, published_by_id)
 
     paths = pano_rel_paths or {}
 
@@ -339,7 +431,7 @@ def render_seed_pano_page(
                font-size: 0.85em; user-select: none;
                background: rgba(0,0,0,0.5); padding: 0.3em 0.8em;
                border-radius: 4px; }}
-</style>
+{_THEME_CSS}</style>
 </head>
 <body>
 <nav class="breadcrumb"><a href="index.html">← {html.escape(region_name)} index</a></nav>
@@ -714,7 +806,7 @@ def render_seed_page(
   figure.tabs > input:nth-of-type(3):checked ~ .tab-depth {{ display: block; }}
   nav.breadcrumb {{ font-size: 0.9em; margin-bottom: 1em; }}
   nav.breadcrumb a {{ color: #0a3070; text-decoration: none; }}
-</style>
+{_THEME_CSS}</style>
 </head>
 <body>
 <nav class="breadcrumb"><a href="index.html">← {html.escape(region_name)} index</a></nav>
@@ -753,6 +845,185 @@ def render_seed_page(
 # Region index
 # ---------------------------------------------------------------------------
 
+def _is_footprint_first(pr) -> bool:
+    """A drone (elevated) seed's pano result: one segment per measured footprint, all with
+    ``height_src == "footprint"``, so detected == matched by construction."""
+    segs = getattr(pr, "matched_segments", None) or []
+    return bool(segs) and all(isinstance(x, dict) and x.get("height_src") == "footprint"
+                              for x in segs)
+
+
+def _tags_by_id(rows: list[dict], records=()) -> dict[str, float]:
+    """feature_id -> OSM height tag (osm_tag / osm_levels), from rows and records."""
+    out: dict[str, float] = {}
+    for rec in records or ():
+        if getattr(rec, "height_source", None) in ("osm_tag", "osm_levels") \
+                and getattr(rec, "height_tag_m", None):
+            out[rec.feature_id] = float(rec.height_tag_m)
+    for r in rows:
+        if r.get("height_source") in ("osm_tag", "osm_levels") and r.get("height_tag_m"):
+            out[r["feature_id"]] = float(r["height_tag_m"])
+    return out
+
+
+def _seed_reading_stats(seed: str, rows: list[dict],
+                        tags: dict[str, float]) -> tuple[int, int, int]:
+    """For one seed: (readings that reached the published aggregate, of those on a tagged
+    building, of those within 25 % of the tag)."""
+    used = tagged = within = 0
+    for r in rows:
+        v = (r.get("per_seed_median_m") or {}).get(seed)
+        if not isinstance(v, (int, float)):
+            continue
+        used += 1
+        t = tags.get(r.get("feature_id"))
+        if t:
+            tagged += 1
+            within += abs(float(v) - t) <= 0.25 * t
+    return used, tagged, within
+
+
+def _fmt_seed_values(row: dict, seeds: set[str]) -> str:
+    vals = [(s, v) for s, v in sorted((row.get("per_seed_median_m") or {}).items())
+            if s in seeds and isinstance(v, (int, float))]
+    return ", ".join(f"{html.escape(s)} {float(v):.0f}" for s, v in vals) or "—"
+
+
+def _fmt_satellite(row: dict) -> str:
+    sat = row.get("satellite") or {}
+    parts = []
+    for k, v in sorted(sat.items()):
+        try:
+            m, conf = (v[0], v[1]) if isinstance(v, (list, tuple)) else (v, None)
+            parts.append(f"{html.escape(str(k))} {float(m):.0f}"
+                         + (f' <span class="small">({float(conf):.2f})</span>'
+                            if conf is not None else ""))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return ", ".join(parts) or "—"
+
+
+def _towers_table_html(known: list[dict], rows: list[dict], drone_set: set[str]) -> str:
+    """The published towers (``known_heights``: CTBUH-style reference heights) against our
+    published value, its source and tier, and the drone and satellite readings behind it."""
+    if not known:
+        return ('<p class="small">No reference tower heights for this region '
+                '(sites/&lt;region&gt;.json <code>known_heights_m</code>).</p>')
+    by_id = {r.get("feature_id"): r for r in rows}
+    body = []
+    for k in sorted(known, key=lambda k: -float(k.get("ctbuh_m") or 0)):
+        ref = k.get("ctbuh_m")
+        r = by_id.get(k.get("matched_id"))
+        if r is None:
+            body.append(f"<tr><td>{html.escape(str(k.get('name')))}</td>"
+                        f"<td class='num'>{float(ref or 0):.0f}</td>"
+                        "<td colspan='6' class='note'>no published row (footprint not matched "
+                        "or not measured)</td></tr>")
+            continue
+        ours = r.get("effective_height_m")
+        off = (f"{100.0 * (float(ours) - float(ref)) / float(ref):+.0f} %"
+               if isinstance(ours, (int, float)) and ref else "—")
+        t = row_tier(r)
+        body.append(
+            f"<tr><td>{html.escape(str(k.get('name')))} "
+            f"<span class='small'>{html.escape(str(k.get('matched_id')))}</span></td>"
+            f"<td class='num'>{float(ref or 0):.0f}</td>"
+            f"<td class='num'><b>{'' if ours is None else f'{float(ours):.0f}'}</b></td>"
+            f"<td class='num'>{off}</td>"
+            f"<td>{html.escape(source_label(r))}</td>"
+            f'<td><span class="tier" title="{html.escape(tier_hover(r))}">'
+            f'<span class="tsw" style="background:{TIER_COLORS[t]}"></span>'
+            f"{html.escape(TIER_LABELS[t])}</span></td>"
+            f"<td>{_fmt_seed_values(r, drone_set)}</td><td>{_fmt_satellite(r)}</td></tr>")
+    return ("<table class='towers'><thead><tr><th>Tower</th><th>Reference m</th>"
+            "<th>Ours m</th><th>Off by</th><th>Source</th><th>Tier</th><th>Drone m</th>"
+            "<th>Satellite m (conf)</th></tr></thead><tbody>\n" + "\n".join(body)
+            + "\n</tbody></table>\n<p class='small'>Reference = the published (CTBUH-style) "
+            "height in sites/&lt;region&gt;.json. Drone = per-seed medians of trusted readings "
+            "that reached the published value.</p>")
+
+
+def _tier_summary_html(rows: list[dict], stored: dict | None = None) -> str:
+    """Tier counts for the heights section: a verified share, a stacked bar and a legend with
+    counts (F-SKY26 2f), plus the survey licence lines when survey rows exist."""
+    counts = tier_counts(rows, stored)
+    total = sum(counts.values())
+    if not total:
+        return ""
+    n_ver = sum(counts.get(t, 0) for t in VERIFIED_TIERS)
+    pct = 100.0 * n_ver / total
+    bar = "".join(
+        f'<span style="flex:{n};background:{TIER_COLORS[t]}" '
+        f'title="{html.escape(TIER_LABELS[t])}: {n}"></span>'
+        for t, n in counts.items() if n)
+    chips = "".join(
+        f'<span class="tchip" title="{html.escape(TIER_HINTS[t])}">'
+        f'<span class="tsw" style="background:{TIER_COLORS[t]}"></span>'
+        f'{html.escape(TIER_LABELS[t])} <b>{n}</b> '
+        f'<span class="small">({100.0 * n / total:.0f} %)</span></span>'
+        for t, n in counts.items())
+    attributions = survey_attributions(survey_providers(rows))
+    attr_html = "".join(f'<p class="small attr">{html.escape(a)}</p>' for a in attributions)
+    return (f'<p><b>{n_ver} of {total}</b> published heights are verified ({pct:.0f} %); '
+            f'{total - n_ver} are unverified.</p>\n'
+            f'<div class="tierbar">{bar}</div>\n<div class="tchips">{chips}</div>\n{attr_html}')
+
+
+def _heights_table_html(rows: list[dict]) -> str:
+    """Every published height with its tier (methods on hover), an "unverified" mark on
+    tag/single/prior rows and a note where a single reading was withheld for the prior.
+    Best tier first, tallest first within a tier; a tier filter above it."""
+    rank = {t: i for i, t in enumerate((*TIERS, "unlabelled"))}
+
+    def _h(r):
+        v = r.get("effective_height_m")
+        return float(v) if isinstance(v, (int, float)) else None
+
+    ordered = sorted(rows, key=lambda r: (rank[row_tier(r)], -(_h(r) or 0.0)))
+    body = []
+    for r in ordered:
+        t = row_tier(r)
+        h = _h(r)
+        notes = []
+        w = withheld_note(r)
+        if w:
+            notes.append(w)
+        elif r.get("prior_disagrees") and t == "single":
+            notes.append("more than 2x the prior")
+        if r.get("measured") is False:
+            notes.append("not seen by a seed")
+        name = str(r.get("name") or r.get("feature_id") or "")
+        fid = str(r.get("feature_id") or "")
+        name_cell = html.escape(name) if name == fid else (
+            f'{html.escape(name)} <span class="small">{html.escape(fid)}</span>')
+        body.append(
+            f'<tr data-tier="{t}"><td>{name_cell}</td>'
+            f'<td class="num">{"" if h is None else f"{h:.0f}"}</td>'
+            f'<td><span class="tier" title="{html.escape(tier_hover(r))}">'
+            f'<span class="tsw" style="background:{TIER_COLORS[t]}"></span>'
+            f'{html.escape(TIER_LABELS[t])}</span></td>'
+            f'<td>{"<span class=unv>unverified</span>" if is_unverified(r) else ""}</td>'
+            f'<td>{html.escape(source_label(r))}</td>'
+            f'<td class="num">{int(r.get("n_seeds") or 0)}</td>'
+            f'<td class="note">{html.escape("; ".join(notes))}</td></tr>')
+    options = "".join(
+        f'<option value="{t}">{html.escape(TIER_LABELS[t])}</option>'
+        for t in (*TIERS, "unlabelled") if any(row_tier(r) == t for r in rows))
+    return f"""
+<p class="small">Hover a tier for the methods behind it. Show:
+  <select id="tier-filter" onchange="for (const tr of document.querySelectorAll('#heights-table tbody tr'))
+    tr.style.display = (!this.value || tr.dataset.tier === this.value) ? '' : 'none';">
+    <option value="">all tiers ({len(rows)})</option>{options}</select></p>
+<table id="heights-table">
+  <thead><tr><th>Building</th><th>Height (m)</th><th>Tier</th><th></th><th>Source</th>
+    <th>Seeds</th><th>Note</th></tr></thead>
+  <tbody>
+{chr(10).join(body)}
+  </tbody>
+</table>
+"""
+
+
 def render_region_index(
     region_name: str,
     seed_views: list,
@@ -761,6 +1032,11 @@ def render_region_index(
     step_timings: list[tuple[str, float]] | None = None,
     screening_map_rel: str | None = None,
     pano_results: list | None = None,
+    building_records=None,
+    tier_counts_stored: dict | None = None,
+    known_heights: list[dict] | None = None,
+    tier_map_rel: str | None = None,
+    elevated_seeds=(),
 ) -> str:
     """Render the per-region index.html.
 
@@ -769,6 +1045,18 @@ def render_region_index(
     bottom-of-page totals. ``step_timings`` (label, seconds) renders a
     pipeline-timing table so contributors can see where a run spent its
     time.
+
+    The heights section shows the verification tiers (F-SKY26 2f): counts, a table with the
+    tier per building (methods on hover), "unverified" on tag/single/prior rows, a note where
+    a single reading was withheld for the prior, and survey licence lines. ``building_records``
+    adds the OSM-tagged footprints no seed measured, as ``heights.json`` does;
+    ``tier_counts_stored``: a ``heights.json``'s own ``tier_counts`` (re-rendering from one).
+
+    Layout (coordinator review, 2026-10-08): the answer first (published towers against their
+    reference heights, tier counts and the tier map at ``tier_map_rel``), then the seeds and
+    the full heights table; pipeline timing last, collapsed. ``known_heights``: the
+    ``_load_known_heights`` list. ``elevated_seeds``: drone seed names (also found from
+    ``tier_methods`` and from footprint-first pano results).
     """
     title = f"{region_name} — Skyline diagnostic report"
 
@@ -936,7 +1224,8 @@ def render_region_index(
         # units); the table below shows the full call HIERARCHY with each
         # step's input/output.
         timings_html = f"""
-<h2>Pipeline timing</h2>
+<details class="timing">
+<summary>Pipeline timing and call hierarchy ({total:.0f} s)</summary>
 <h3 class="talloc-title">Where the time goes — top {TOP_N} leaf work steps
    (of {total:.0f}s total)</h3>
 <div class="talloc">
@@ -964,6 +1253,7 @@ def render_region_index(
    parent's — that's how to spot which inner operation dominates a phase.
    Only steps &ge; 5% are listed; the % cell is shaded by magnitude. The
    HTML render itself runs after this table is built and isn't included.</p>
+</details>
 """
 
     # Aggregated building heights (headline output, ported from the PDF's
@@ -971,11 +1261,17 @@ def render_region_index(
     # its cross-seed median/weighted height and a disagreement metric — the
     # key "are matches pointing at the same building?" signal.
     heights_html = ""
+    headline_html = ""
+    all_rows = with_unmeasured_tags(building_heights or [], building_records or ())
+    drone_set = drone_seeds(all_rows, elevated_seeds)
+    drone_set |= {pr.seed_name for pr in (pano_results or ()) if _is_footprint_first(pr)}
     if building_heights:
-        cross = [r for r in building_heights if r.get("n_seeds", 1) >= 2]
-        single = [r for r in building_heights if r.get("n_seeds", 1) < 2]
+        measured = [r for r in building_heights if r.get("measured", True) is not False]
+        cross = [r for r in measured if r.get("n_seeds", 1) >= 2]
+        single = [r for r in measured if r.get("n_seeds", 1) < 2]
         disagreements = sorted(
             float(r.get("seed_disagreement_m", 0.0)) for r in cross)
+        drone_dis = drone_disagreements(measured, drone_set)
 
         def _pctile(vals, p):
             if not vals:
@@ -985,21 +1281,37 @@ def render_region_index(
             hi = min(lo + 1, len(vals) - 1)
             return vals[lo] + (vals[hi] - vals[lo]) * (k - lo)
 
-        if disagreements:
-            med = _pctile(disagreements, 50)
-            p90 = _pctile(disagreements, 90)
-            agree_line = (
-                f"Cross-seed disagreement (lower = better): median "
-                f"{med:.1f} m · p90 {p90:.1f} m · max {disagreements[-1]:.1f} m "
-                f"over {len(cross)} buildings seen from ≥2 seeds."
-            )
-        else:
-            agree_line = "No buildings seen from ≥2 seeds yet."
+        def _dis_line(label, vals, what):
+            if not vals:
+                return f"{label}: no building {what}."
+            return (f"{label}: median {_pctile(vals, 50):.1f} m · p90 {_pctile(vals, 90):.1f} m"
+                    f" · max {vals[-1]:.1f} m over {len(vals)} buildings {what}.")
 
+        agree_lines = [
+            _dis_line("Drone seeds only (trusted readings that reached the published value)",
+                      drone_dis, "read by ≥2 drone seeds"),
+            _dis_line("All seeds, street level and drone mixed", disagreements,
+                      "seen from ≥2 seeds"),
+        ]
+        headline_html = f"""
+<h2>Answer: published heights</h2>
+{_towers_table_html(known_heights or [], all_rows, drone_set)}
+<div class="headline">
+  <div class="headline-text">
+{_tier_summary_html(all_rows, tier_counts_stored)}
+  </div>
+  {f'<a href="{html.escape(tier_map_rel)}"><img class="tiermap" src="{html.escape(tier_map_rel)}" alt="tier map"></a>' if tier_map_rel else ''}
+</div>
+"""
         heights_html = f"""
-<h2>Building heights (aggregated)</h2>
-<p>{len(building_heights)} buildings with estimates — {len(cross)} cross-seed (≥2 seeds), {len(single)} single-seed.</p>
-<p class="small">{html.escape(agree_line)}</p>
+<h2>Building heights</h2>
+<p>{len(measured)} buildings seen by a seed — {len(cross)} cross-seed (≥2 seeds), {len(single)} single-seed.
+   Cross-seed disagreement (lower = better):</p>
+<ul class="small">{''.join(f"<li>{html.escape(x)}</li>" for x in agree_lines)}</ul>
+<details>
+<summary>All {len(all_rows)} published heights, by tier</summary>
+{_heights_table_html(all_rows)}
+</details>
 """
 
     # One row per UNIQUE seed name. seed_views contains one row per (seed, view),
@@ -1052,6 +1364,7 @@ def render_region_index(
     pano_summary_html = ""
     if pano_results:
         srows = []
+        tags = _tags_by_id(all_rows, building_records or ())
         for pr in pano_results:
             nm = int(getattr(pr, "n_matched", 0) or 0)
             nseg = int(getattr(pr, "n_segments", 0) or 0)
@@ -1093,6 +1406,25 @@ def render_region_index(
             # the percentage is real but not statistically meaningful.
             if nseg < 10 and mrate >= 65:
                 qlabel += " ⚠"
+            used, tagged, within = _seed_reading_stats(pr.seed_name, all_rows, tags)
+            tag_cell = (f"{within} of {tagged} ({100.0 * within / tagged:.0f}%)"
+                        if tagged else "<span class='small'>none tagged</span>")
+            drone = _is_footprint_first(pr)
+            rate_cell = f"{mrate:.0f}%"
+            if drone:
+                # footprint-first: one segment per measured footprint, so detected == matched
+                # and a match rate says nothing; judge it by the tagged buildings instead
+                rate_cell = ("<span class='small' title='footprint-first: every reading is a "
+                             "matched footprint'>n/a</span>")
+                share = within / tagged if tagged else None
+                if share is None or tagged < 3:
+                    qlabel, qbg = "drone — too few tags", "rgba(160,160,160,0.25)"
+                elif share >= 0.8:
+                    qlabel, qbg = "drone — good", "rgba(46,160,67,0.30)"
+                elif share >= 0.6:
+                    qlabel, qbg = "drone — medium", "rgba(230,180,40,0.30)"
+                else:
+                    qlabel, qbg = "drone — weak", "rgba(214,40,40,0.25)"
             corr = (f"{shift:+.0f}&deg;" if abs(shift) >= 1.0
                     else "<span class='small'>&mdash;</span>")
             slug = (pr.seed_name[5:] if pr.seed_name.startswith("seed_")
@@ -1100,8 +1432,9 @@ def render_region_index(
             srows.append(
                 f"      <tr><td><a href=\"seed_{html.escape(slug)}.html\">"
                 f"{html.escape(pr.seed_name)}</a></td>"
+                f"<td>{'drone' if drone else 'street'}</td>"
                 f"<td>{corr}</td><td>{nseg}</td><td>{nm}</td>"
-                f"<td>{mrate:.0f}%</td><td>{ncov}</td>"
+                f"<td>{rate_cell}</td><td>{ncov}</td><td>{used}</td><td>{tag_cell}</td>"
                 f"<td style=\"background:{qbg}\">{qlabel}</td></tr>"
             )
         n_corr = sum(1 for pr in pano_results
@@ -1118,12 +1451,17 @@ def render_region_index(
    <b>Match rate</b> = matched / detected (precision; ⚠ = fewer than 10
    segments detected — percentage is not statistically meaningful).
    <b>Coverage</b> = distinct OSM buildings matched.
-   <b>Quality</b> = good requires ≥65% rate, ≥15 buildings, ≥10 segments;
-   medium ≥50%/≥5/≥4; otherwise weak.</p>
+   <b>Used</b> = buildings whose published aggregate has this seed's reading (trusted
+   readings only). <b>Tag within 25 %</b> = of those on an OSM-tagged building, how many
+   read within 25 % of the tag.
+   <b>Quality</b> (street) = good requires ≥65% rate, ≥15 buildings, ≥10 segments;
+   medium ≥50%/≥5/≥4; otherwise weak. Drone seeds are footprint-first (every reading is
+   a matched footprint, so no match rate): quality is the tag-within-25 % share
+   (good ≥80 %, medium ≥60 %, at least 3 tagged).</p>
 <table>
-  <thead><tr><th>seed</th><th>heading</th><th>detected</th>
-    <th>matched</th><th>match rate</th><th>coverage</th>
-    <th>quality</th></tr></thead>
+  <thead><tr><th>seed</th><th>kind</th><th>heading</th><th>detected</th>
+    <th>matched</th><th>match rate</th><th>coverage</th><th>used</th>
+    <th>tag within 25 %</th><th>quality</th></tr></thead>
   <tbody>
 {chr(10).join(srows)}
   </tbody>
@@ -1158,6 +1496,23 @@ def render_region_index(
   .stat {{ background: #f4f6fa; padding: 0.6em 1em; border-radius: 4px; }}
   .stat .num {{ font-size: 1.4em; font-weight: 600; color: #0a3070; }}
   .small {{ font-size: 0.85em; color: #666; }}
+  /* Verification tiers (F-SKY26 2f); colours from tier_display (Okabe-Ito). */
+  .tierbar {{ display: flex; height: 18px; border-radius: 4px; overflow: hidden;
+             max-width: 900px; margin: 0.4em 0; }}
+  .tierbar span {{ display: block; height: 100%; }}
+  .tchips {{ display: flex; flex-wrap: wrap; gap: 0.3em 1.2em; margin: 0.3em 0 0.8em; }}
+  .tchip {{ font-size: 0.9em; cursor: help; }}
+  .tsw {{ display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+          margin-right: 5px; vertical-align: -1px; }}
+  .tier {{ white-space: nowrap; cursor: help; border-bottom: 1px dotted #999; }}
+  .unv {{ font-size: 0.8em; color: #7a3300; background: #fdeee4; border-radius: 8px;
+          padding: 1px 6px; white-space: nowrap; }}
+  td.num {{ text-align: right; white-space: nowrap; }}
+  td.note {{ font-size: 0.85em; color: #555; }}
+  .headline {{ display: flex; gap: 1.5em; align-items: flex-start; flex-wrap: wrap; }}
+  .headline-text {{ flex: 1 1 420px; min-width: 0; }}
+  img.tiermap {{ width: 420px; max-width: 100%; height: auto; border: 1px solid #ccc;
+                 background: #fff; }}
   /* Time-allocation chart: stacked ABOVE the table, full width. Each row
      is a 3-col grid (label | bar track | number) so bars never overlap
      the labels. */
@@ -1173,7 +1528,7 @@ def render_region_index(
        width: 100%; overflow: hidden; }}
   .talloc-bar {{ display: block; height: 100%; border-radius: 3px;
        min-width: 2px; }}
-</style>
+{_THEME_CSS}</style>
 </head>
 <body>
 <nav class="breadcrumb"><a href="../index.html">&#8592; All regions</a></nav>
@@ -1183,9 +1538,9 @@ def render_region_index(
   <div class="stat"><div class="num">{n_seeds}</div>seeds</div>
   <div class="stat"><div class="num">{n_buildings}</div>aggregated buildings</div>
 </div>
+{headline_html}
 {pano_summary_html}
 {screening_map_html}
-{timings_html}
 <h2>Seeds</h2>
 <table>
   <thead>
@@ -1208,6 +1563,7 @@ def render_region_index(
   not computed for that seed.
 </p>
 {heights_html}
+{timings_html}
 <footer class="small" style="margin-top:2em;color:#888;">
   Generated by city2stl.skyline.html_report (F-SKY15)
 </footer>
@@ -1257,6 +1613,7 @@ def write_region_report(
 
     buildings_by_id = buildings_by_id or {}
     estimates_by_seed = dict(estimates_by_seed) if estimates_by_seed else {}
+    published_by_id = {r.get("feature_id"): r for r in (building_heights or ())}
 
     # Group seed_views by seed_name. Each value is the ordered list of
     # per-view rows for that seed. The first entry is used for the
@@ -1396,7 +1753,7 @@ def write_region_report(
 
             page_html = render_seed_pano_page(
                 primary, sv_list, pano_result, region_name, minimap_rel,
-                pano_rel_paths=pano_rels,
+                pano_rel_paths=pano_rels, published_by_id=published_by_id,
             )
             (out_dir / f"seed_{slug}.html").write_text(page_html, encoding="utf-8")
             continue
@@ -1500,9 +1857,23 @@ def write_region_report(
         if _render_screening_map_png(sm_path, region_bbox, screened, osm_data):
             screening_map_rel = "assets/screening_map.png"
 
+    records = list(buildings_by_id.values())
+    known_heights = None
+    tier_map_rel = None
+    if building_heights:
+        try:
+            from ._region_render._pages import _load_known_heights, render_tier_map_png
+            known_heights = _load_known_heights(region_name, records)
+            if render_tier_map_png(out_dir / "assets" / "tiers_map.png",
+                                   with_unmeasured_tags(building_heights, records),
+                                   buildings_by_id):
+                tier_map_rel = "assets/tiers_map.png"
+        except Exception as e:  # the headline must not break the report
+            logger.warning("HTML report: tier map / known heights failed: %s", e)
     index_html = render_region_index(
         region_name, seed_views, building_heights, step_timings=step_timings,
-        screening_map_rel=screening_map_rel, pano_results=pano_results)
+        screening_map_rel=screening_map_rel, pano_results=pano_results,
+        building_records=records, known_heights=known_heights, tier_map_rel=tier_map_rel)
     (out_dir / "index.html").write_text(index_html, encoding="utf-8")
 
     logger.info(

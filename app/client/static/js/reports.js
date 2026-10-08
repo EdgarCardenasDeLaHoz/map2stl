@@ -240,11 +240,14 @@ window.reportsPage = (() => {
       const srcs = Object.entries(h.height_sources || {})
         .sort((a, b) => b[1] - a[1])
         .map(([k, v]) => `${esc(k)} ${v}`).join(' · ');
+      const nKnown = h.n_known_heights ?? (Array.isArray(h.known_heights)
+        ? h.known_heights.length : h.known_heights);
       html += '<h3>heights.json</h3>'
-        + `<div class="meta">${h.n_buildings} buildings · ${h.known_heights} with a known height`
+        + `<div class="meta">${h.n_buildings} buildings · ${nKnown} with a known height`
         + ` · p10 ${h.height_p10} m · median ${h.height_median} m · p90 ${h.height_p90} m`
         + ` · max ${h.height_max} m<br>sources: ${srcs}`
         + ` · <a href="${esc(r.heights_json)}" target="_blank">raw</a></div>`;
+      html += tierSummary(h);
     }
 
     if (r.screening_map) {
@@ -261,6 +264,38 @@ window.reportsPage = (() => {
     pane.innerHTML = html;
 
     if (r.heights_json && !state.heights[r.dir]) loadHeights(r.dir);
+  }
+
+  // Verification tiers (F-SKY26 2f): the same labels, colours and survey licence lines as the
+  // HTML report and the PDF (city2stl/skyline/tier_display.py, sent by /api/reports/heights).
+  function tierSummary(h) {
+    const counts = h.tier_counts || {};
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (!total) return '';
+    const tiers = h.tiers || {};
+    const label = (t) => (tiers[t] && tiers[t].label) || t;
+    const color = (t) => (tiers[t] && tiers[t].color) || '#ccc';
+    const pct = (n) => Math.round((100 * n) / total);
+    const entries = Object.entries(counts);
+    const bar = entries.filter(([, n]) => n > 0).map(([t, n]) => `<span style="flex:${n};`
+      + `background:${esc(color(t))}" title="${esc(label(t))}: ${n}"></span>`).join('');
+    const chips = entries.map(([t, n]) => `<span class="tchip" title="${esc((tiers[t] || {}).hint || '')}">`
+      + `<span class="tsw" style="background:${esc(color(t))}"></span>${esc(label(t))} `
+      + `<b>${n}</b> <span class="muted">(${pct(n)} %)</span></span>`).join('');
+    const nVer = h.n_verified || 0;
+    const survey = (h.survey && h.survey.attributions) || [];
+    const attr = survey.length
+      ? survey.map((a) => `<div class="attr">${esc(a)}</div>`).join('')
+      : '<div class="attr">No survey heights in this run.</div>';
+    const withheld = h.n_withheld
+      ? ` · ${h.n_withheld} single ${h.n_withheld === 1 ? 'reading' : 'readings'} withheld for the prior`
+      : '';
+    const legacy = (h.schema_version || 1) < 2
+      ? '<div class="attr">Written before verification tiers existed.</div>' : '';
+    return '<h3>Verification</h3>'
+      + `<div class="meta"><b class="ink">${nVer} of ${total} verified</b> (${pct(nVer)} %)`
+      + ` · ${total - nVer} unverified${withheld}</div>`
+      + `<div class="tierbar">${bar}</div><div class="tchips">${chips}</div>${attr}${legacy}`;
   }
 
   async function loadHeights(dir) {
@@ -522,5 +557,7 @@ window.reportsPage = (() => {
   }
 
   document.addEventListener('DOMContentLoaded', init);
+  // pure formatters, for tests (tests/js/reportsTiers.test.js)
+  state.fmt = { tierSummary };
   return state;
 })();
