@@ -367,3 +367,38 @@ def test_estimates_leave_out_tower_behind_readings_given_raw_satellite():
     # fusion-form readings (no low ones) leave the reading in, as before
     fused = {"w/1": [fd.satellite_reading("w/1", "stereo", 105.0, 1.0)]}
     assert {e.feature_id for e in el.elevated_estimates([s], satellite=fused)} == {"w/1", "w/2"}
+
+
+def test_floors_flag_high_rises_join_fusion_and_never_publish_alone():
+    """F-SKY26 steps 4/5: the storey from tagged plots counted with their base in view, the
+    high-rise flag on an untagged plot (not where satellite says low), floors readings from
+    another seed verify a drone reading, and a floors-only plot emits nothing."""
+    from city2stl.height.satellite.readings import SatReading
+    from city2stl.skyline import floor_bands as fl
+
+    fids = ["w/t1", "w/t2", "w/t3", "w/u", "w/v", "w/low"]
+    tags = [{"fid": f, "floors": n, "base_seen": True, "spread": 0.02, "n_strips": 4,
+             "instance": i, "name": f, "tag_m": n * 4.0 + 3.0}
+            for i, (f, n) in enumerate([("w/t1", 20.0), ("w/t2", 30.0), ("w/t3", 40.0)])]
+    other = [{"fid": "w/u", "floors": 25.0, "base_seen": False, "spread": 0.03, "n_strips": 3,
+              "instance": 9, "name": "u", "tag_m": None},                 # untagged, no drone
+             {"fid": "w/v", "floors": 15.0, "base_seen": True, "spread": 0.0, "n_strips": 3,
+              "instance": 10, "name": "v", "tag_m": None},
+             {"fid": "w/low", "floors": 14.0, "base_seen": False, "spread": 0.0, "n_strips": 3,
+              "instance": 11, "name": "low", "tag_m": None}]
+    a = _seed_with("seed_1", [_m(4, 10, 20, 63.0, 500.0)], fids)            # drone on w/v
+    a.floors = tags
+    b = _seed_with("seed_4", [], fids)
+    b.floors = other
+    sat = {"w/low": [SatReading("stereo", 8.0, 0.9)]}
+    est = el.elevated_estimates([a, b], satellite=sat)
+    assert isinstance(est, el.ElevatedEstimates)
+    assert est.storey.storey_m == pytest.approx(4.0) and est.storey.reliable
+    u = est.floors["w/u"]
+    assert u["high_rise_seen"] and u["lower_bound"] and u["floors"] == 25.0
+    assert fl.high_rise_height(12.0, u) == pytest.approx(25 * 4.0 + 3)
+    assert not est.floors["w/low"]["high_rise_seen"]                       # satellite: low
+    # w/v: drone 63 m (seed_1) and floors 15 x 4 + 3 = 63 m (seed_4): one estimate, the drone's
+    assert [(e.feature_id, e.view_name.split("_0")[0]) for e in est] == [("w/v", "seed_1")]
+    # floors-only footprints (w/u, the tagged ones) emit nothing
+    assert {e.feature_id for e in est} == {"w/v"}

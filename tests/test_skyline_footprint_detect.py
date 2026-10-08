@@ -284,6 +284,36 @@ def test_a_shadow_never_outvotes_a_higher_photo_reading():
     assert got["height_m"] == pytest.approx(63.0) and got["lower_bound"]
 
 
+def test_floors_verify_only_beside_another_seeds_drone_reading():
+    drone = {"footprint": 7, "name": "a", "height_m": 100.0, "dist_m": 500.0, "base_visible": True,
+             "visible_frac": 1.0}
+    fl_a = dict(drone, height_m=104.0, dist_m=400.0, kind="floors", seed="seed_1")
+    got = fd.fuse_heights({"seed_1": [drone], "floors:seed_1": [fl_a]})[7]
+    assert got["n_sources"] == 1 and not got["verified"]       # same seed: not independent
+    fl_b = dict(fl_a, seed="seed_4")
+    got = fd.fuse_heights({"seed_1": [drone], "floors:seed_4": [fl_b]})[7]
+    assert got["n_sources"] == 2 and got["verified"] and not got["floors_only"]
+    # two captures from one camera are one source (group)
+    got = fd.fuse_heights({"seed_1": [drone], "floors:seed_1_sphere": [dict(fl_a, seed="seed_1_sphere")]},
+                          group=lambda s: s.replace("_sphere", ""))[7]
+    assert got["n_sources"] == 1
+    got = fd.fuse_heights({"floors:seed_4": [fl_b]})[7]
+    assert got["floors_only"] and got["n_sources"] == 1
+
+
+def test_a_floors_lower_bound_above_a_low_drone_reading_disputes_it():
+    drone = {"footprint": 7, "name": "a", "height_m": 40.0, "dist_m": 600.0, "base_visible": True,
+             "visible_frac": 1.0}
+    lb = dict(drone, height_m=130.0, dist_m=400.0, kind="floors", seed="seed_4", lower_bound=True)
+    assert fd.fuse_heights({"seed_1": [drone], "floors:seed_4": [lb]})[7]["disputed"]
+    # much heavier than the drone reading: settled for the floors, the drone reading is not used
+    got = fd.fuse_heights({"seed_1": [dict(drone, dist_m=1000.0)], "floors:seed_4": [lb]})[7]
+    assert not got["disputed"] and got["used"] == ["floors:seed_4"] and got["lower_bound"]
+    # a lower bound under the reading says nothing
+    got = fd.fuse_heights({"seed_1": [drone], "floors:seed_4": [dict(lb, height_m=25.0)]})[7]
+    assert not got["disputed"] and got["used"] == ["seed_1"]
+
+
 def test_satellite_agreement_alone_is_not_verified():
     lean = fd.satellite_reading(7, "lean", 150.0, 0.8)
     st = fd.satellite_reading(7, "stereo", 155.0, 0.5)

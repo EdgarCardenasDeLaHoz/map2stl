@@ -363,3 +363,50 @@ def test_base_hidden_makes_the_count_a_lower_bound_and_a_flat_strip_is_refused()
     finally:
         fl.MIN_ASPECT = fl_min
     assert not flat.accepted and "flat strip" in flat.reason
+
+
+# ---- F-SKY26 steps 4/5: storey calibration, high-rise flag, floors readings, publisher hook ---
+
+
+def test_storey_from_height_tags_with_a_leave_one_out_sigma():
+    samples = [(20, 20 * 4.3 + 3), (30, 30 * 4.1 + 3), (40, 40 * 4.5 + 3), (12, 12 * 4.2 + 3)]
+    cal = fl.calibrate_storey(samples)
+    assert cal.n == 4 and not cal.fallback and cal.reliable
+    assert cal.storey_m == pytest.approx(4.25)
+    assert 0.0 < cal.sigma_log < 0.1
+    few = fl.calibrate_storey(samples[:2])                     # under MIN_STOREY_SAMPLES
+    assert few.fallback and few.storey_m == fl.NOMINAL_FLOOR_M and not few.reliable
+    noisy = fl.calibrate_storey([(10, 20.0), (10, 90.0), (10, 45.0), (10, 200.0)])
+    assert not noisy.fallback and not noisy.reliable          # Miami-like: sigma over 0.25
+
+
+def test_high_rise_plots_count_lower_bounds_and_skip_satellite_low_plots():
+    ents = [{"fid": "a", "floors": 12.0, "lower_bound": True},
+            {"fid": "a", "floors": 12.0, "lower_bound": False},   # same count, base seen
+            {"fid": "b", "floors": 9.5, "lower_bound": False},    # under 10
+            {"fid": "c", "floors": 30.0, "lower_bound": True},
+            {"fid": "d", "floors": 25.0, "lower_bound": True},
+            {"fid": None, "floors": 40.0, "lower_bound": False}]  # no plot
+    got = fl.high_rise_plots(ents, low={"d"})
+    assert got == {"a": (12.0, False), "c": (30.0, True)}
+
+
+def test_floor_readings_weigh_by_sigma_and_keep_the_seed():
+    cal = fl.StoreyCalibration(4.0, 6, 0.12)
+    ents = [{"fid": "a", "seed": "seed_1", "floors": 20.0, "lower_bound": False, "spread": 0.05},
+            {"fid": "b", "seed": "seed_4", "floors": 15.0, "lower_bound": True, "spread": 0.0}]
+    got = fl.floor_readings(ents, cal)
+    (ra,), (rb,) = got["floors:seed_1"], got["floors:seed_4"]
+    assert ra["height_m"] == pytest.approx(83.0) and ra["kind"] == "floors" and ra["seed"] == "seed_1"
+    assert ra["dist_m"] == pytest.approx(3300 * math.hypot(0.12, 0.05))
+    assert rb["lower_bound"] and rb["dist_m"] == pytest.approx(3300 * 0.12)
+    assert fl.floor_readings(ents, fl.StoreyCalibration(4.0, 6, 0.6)) == {}   # unreliable
+
+
+def test_high_rise_hook_only_raises_the_prior():
+    info = {"high_rise_seen": True, "floors": 20.0, "storey_m": 4.0}
+    assert fl.high_rise_height(12.0, info) == pytest.approx(83.0)
+    assert fl.high_rise_height(100.0, info) == 100.0
+    assert fl.high_rise_height(12.0, dict(info, storey_m=None)) == pytest.approx(20 * 3.1 + 3)
+    assert fl.high_rise_height(12.0, dict(info, high_rise_seen=False)) is None
+    assert fl.high_rise_height(12.0, None) is None

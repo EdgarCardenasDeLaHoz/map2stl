@@ -943,3 +943,121 @@ def pano_floors(pano: fd.Pano, pose: fd.PanoPose, gray: np.ndarray, instances: n
         elif e.plot is None:
             out.append((e, None))
     return out
+
+
+# ---- F-SKY26 steps 4 and 5: floors into fusion and publishing --------------------------------
+
+#: Floors height = floors x storey + this (parapet, plant room, a taller lobby; the harness's
+#: ``FLOOR_ROOF_M``, the middle of :data:`ROOF_ALLOWANCE_M`).
+FLOOR_ROOF_M = 3.0
+#: A city's storey calibration needs this many tagged plots counted with their base in view.
+MIN_STOREY_SAMPLES = 3
+#: Floor counts become fusion readings only when the calibration's leave-one-out sigma_log is at
+#: most this (Cartagena 0.11, n 5; Miami 1.08, n 9: its counts stay review-only, 2026-10-07).
+MAX_STOREY_SIGMA = 0.25
+#: :func:`floor_readings` weigh a reading as a fully seen drone reading at this many metres per
+#: unit of sigma_log (``footprint_detect.SAT_DIST_PER_SIGMA_M``: drone sigma_log grows ~0.15 per
+#: 500 m), so a floors reading of sigma_log 0.11 weighs as a drone reading at ~360 m.
+FLOORS_DIST_PER_SIGMA_M = 3300.0
+
+
+@dataclass(frozen=True)
+class StoreyCalibration:
+    """A city's storey height from OSM height tags (never ``building:levels``: OSM levels are
+    sometimes wrong, and a levels-derived height is the same number twice)."""
+    storey_m: float                   # NOMINAL_FLOOR_M when there are too few samples
+    n: int
+    sigma_log: float | None           # leave-one-out sigma_log of floors x storey + 3 vs the tag
+    fallback: bool = False            # too few samples: the nominal floor
+
+    @property
+    def reliable(self) -> bool:
+        """Good enough for floors to be fusion readings (:data:`MAX_STOREY_SIGMA`)."""
+        return (not self.fallback and self.sigma_log is not None
+                and self.sigma_log <= MAX_STOREY_SIGMA)
+
+
+def floors_height(floors: float, storey_m: float) -> float:
+    return float(floors) * float(storey_m) + FLOOR_ROOF_M
+
+
+def calibrate_storey(samples) -> StoreyCalibration:
+    """``samples``: ``(floors seen, OSM height tag m)`` of plots counted with their base in view
+    (a lower bound would bias the storey high). Storey = median((tag - 3) / floors), with the
+    leave-one-out sigma_log of ``floors x storey + 3`` against each tag. Pose-free: the count does
+    not depend on the camera's distance, height or heading. Under :data:`MIN_STOREY_SAMPLES`
+    samples: :data:`NOMINAL_FLOOR_M`, ``fallback`` True."""
+    s = [((t - FLOOR_ROOF_M) / n, n, t) for n, t in samples
+         if n and n >= 3 and t and t > FLOOR_ROOF_M]
+    if len(s) < MIN_STOREY_SAMPLES:
+        return StoreyCalibration(NOMINAL_FLOOR_M, len(s), None, fallback=True)
+    arr = np.array([x[0] for x in s])
+    lo = [math.log((n * float(np.median(np.delete(arr, i))) + FLOOR_ROOF_M) / t)
+          for i, (_x, n, t) in enumerate(s)]
+    return StoreyCalibration(float(np.median(arr)), len(s), float(np.std(lo)))
+
+
+def high_rise_plots(entries, low=()) -> dict:
+    """``{fid: (floors, lower_bound)}`` for the plots with at least :data:`HIGH_RISE_FLOORS`
+    floors seen by any seed. ``entries``: dicts with ``fid``, ``floors``, ``lower_bound`` (one per
+    accepted, plot-matched instance and seed). A lower bound counts: "at least 12" is a high-rise.
+    ``floors`` is the largest count; ``lower_bound`` is True unless a count with the base in view
+    reaches it.
+
+    ``low``: plots the satellite says are low (every confident reading under 40 m,
+    ``elevated._sat_max``); they are never flagged. Cartagena 2026-10-08: the 3 tagged plots
+    under 30 m that were flagged (b0634 10 m, b0639 10 m, b0645 6 m) all had their base hidden:
+    the count was the tower behind the low building; two of them have confident stereo at 5-8 m
+    (b0645's stereo reads 49 m: its 6 m tag may be the wrong one)."""
+    low = set(low or ())
+    out: dict = {}
+    for e in entries:
+        f, n = e.get("fid"), float(e.get("floors") or 0.0)
+        if f is None or n < HIGH_RISE_FLOORS or f in low:
+            continue
+        lb = bool(e.get("lower_bound", True))
+        cur = out.get(f)
+        if cur is None or n > cur[0] or (n == cur[0] and cur[1] and not lb):
+            out[f] = (n, lb)
+    return out
+
+
+def floor_readings(entries, cal: StoreyCalibration) -> dict:
+    """Floor counts as ``footprint_detect.fuse_heights`` readings: ``{"floors:<seed>": [dict]}``,
+    one per plot-matched entry (``fid``, ``seed``, ``floors``, ``lower_bound``, ``spread``,
+    ``n_strips``), ``kind`` "floors", ``seed`` the seed that counted them (fusion counts it as a
+    source only beside another seed's drone reading: decision 2026-10-07).
+
+    Height ``floors x storey + 3 m``; ``lower_bound`` when the base was hidden. Weight: sigma_log
+    = hypot(the calibration's leave-one-out sigma, the strips' storey-count spread), entered as
+    a fully seen drone reading at ``max(100, 3300 x sigma)`` m. Empty when the calibration is not
+    :attr:`StoreyCalibration.reliable`."""
+    if not cal.reliable:
+        return {}
+    out: dict = {}
+    for e in entries:
+        f = e.get("fid")
+        if f is None or not e.get("floors"):
+            continue
+        sigma = math.hypot(cal.sigma_log, float(e.get("spread") or 0.0))
+        out.setdefault(f"floors:{e['seed']}", []).append(dict(
+            footprint=f, name=e.get("name", f), height_m=floors_height(e["floors"], cal.storey_m),
+            dist_m=max(100.0, FLOORS_DIST_PER_SIGMA_M * sigma), base_visible=True,
+            visible_frac=1.0, top_edge="floors", confidence=None, weight_scale=1.0,
+            kind="floors", lower_bound=bool(e.get("lower_bound", True)), seed=e["seed"],
+            floors=float(e["floors"]), sigma_log=sigma))
+    return out
+
+
+def high_rise_height(prior_m: float | None, info: dict | None) -> float | None:
+    """The publisher's hook (F-SKY26 step 4): for an *untagged* plot with *no drone reading*,
+    the height to publish when floors flagged it a high-rise, else None (keep the usual
+    fallback). ``info``: the plot's entry in ``elevated_estimates(...).floors``
+    (``high_rise_seen``, ``floors``, ``storey_m``). Returns ``max(prior, floors x storey + 3 m)``:
+    a count is at least the floors seen (often a lower bound), so it only ever raises the prior.
+    The storey is the city's calibrated one, or :data:`NOMINAL_FLOOR_M` (3.1 m, a low choice)
+    when the calibration is missing or unreliable."""
+    if not info or not info.get("high_rise_seen"):
+        return None
+    h = floors_height(info["floors"], info.get("storey_m") or NOMINAL_FLOOR_M)
+    return max(float(prior_m), h) if prior_m is not None else h

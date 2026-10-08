@@ -514,8 +514,12 @@ def _seed_multiview_registration(
     if elevated:
         # Across drone seeds the nearer, better-seen reading wins a disagreement
         # (footprint_detect.fuse_heights); only the kept readings reach the aggregate.
-        all_estimates.extend(elevated_estimates(
-            elevated, satellite=(elevated_state or {}).get("satellite")))
+        est = elevated_estimates(elevated, satellite=(elevated_state or {}).get("satellite"))
+        if elevated_state is not None:
+            # F-SKY26 step 4: per-footprint floors / high_rise_seen for the publisher
+            # (floor_bands.high_rise_height); the list itself carries only drone estimates
+            elevated_state["floors"] = getattr(est, "floors", {})
+        all_estimates.extend(est)
 
     agg = aggregate_building_heights(all_estimates) if all_estimates else []
     return view_rows, agg, pano_results

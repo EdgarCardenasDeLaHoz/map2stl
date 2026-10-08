@@ -846,7 +846,12 @@ def _is_sat(d) -> bool:
     return str(d.get("kind") or "").startswith("sat")
 
 
-def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> dict:
+def _is_floors(d) -> bool:
+    return d.get("kind") == "floors"
+
+
+def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0,
+                 group=None) -> dict:
     """One height per footprint from several seeds' measurements (``{seed: [Measured or dict]}``).
 
     Seeds within ``agree`` (relative) of the most reliable one (:func:`measurement_weight`) are
@@ -868,7 +873,15 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> d
     kept plus 1 for any satellite reading kept, and ``verified`` (>= 2 sources) never comes from
     satellite readings alone. ``lower_bound`` in the result: the height rests on lower bounds
     only.
+
+    ``kind`` "floors" readings (``floor_bands.floor_readings``, F-SKY26 step 5) carry the
+    ``seed`` that counted them. They are one source together, and only when one of them comes
+    from a seed with no drone reading kept: floors and drone from seed A are one source, floors
+    from seed B beside a drone reading from seed A are two (decision 2026-10-07). ``group``: seed
+    name -> camera (two captures from one camera are one source); identity by default.
+    ``floors_only``: every kept reading is a floors reading.
     """
+    grp = group or (lambda x: x)
     rows: dict = {}
     for seed, ms in by_seed.items():
         for m in ms:
@@ -890,8 +903,10 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> d
         keep = [r for r in got if abs(r[1]["height_m"] - best) <= tol and not bound(r)]
         out_v = [r for r in got if r not in keep and not (bound(r) and r[1]["height_m"] < best)]
         w = np.array([r[2] for r in keep])
-        drones = {r[0] for r in keep if not _is_sat(r[1])}
-        n_src = len(drones) + (1 if any(_is_sat(r[1]) for r in keep) else 0)
+        drones = {grp(r[0]) for r in keep if not _is_sat(r[1]) and not _is_floors(r[1])}
+        fl_src = {grp(r[1].get("seed", r[0])) for r in keep if _is_floors(r[1])}
+        n_src = (len(drones) + (1 if any(_is_sat(r[1]) for r in keep) else 0)
+                 + (1 if fl_src - drones else 0))
         out[fp] = {"name": anchor[1]["name"],
                    "height_m": float(np.average([r[1]["height_m"] for r in keep], weights=w)),
                    "seeds": {r[0]: round(float(r[1]["height_m"]), 1) for r in got},
@@ -899,7 +914,8 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0) -> d
                    "disputed": any(w.sum() < overrule * r[2] for r in out_v),
                    "osm_height_m": anchor[1].get("osm_height_m"),
                    "n_sources": n_src, "verified": n_src >= 2,
-                   "lower_bound": all(r[1].get("lower_bound") for r in keep)}
+                   "lower_bound": all(r[1].get("lower_bound") for r in keep),
+                   "floors_only": all(_is_floors(r[1]) for r in keep)}
     return out
 
 

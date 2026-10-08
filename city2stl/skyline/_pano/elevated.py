@@ -284,6 +284,9 @@ class ElevatedSeed:
     #: footprints over each trusted reading's columns and the height each would have if the
     #: reading's top row were its top (:func:`behind_map`, F-SKY26 step 6)
     behind: dict = field(default_factory=dict)
+    #: floor counts of the accepted, plot-matched MobileSAM instances (:func:`seed_floors`):
+    #: ``{fid, floors, base_seen, spread, n_strips, instance, name, tag_m}`` (F-SKY26 steps 4/5)
+    floors: list = field(default_factory=list)
 
 
 def _ring(geom) -> np.ndarray | None:
@@ -528,10 +531,17 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
     logger.info("[elevated] %s: %d footprints measured (%d with the base visible)%s",
                 seed.name, len(ms), sum(m.base_visible for m in ms),
                 "" if instances is None else f", {int(instances.max())} MobileSAM instances")
+    from .. import floor_bands
+
+    floors = _sc.cached("floors", FLOORS_CACHE_VERSION,
+                        (_sc.Digest(pose_key), branch, FLOORS_RANGE_M,
+                         _sc.source_hash(floor_bands, seed_floors)),
+                        lambda: seed_floors(pano, pose, depth, instances, buildings),
+                        kind="pickle")
     out = ElevatedSeed(seed.name, pf, ms, fids,
                        pano_result(seed, pano, pose, ms, fids, depth, instances),
                        _view_rows(seed, views, pano, pose, len(ms)),
-                       behind=behind_map(pano, pose, fps, fids, ms))
+                       behind=behind_map(pano, pose, fps, fids, ms), floors=floors)
     if keep:
         out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
     return out
@@ -551,6 +561,7 @@ LABELS_CACHE_VERSION = 1
 STITCH_CACHE_VERSION = 1
 POSE_CACHE_VERSION = 1
 MEASURED_CACHE_VERSION = 1
+FLOORS_CACHE_VERSION = 1
 #: The old raw-.npy cache of depth and instances: read (and converted) on a miss only.
 PANO_CACHE_DIR = _sc.LEGACY_PANO_CACHE_DIR
 
@@ -1047,6 +1058,126 @@ def tower_behind(seeds: list[ElevatedSeed], satellite_raw: dict | None) -> dict:
     return out
 
 
+#: Footprints within this range of the camera are candidates for a floor instance's plot (the
+#: harness's ``--floors-range``; floors need >= 5 px a floor, ~770 m at hi-res anyway).
+FLOORS_RANGE_M = 3000.0
+#: MobileSAM instances smaller than this many pixels (at 1194 px focal length, scaled by f^2) are
+#: not counted (the review's size cut).
+FLOORS_MIN_PX = 4000
+#: Floor counts join the fusion as weighted readings (F-SKY26 step 5) when the city's storey
+#: calibration is reliable (``floor_bands.StoreyCalibration.reliable``).
+FLOORS_IN_FUSION = True
+#: A footprint only floors read (no drone, no satellite reading kept) publishes no height from
+#: them: off by the score of 2026-10-08 (Cartagena: 47 floors-only footprints, the 2 with truth
+#: both lower bounds reading 37 % low; no floors-only count with its base seen had truth).
+FLOORS_PUBLISH_ALONE = False   # True needs an estimate builder for floors-only footprints
+
+
+def seed_floors(pano: fd.Pano, pose: fd.PanoPose, depth, instances,
+                buildings: list[BuildingRecord], max_range_m: float = FLOORS_RANGE_M) -> list:
+    """``floor_bands.pano_floors`` on a measured pano: one dict per accepted instance matched to
+    a footprint within ``max_range_m`` (``fid``, ``floors``, ``base_seen``, ``spread``,
+    ``n_strips``, ``instance``, ``name``, ``tag_m``: the OSM height tag, ``osm_tag`` source only,
+    for the storey calibration). Pose-dependent only through the plot match; the counts are not."""
+    from .. import floor_bands as fl
+
+    if instances is None:
+        return []
+    fps, fids = footprints_from_records(buildings)
+    recs = {str(b.feature_id): b for b in buildings}
+    sel, rings = [], []
+    for i, f in enumerate(fps):
+        r = fd._local(pano.lat, pano.lon, np.asarray(f.ring, float)[:, :2])
+        if float(np.hypot(*r.mean(0))) <= max_range_m:
+            sel.append(i)
+            rings.append(r)
+    if not rings:
+        return []
+    gray = pano.rgb.mean(-1).astype(np.float32)
+    ids, cnt = np.unique(instances[instances > 0], return_counts=True)
+    min_px = int(FLOORS_MIN_PX * (pano.f_px / 1194.0) ** 2)
+    out = []
+    for e, hit in fl.pano_floors(pano, pose, gray, instances, [int(i) for i in ids[cnt > min_px]],
+                                 depth=depth, rings_xy=rings):
+        if not hit:
+            continue
+        fid = fids[sel[hit[0]]]
+        rec = recs.get(fid)
+        tag = (float(rec.height_tag_m) if rec is not None and rec.height_tag_m
+               and rec.height_source == "osm_tag" else None)
+        out.append({"fid": fid, "floors": float(e.floors_visible), "base_seen": bool(e.base_seen),
+                    "spread": float(e.spread), "n_strips": int(e.n_strips),
+                    "instance": int(e.instance), "name": fps[sel[hit[0]]].name or fid,
+                    "tag_m": tag})
+    return out
+
+
+def floor_entries(seeds: list[ElevatedSeed]) -> list[dict]:
+    """Every seed's :attr:`ElevatedSeed.floors` as ``floor_bands`` entries (``seed`` added).
+    ``lower_bound`` unless the base is in view: ground under the instance's mask
+    (``InstanceFloors.base_seen``) or the same seed's reading of that footprint saw its base.
+    With the mask test alone 140 of Cartagena's 153 counts were lower bounds and the storey
+    calibration had 2 samples; with either, 85 and 6 (storey 4.13 m, sigma_log 0.13)."""
+    out = []
+    for s in seeds:
+        base = {s.feature_ids[m.footprint] for m in s.measured if m.base_visible}
+        for e in s.floors or ():
+            out.append(dict(e, seed=s.seed_name,
+                            lower_bound=not (e.get("base_seen") or e["fid"] in base)))
+    return out
+
+
+class ElevatedEstimates(list):
+    """:func:`elevated_estimates`' list of estimates, plus ``floors``: ``{fid: {high_rise_seen,
+    floors, lower_bound, storey_m, storey_sigma_log, storey_reliable}}`` for every footprint a
+    seed counted floors on, and ``storey`` (``floor_bands.StoreyCalibration``). The publisher's
+    hook is ``floor_bands.high_rise_height(prior_m, est.floors.get(fid))``."""
+
+    floors: dict
+    storey: object
+
+    def __init__(self, items=(), floors=None, storey=None):
+        super().__init__(items)
+        self.floors = floors or {}
+        self.storey = storey
+
+
+def floors_info(seeds: list[ElevatedSeed], satellite_raw: dict | None = None):
+    """``(floors info per fid, storey calibration, fusion readings)`` of the seeds' floor counts
+    (F-SKY26 steps 4/5): the city's storey from the counts with their base in view on
+    ``osm_tag`` plots (``floor_bands.calibrate_storey``), the high-rise flag
+    (``floor_bands.high_rise_plots``, >= 10 floors, a lower bound counts, never on a plot whose
+    confident satellite readings are all under 40 m), and ``floor_bands.floor_readings``."""
+    from .. import floor_bands as fl
+
+    ents = floor_entries(seeds)
+    cal = fl.calibrate_storey([(e["floors"], e["tag_m"]) for e in ents
+                               if e.get("tag_m") and not e["lower_bound"]])
+    low = set()
+    for f, rs in (satellite_raw or {}).items():
+        m = _sat_max(rs)
+        if m is not None and m < SAT_LOW_M:
+            low.add(f)
+    hr = fl.high_rise_plots(ents, low=low)
+    storey = cal.storey_m if cal.reliable else fl.NOMINAL_FLOOR_M
+    info: dict = {}
+    for e in ents:
+        f = e["fid"]
+        cur = info.get(f)
+        if cur is None or e["floors"] > cur["floors"]:
+            info[f] = {"floors": e["floors"], "lower_bound": e["lower_bound"],
+                       "seeds": sorted({x["seed"] for x in ents if x["fid"] == f})}
+    for f, d in info.items():
+        if f in hr:
+            d["floors"], d["lower_bound"] = hr[f]
+        d.update(high_rise_seen=f in hr, storey_m=round(storey, 3),
+                 storey_sigma_log=None if cal.sigma_log is None else round(cal.sigma_log, 4),
+                 storey_reliable=cal.reliable, sat_low=f in low,
+                 floors_m=round(fl.floors_height(d["floors"], storey), 1))
+    readings = fl.floor_readings(ents, cal) if FLOORS_IN_FUSION else {}
+    return info, cal, readings
+
+
 def _split_satellite(satellite: dict | None) -> tuple[dict | None, dict | None]:
     """(fusion readings, raw readings) from either form: ``satellite_fusion.fusion_readings``
     dicts (``kind`` keys) or the raw ``load_region`` readings (``method``)."""
@@ -1067,7 +1198,7 @@ def _split_satellite(satellite: dict | None) -> tuple[dict | None, dict | None]:
 
 
 def elevated_estimates(seeds: list[ElevatedSeed],
-                       satellite: dict | None = None) -> list[RegisteredBuildingEstimate]:
+                       satellite: dict | None = None) -> ElevatedEstimates:
     """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
     whose seeds agree (``fuse_heights``, 25 %): a footprint the seeds disagree on gets no drone
     height at all, rather than the most reliable view's, since any of them may be the misread.
@@ -1080,7 +1211,14 @@ def elevated_estimates(seeds: list[ElevatedSeed],
 
     Raw satellite readings (``satellite_fusion.load_region``, ``method`` keys) are converted
     here and also drive :func:`tower_behind`: the readings it flags are left out (F-SKY26 step 6;
-    no re-credit to the tower behind)."""
+    no re-credit to the tower behind).
+
+    Floor counts (:attr:`ElevatedSeed.floors`, F-SKY26 steps 4/5, :func:`floors_info`): with a
+    reliable storey calibration they join the fusion as ``kind`` "floors" readings (they can
+    dispute a drone reading, and verify one from another seed); they are never emitted, and a
+    footprint only floors read publishes nothing (:data:`FLOORS_PUBLISH_ALONE`). The result's
+    ``floors`` carries the per-footprint ``high_rise_seen`` / ``floors`` / ``storey_m`` for the
+    publisher (``floor_bands.high_rise_height``)."""
     satellite, raw = _split_satellite(satellite)
     behind = tower_behind(seeds, raw)
     if behind:
@@ -1096,12 +1234,20 @@ def elevated_estimates(seeds: list[ElevatedSeed],
         for fid in drone_fids:
             for d in satellite.get(fid, ()):
                 by_seed.setdefault(d["kind"], []).append(d)
+    finfo, cal, floor_rs = floors_info(seeds, raw)
+    if finfo:
+        logger.info("[elevated] floors: %d footprints counted, %d high-rise; storey %.2f m "
+                    "(n %d, sigma_log %s%s); %d floors readings in fusion",
+                    len(finfo), sum(d["high_rise_seen"] for d in finfo.values()), cal.storey_m,
+                    cal.n, cal.sigma_log, "" if cal.reliable else ", not reliable",
+                    sum(len(v) for v in floor_rs.values()))
+    by_seed.update(floor_rs)
     fused = fd.fuse_heights(by_seed)
     by_key = {(s.seed_name, s.feature_ids[m.footprint]): (s, m) for s in seeds for m in s.measured}
     # the segments carry each footprint's true bearing (their columns are rolled north-centre)
     bearing = {(s.seed_name, seg["matched_projection"]["feature_id"]): seg["true_bearing_deg"]
                for s in seeds for seg in s.pano_result.matched_segments}
-    out = []
+    out = ElevatedEstimates(floors=finfo, storey=cal)
     for fid, f in fused.items():
         if f["disputed"]:
             # seeds that saw it disagree (Cartagena 2026-10-06: seed pairs agreed within 25 % on
@@ -1121,7 +1267,8 @@ def elevated_estimates(seeds: list[ElevatedSeed],
     return out
 
 
-__all__ = ["ElevatedSeed", "measure_elevated_seed", "elevated_estimates", "trusted", "pano_result",
+__all__ = ["ElevatedSeed", "ElevatedEstimates", "measure_elevated_seed", "elevated_estimates",
+           "seed_floors", "floors_info", "trusted", "pano_result",
            "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M", "measure_waterline",
            "outline_gate"]
 
