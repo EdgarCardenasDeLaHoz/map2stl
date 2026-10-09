@@ -305,6 +305,41 @@ Two constraints follow:
   propiedad-horizontal finding in decision "Cadastre floors (Cartagena, AMB) as an opt-in height
   source". Not wired into `withhold_untagged_street_view` / `region_pdf` yet (busy with v10): the
   hook is in the `cadastre_heights` docstring.
+- 2026-10-08, publishing rules (the user's choices; decisions "A single reading over 2x the prior
+  publishes the prior unless supported", "An OSM height tag one agreeing image reading confirms is
+  verified_2", "Footprints a drone seed measured without a usable reading get a prior row"):
+  - `tiers.single_withheld` (`4a73d5a`): a single over 2x the prior publishes the prior, the
+    reading kept as evidence; `region_pdf._drone_seen_rows` / `_fill_unread_heights`: rows for
+    drone-seen footprints with no usable reading; their prior from `_chain_fallbacks` (`c92f224`).
+  - `tiers.tag_witness` (`53bb58b`): osm_tag + one drone / lean / multiview / stereo >= 40 m
+    reading is verified_2. The high-rise hook is wired (`withhold_untagged_street_view(floors=)`,
+    source `withheld:high_rise`), exempt from the 2x rule: the "Publisher wiring open" item above
+    is done.
+  - `elevated.untrusted_reason` / `_mark_tower_behind` (`2c91aff`): the seed pages say why a
+    reading is left out.
+  - Cartagena v10: rows 646 -> 1,016; verified_2 32 -> 40, tag 143 -> 133, single 223 -> 42,
+    prior 248 -> 801; 302 singles withheld (median 69 m), most of Bocagrande at the ~12 m prior.
+- 2026-10-09, refined 2x rule and the lost drone readings (decisions "A single reading over 2x the
+  prior publishes the prior unless supported", "A floor count its own seed's reading contradicts
+  leaves the fusion"):
+  - `tiers.single_support` (`050ccbc`): a single over 2x stays when a validated satellite reading
+    >= 40 m agrees (lean conf >= 0.7, ls, multiview conf >= 0.3) or floors flagged a high-rise,
+    never on a satellite-low plot; rows carry `single_support`, `high_rise_seen`, `floors`,
+    `storey_m`.
+  - b0426, b0582 (Hotel Cartagena Plaza), b0635, b0075 lost their drone readings in v10: a floors
+    count contradicting its own seed's reading of the plot anchored the fusion.
+    `elevated.drop_contradicted_floors` (`72b2477`) leaves such counts out (20 of 145). The saved
+    review states (`seed_experiment.py --remeasure`) could not show it (older captures, no
+    reliable storey): the cause came from replaying v10's fusion on the run's stage-cache entries.
+  - Cartagena v11 (10 min: every elevated stage hit the stage cache): verified_2 43, tag 133,
+    single 124, prior 716; withheld 302 -> 218 (median 77 m); 90 singles kept with support (51
+    satellite, 39 high-rise flag only); Bocagrande rows >= 40 m 60 -> 127 (v9 215, unverified
+    drone singles included); b0426 / b0582 / b0635 verified_2 again, b0075's reading back but
+    withheld (unsupported). The 7 towers unchanged. Still withheld: satellite low 90, no
+    confident satellite 45, stereo-only agreement 47, lean at conf 0.5-0.69 19.
+  - Rejected: a joint camera position fit (decision "A joint camera position / heading / height
+    fit ...") and the render-fit height optimiser (decision "A render-fit height optimiser over
+    the drone images"; kept as a checker idea only).
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered

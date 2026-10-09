@@ -5,6 +5,123 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-09 — A single reading over 2x the prior publishes the prior unless supported
+- **Decision:** an untagged `single` row (one drone median or a satellite-only height, no
+  independent agreeing pair) more than 2x its prior publishes the prior (`_core/tiers.py::single_withheld`,
+  `SINGLE_WITHHOLD_FACTOR`; flag `SKYLINE_WITHHOLD_SINGLE`, default on): tier `prior`,
+  `prior_disagrees`, the reading kept as `single_reading_m` / `single_source` / `single_methods`,
+  `withheld_reason` "single over 2x prior". It stays `single`, with `single_support`, when
+  supported (`tiers.py::single_support`):
+  - a validated satellite reading of 40 m or more agrees within 25 %, or is the single itself:
+    lean at conf >= 0.7, lean + shadow (`ls`), multiview at conf >= 0.3 (`SUPPORT_MIN_CONF`);
+    support `["lean", ...]`;
+  - floor counts flagged the plot a high-rise (`floor_bands.high_rise_plots`, satellite veto
+    inside): `["high_rise_floors"]`. This also keeps the `withheld:high_rise` rows (an untagged
+    plot with no drone reading and no publishable satellite height publishes
+    `floor_bands.high_rise_height`), exempt since 2026-10-08.
+  Never when the plot's confident satellite readings are all under 40 m (`_core/height.py::_satellite_low`,
+  the tower-behind test's rule). Rows floors counted carry `high_rise_seen`, `floors`, `storey_m`.
+- **Why:** the user's choices: the rule on 2026-10-07/08, the high-rise exemption on 2026-10-08,
+  the refinement on 2026-10-09.
+  - Rule: on v9 the tower-behind check showed a lone drone reading far over the prior is often a
+    farther tower's top; v9 had 164 drone singles over 2x the prior at a median of ~99 m.
+  - Refinement: v10 withheld 302 singles (median reading 69 m; 152 drone, 150 satellite) and
+    Bocagrande, a tower district, published mostly at the ~12 m prior. Many had a validated
+    satellite reading behind them (b1429 lean 60.4 at conf 1.0 + stereo 64.2; b0112 lean 67.4 at
+    0.9 + stereo 65.5), and the high-rise flag reached only plots with no drone reading.
+  - Thresholds from Chicago LiDAR (entries 2026-10-07 below): lean over 100 m within 25 % 94 %,
+    multiview over 40 m 84 %; stereo at 40-100 m only ~59 %, so stereo alone never supports
+    (b1211: lean 53.5 at conf 0.64 + stereo 54 stays withheld).
+- **Measured** (Cartagena region report, cache-only; v9 2026-10-07, v10 2026-10-08, v11
+  2026-10-09 with this rule and the floors fix below):
+
+  | | v9 | v10 | v11 |
+  |---|---|---|---|
+  | rows | 646 | 1,016 | 1,016 |
+  | verified_2 / tag / single / prior | 32 / 143 / 223 / 248 | 40 / 133 / 42 / 801 | 43 / 133 / 124 / 716 |
+  | singles over 2x withheld (drone / satellite), median reading | 0 | 302 (152 / 150), 69 m | 218 (142 / 76), 77 m |
+  | kept with `single_support` (satellite / high-rise flag only) | - | - | 90 (51 / 39) |
+  | `withheld:high_rise` rows | 0 | 8 | 8 |
+  | Bocagrande rows >= 40 m (of 588 in v10/v11) | 215 of 366 | 60 | 127 |
+
+  - Support kinds: lean 34, high-rise flag only 39 (11 of them drone singles), lean + flag 6,
+    lean + ls 5, ls 3, multiview 2, lean + ls + flag 1.
+  - The 218 still withheld: satellite says low 90; no confident satellite reading 45 (drone);
+    only stereo agrees 47; a lean at conf 0.5-0.69 agrees 19; satellite >= 40 m disagrees 15; no
+    satellite reading 2.
+  - The 7 published towers keep their values and tiers (Estelar, Gran Bay, Portomarine, Nautica,
+    Ravello verified_2 by drone / satellite pairs; Allure and Palmetto verified_2 by tag + lean
+    and lean + shadow).
+- **Rejected:** counting plain stereo as support (~59 % at 40-100 m: it would keep 47 more);
+  publishing every single (v9: 164 drone singles over 2x at median ~99 m, the tower-behind
+  readings among them).
+- **Supersedes / superseded by:** the 2026-10-08 rule (no support) is this entry without the
+  refinement; the high-rise exemption is the floors branch.
+- **Source:** commits `4a73d5a`, `53bb58b`, `050ccbc`; [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md)
+  Progress 2026-10-08 / 2026-10-09; maps `runs/region_reports/Cartagena_v11_skyline_report/tiers_map_bocagrande.png`.
+
+### 2026-10-08 — An OSM height tag one agreeing image reading confirms is verified_2
+- **Decision:** `_core/tiers.py::tag_witness`: an `osm_tag` height (never `osm_levels`) that one
+  trusted drone reading, satellite lean or multiview, or a stereo reading of 40 m or more agrees
+  with within 25 % is `verified_2`, methods `["osm_tag", <reading>]`. Shadow (a lower bound),
+  floors and Street View never witness; an independent pair that disputes the tag blocks it.
+  Unmeasured tagged rows in `heights.json` carry their satellite readings so a lean can witness.
+- **Why:** the user's rule (2026-10-08). A tag is an independent source, so tag + one image reading
+  is two sources. v10 and v11: 9 tag rows verified_2 this way (lean 6, multiview 2, stereo 1),
+  Allure (190 m, osm_tag + lean 168 m) among them; Palmetto's unmeasured row got its satellite
+  readings back and verifies by lean + shadow.
+- **Rejected:** levels-derived tags (one storey guess per building, not a measurement).
+- **Supersedes / superseded by:** —
+- **Source:** commit `53bb58b`.
+
+### 2026-10-08 — Footprints a drone seed measured without a usable reading get a prior row
+- **Decision:** `region_pdf.py::_drone_seen_rows` adds a row for every untagged footprint an
+  elevated seed measured that has none (its reading untrusted, left out by the tower-behind check
+  or disputed in fusion), `drone_seen` naming the seeds; `withhold_untagged_street_view` gives it
+  the prior (or a publishable satellite / high-rise height). Their prior comes from a second prior
+  over both record sets (`_chain_fallbacks`): `untagged_prior.fallback_for` predicts only the
+  records it was built on.
+- **Why:** v9 dropped 41 singles and 3 verified rows of v8 whose only drone reading was left out:
+  no estimate, no row, so the map showed holes where a seed had looked. v10 run 1 added 368 rows
+  but, without the wider prior, dropped all but the satellite / high-rise ones again; v10 run 2:
+  376 rows added, 646 -> 1,016 rows.
+- **Supersedes / superseded by:** —
+- **Source:** commits `4a73d5a`, `c92f224`.
+
+### 2026-10-09 — A floor count its own seed's reading contradicts leaves the fusion
+- **Decision:** `_pano/elevated.py::drop_contradicted_floors` (called in `floors_info`): a floors
+  reading of a plot leaves the fusion when the same seed's base-visible reading of that plot,
+  trusted or not, differs from it by more than 25 % (`FLOORS_SAME_SEED_AGREE`). The high-rise flag
+  and the storey calibration are unchanged.
+- **Why:** Cartagena v10 lost the drone heights of b0582 (Hotel Cartagena Plaza), b0426, b0635
+  and b0075 (v9: verified_2, verified_2, verified_2, single). Replaying v10's fusion from the run's
+  own stage-cache entries (measured and floors of seeds 1/4/5/6) found the cause: floors readings
+  in fusion (commit `1c9a182`). One count, entered as a fully seen drone reading at 440-510 m
+  (sigma_log 0.13-0.16), outweighed the trusted drone reading, anchored the fusion and outvoted it:
+  - b0582: seed_1 66 m (base in view; satellite shadow 66, stereo 61) vs seed_1's own count, 35
+    floors = 148 m;
+  - b0426: seed_4 72 m, stereo 74.5 vs seed_5's count 98.5 m (seed_5's own reading 72 m);
+  - b0635: seed_4 44 m, lean 53.5 at conf 1.0, stereo 44 vs seed_6's count 73 m (its own roof
+    fit 49 m);
+  - b0075: seed_4 67 m vs seed_5's count 35 m (its own reading 118 m).
+  Every one contradicts its own seed's reading of the plot. One image cannot overrule itself: the
+  count is an instance matched to the plot by range, and it usually takes its "base in view" from
+  that very reading, so a count far from it is another building's facade.
+- **Measured** (the v10 replay): 20 of 145 floors readings drop. Footprints with a drone height:
+  without floors 256; with floors as in v10 256 (7 lost, 7 gained); with the filter 261 (2 lost,
+  both to another seed's count: b0170, b0403; 7 gained).
+  The four plots get their reading back; the b1158 catch (drone 183 m) and every tagged plot are
+  unchanged. Stage-cache keys are untouched (the filter is outside the hashed functions).
+- **Rejected:**
+  - the saved review states as evidence (`seed_experiment.py --remeasure`): older captures (137-186
+    footprints a seed vs the run's 176-276) with an unreliable storey (n 1), so no floors readings
+    and every reading kept;
+  - re-weighting floors readings (a plot-match term in sigma_log): needs truth on wrong-plot counts
+    that we do not have;
+  - dropping only counts against the same seed's *trusted* reading: restores b0582 only.
+- **Supersedes / superseded by:** refines "Floor counts flag high-rises and join fusion" below.
+- **Source:** [F-SKY26](../plans/active/F-SKY26-skyline-signals-to-publish.md) Progress 2026-10-09.
+
 ### 2026-10-08 — Cadastre floors (Cartagena, AMB) as an opt-in height source; propiedad horizontal never published
 - **Decision:** `city2stl/height/providers/co_catastro.py` reads the AMB cadastre `Construccion`
   layer (datos.gov.co `d7hk-qg8h`: range reads of ~25 MB of a 1.2 GB zip, cleaned layer cached
@@ -135,6 +252,10 @@ providers are merged and ranked, and how height accuracy is measured. Related:
     conflicts with the 2026-10-08 rule "a single reading over 2x the prior publishes the prior":
     every high-rise height (>= 10 x 3.1 + 3 = 34 m) is over 2x a 12 m prior, so wiring it needs
     the user's call on exempting `withheld:high_rise` rows from that rule.
+- **Supersedes / superseded by:** publishing wired, and the flag supports a single over 2x the
+  prior (entry "A single reading over 2x the prior publishes the prior unless supported",
+  2026-10-09); counts their own seed contradicts leave the fusion (entry "A floor count its own
+  seed's reading contradicts leaves the fusion", 2026-10-09).
 - **Source:** plan F-SKY26 steps 4/5; outputs `<scratch>/out/seed_exp/s45_cart.json`,
   `s45_miami.json`.
 
@@ -559,6 +680,39 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Source:** decisions.md 2026-08-05 entry.
 
 ## Rejected hypotheses
+
+### 2026-10-08 — A render-fit height optimiser over the drone images
+- **Hypothesis:** render every footprint as a prism from the saved drone cameras and move the
+  heights (and each camera's heading, pitch and height) until the render matches the MobileSAM
+  instances and the sky labels; a "handover" step (lower a footprint to its prior, raise the one
+  behind it) fixes readings of the tower behind. It would replace per-footprint column readings
+  plus fusion.
+- **Measured** (scratch `renderfit/`, Cartagena seeds 1/4/5/6, spin and sphere, fit v3; truth = OSM
+  height tags plus the published towers):
+  - published towers within 25 %: 5 of 7;
+  - on the footprints fusion also reads (n 12): within 25 % 0.58, fusion 0.75; median error 8.9 %
+    vs 4.4 %; bias -0.34 vs +0.14 (log);
+  - where only the fit reads (n 23): 0.52 vs 0.48 for its start heights;
+  - as a checker of fused readings (`checker.py`): Miami (LiDAR, n 50, 27 wrong) handover gain
+    > 50 flags 9 readings with truth, 7 of them wrong (20 wrong missed); any flag (sky, split,
+    handover) 26 flagged, 16 wrong. Cartagena: 3 wrong of 12; the handover flags only wrong ones
+    (2-3), but any flag also marks 6 right ones.
+- **Verdict:** refused as a height source: worse than fusion where both read, and it loses 2
+  published towers. Recommended as a checker only: the handover flag marks readings for review
+  (mostly wrong ones in Miami), not an automatic dispute until it is measured on more truth.
+
+### 2026-10-07 — A joint camera position / heading / height fit from feet, water edge and tower outline
+- **Hypothesis:** fitting a drone seed's position, heading and height together (observed building
+  feet, the water edge, the tower outline) makes the far and overhead seeds usable (the "Open"
+  item of the far-drone entry above).
+- **Measured** (scratch `jointfit/`; Cartagena seeds 4/6/7, Chicago chi1 and wickerSKY, Miami mia2
+  and mia3, Benidorm izalko; held-out tag / survey folds):
+  - none of the 6 user-kept seeds became usable;
+  - seed_6, the control (its recorded position is right: tags exact), moved 42 m and read 2.2x
+    the tags;
+  - Benidorm izalko: a constant ~34 m camera-height error plus ~1 deg of pitch, not position.
+- **Verdict:** refused. The cues cannot place a camera within the ~10 m these seeds need; a cue
+  that could is footprint corners matched to MobileSAM instance edges.
 
 ### 2026-10-06 — Relaxing the trust gates to get more coverage
 - **Hypothesis:** loosening the confidence and distance gates of `_pano/elevated.py::trusted` adds usable readings.
