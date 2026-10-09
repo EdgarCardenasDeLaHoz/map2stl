@@ -1,6 +1,7 @@
 """F-SKY26 step 7: satellite height package (city2stl.height.satellite) and its skyline wiring."""
 
 import datetime as dt
+import json
 import math
 
 import numpy as np
@@ -274,3 +275,124 @@ def test_block_groups_keep_measure_multi_blocks_whole_and_balanced():
     g = s.block_groups(todo, 2)
     assert sorted(map(sorted, g)) == [["a", "b", "c"], ["d", "e"]]       # a/b/c share block (0, 0)
     assert s.block_groups(todo, 1) == [["a", "b", "c", "d", "e"]] and s.block_groups([], 3) == []
+
+
+# ------------------------------------------------------------------------------ search windows
+def test_search_cap_widens_an_untagged_window_only_with_a_tall_hint():
+    """Review 2026-10-09 item 2: untagged, the shadow / lean windows stopped at 60 m and the sweep
+    at 80 m; a drone or floors reading (``hint``) widens them: 1.6x, and at least 220 m when a seed
+    reads over 80 m. A tag sizes the window itself; the hint never narrows it."""
+    cap = sm.search_cap
+    assert cap(dict(tag=None), 60.0, 320.0) == 60.0 and cap(dict(tag=None), 80.0, 330.0) == 80.0
+    assert cap(dict(tag=150.0), 60.0, 320.0) == 240.0 and cap(dict(tag=250.0), 60.0, 320.0) == 320.0
+    assert cap(dict(tag=150.0, hint=300.0), 60.0, 320.0) == 240.0            # tagged: hint ignored
+    assert cap(dict(tag=None, hint=30.0), 60.0, 320.0) == 60.0                 # 1.6 x 30 < 60
+    assert cap(dict(tag=None, hint=70.0), 60.0, 320.0) == pytest.approx(112.0)
+    assert cap(dict(tag=None, hint=81.0), 60.0, 320.0) == sm.HINT_TALL_CAP_M  # a seed over 80 m
+    assert cap(dict(tag=None, hint=81.0), 80.0, 330.0) == sm.HINT_TALL_CAP_M
+    assert cap(dict(tag=None, hint=150.0), 80.0, 330.0) == pytest.approx(240.0)
+    assert cap(dict(tag=None, hint=400.0), 80.0, 330.0) == 330.0
+
+
+def _lean_scene(H=120.0, k=0.4, M=0.5):
+    """A 20 m square tower of height ``H`` leaning ``k`` m/m to the east (bearing 90): dark
+    ground, mid-grey facade swept from the base to the roof, bright roof at ``H * k``."""
+    from skimage.draw import polygon as skpoly
+
+    gray = np.full((900, 900), 60.0, np.float32)
+    sq = np.array([[300, 400], [340, 400], [340, 440], [300, 440]], float)
+    ul = ss.uv(90.0)
+    s_px = H * k / M
+    for fr in np.linspace(0, 1, 300):
+        rr, cc = skpoly(sq[:, 1] + ul[1] * s_px * fr, sq[:, 0] + ul[0] * s_px * fr, gray.shape)
+        gray[rr, cc] = 120.0
+    rr, cc = skpoly(sq[:, 1] + ul[1] * s_px, sq[:, 0] + ul[0] * s_px, gray.shape)
+    gray[rr, cc] = 200.0
+    from scipy import ndimage as ndi
+
+    lab = np.zeros(gray.shape, np.int32)
+    rr, cc = skpoly(sq[:, 1], sq[:, 0], gray.shape)
+    lab[rr, cc] = 1
+    z = np.zeros(gray.shape, bool)
+    return sm.ShadowCtx(gray=gray, lab=lab, water=z, veg=z, B={0: dict(P=[sq], tag=None)},
+                        ub=ss.uv(320.0), COT=1.0, p_ls=0.0, DEN_ROOF=1.0, DARK=40.0, M=M,
+                        gxx=ndi.gaussian_filter(gray, 1.0, order=(0, 1)),
+                        gyy=ndi.gaussian_filter(gray, 1.0, order=(1, 0)), k_lean=k, ul=ul)
+
+
+def test_lean_reads_an_untagged_tower_once_a_seed_reading_widens_the_window():
+    c = _lean_scene(H=120.0)
+    narrow = sm.lean_height(c, 0)                         # untagged: window up to 60 m
+    assert narrow["height_m"] <= 70.5 and narrow["conf"] <= 0.3  # stuck at the window's end
+    assert narrow["reason"] == "peak at search-window edge"
+    c.B[0]["hint"] = 100.0                                # a drone read it at 100 m
+    got = sm.lean_height(c, 0)
+    assert got["height_m"] == pytest.approx(120.0, abs=4.0) and got["conf"] > 0.5
+    c.B[0]["tag"] = 120.0                                 # tagged: the same reading
+    assert sm.lean_height(c, 0)["height_m"] == pytest.approx(120.0, abs=4.0)
+
+
+def test_hints_from_a_region_run_and_the_windows_they_change(tmp_path):
+    s = _script()
+    fps = [dict(fid="b1", tag=None, lat=10.40, lon=-75.55), dict(fid="b2", tag=None, lat=10.41, lon=-75.55),
+           dict(fid="b3", tag=150.0, lat=10.42, lon=-75.55), dict(fid="b4", tag=None, lat=10.43, lon=-75.55),
+           dict(fid="b5", tag=None, lat=10.44, lon=-75.55)]
+    rows = [
+        # drone single withheld (seed_1 view) -> its reading; a street seed's 300 m is not a drone
+        {"feature_id": "b1", "height_tag_m": None, "centroid_lat": 10.40, "centroid_lon": -75.55,
+         "per_seed_median_m": {"seed_1": 214.1, "auto_090_1400m": 300.0},
+         "views": [{"view_name": "seed_1_161", "height_m": 214.1}, {"view_name": "auto_090_1400m_270", "height_m": 300.0}],
+         "single_source": "withheld:elevated", "single_reading_m": 214.1, "tier_methods": ["drone:seed_1"]},
+        # floors only: 20 x 4.128 m
+        {"feature_id": "b2", "height_tag_m": None, "centroid_lat": 10.41, "centroid_lon": -75.55,
+         "per_seed_median_m": {}, "floors": 20.0, "storey_m": 4.128},
+        # tagged: no hint (the tag sizes the window)
+        {"feature_id": "b3", "height_tag_m": 150.0, "centroid_lat": 10.42, "centroid_lon": -75.55,
+         "per_seed_median_m": {"seed_1": 140.0}},
+        # renumbered run: id b9 at b4's centroid -> b4
+        {"feature_id": "b9", "height_tag_m": None, "centroid_lat": 10.43, "centroid_lon": -75.55,
+         "per_seed_median_m": {"seed_1": 50.0}},
+        # only a street seed: no hint
+        {"feature_id": "b5", "height_tag_m": None, "centroid_lat": 10.44, "centroid_lon": -75.55,
+         "per_seed_median_m": {"auto_090_1400m": 90.0}},
+    ]
+    p = tmp_path / "heights.json"
+    p.write_text(json.dumps({"region": "nowhere", "buildings": rows}), encoding="utf-8")
+    h = s.load_hints(p, fps, "nowhere")
+    assert h == {"b1": 214.1, "b2": pytest.approx(82.6, abs=0.05), "b4": 50.0}
+    q = tmp_path / "hints.json"
+    q.write_text(json.dumps({"b1": 100.0}), encoding="utf-8")
+    assert s.load_hints(q) == {"b1": 100.0}
+    s.set_hints(fps, h)
+    assert [f.get("hint") for f in fps] == [214.1, pytest.approx(82.6, abs=0.05), None, 50.0, None]
+    # b4's 50 m hint: 1.6 x 50 = 80 m = the sweep floor, but the lean / shadow window grows (60 -> 80)
+    assert s.changed_windows(fps, {}, h) == {"b1", "b2", "b4"}
+    assert s.changed_windows(fps, h, h) == set()
+    assert s.changed_windows(fps, h, dict(h, b1=230.0)) == set()           # both at the 320 / 330 top
+    assert s.changed_windows(fps, {"b1": 100.0}, {"b1": 120.0}) == set()   # both 220 m
+    assert s.changed_windows(fps, {"b1": 100.0}, {"b1": 150.0}) == {"b1"}  # 220 -> 240 m
+
+
+# ------------------------------------------------------------------------------ calibrated on load
+def test_load_calibrates_a_stored_file_and_load_region_never_uses_it_raw(tmp_path):
+    """Review 2026-10-09: Cartagena's region file had 178 leans under 40 m above conf 0.3
+    (written before calibration, or kept by --add); readings.load did not calibrate."""
+    p = tmp_path / "readings.json"
+    rs = {"b1": sr.footprint_readings(lean={"height_m": 22.0, "conf": 1.0}, calibrate=False),
+          "b2": sr.footprint_readings(lean={"height_m": 130.0, "conf": 0.8})}
+    sr.save(p, rs, {"scenes": {}}, {"b1": {"lat": 10.4, "lon": -75.55}, "b2": {"lat": 10.41, "lon": -75.55}})
+    meta, raw = sr.load(p, calibrate=False)
+    assert raw["b1"]["readings"][0].conf == 1.0 and "n_recalibrated" not in meta
+    meta, got = sr.load(p)
+    assert got["b1"]["readings"][0].conf == sr.LOW_LEAN_MAX_CONF and meta["n_recalibrated"] == 1
+    assert got["b2"]["readings"] == rs["b2"]
+    recs = [_rec("b1", "default"), _rec("b2", "default")]
+    recs = [BuildingRecord(r.feature_id, r.name, None, lat, -75.55, None, "default", 400.0)
+            for r, lat in zip(recs, (10.4, 10.41), strict=True)]
+    sat = sf.load_region("nowhere", recs, path=p)
+    assert sat["b1"][0].conf == sr.LOW_LEAN_MAX_CONF and sat["b1"][0].extra["conf_peak"] == 1.0
+    from city2stl.skyline._pano.elevated import _sat_max
+    assert _sat_max(sat["b1"]) is None                    # no longer "satellite low"
+    # --recalibrate rewrites the file; it then loads unchanged
+    assert _script().recalibrate(p) == 0
+    assert sr.load(p)[0]["n_recalibrated"] == 0

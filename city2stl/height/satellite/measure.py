@@ -10,7 +10,9 @@ records the reproduction check: identical per-building values to the scratch scr
 
 Footprints are dicts: ``fid`` (id), ``P`` (list of global z18 pixel rings at the OSM position),
 ``bb`` (pixel bbox), ``tag`` (OSM height tag or None: it only sizes search windows and the
-occlusion labels; truth heights are never read), ``lat``, ``lon``.
+occlusion labels; truth heights are never read), ``lat``, ``lon``; optional ``hint`` (the highest
+drone or floors reading of an untagged footprint, from a region run: it only widens the search
+window, :func:`search_cap`).
 
 Shadow (``shadow_height``): slide the footprint's shadow-facing outline along the shadow bearing;
 the dark run start (roof edge) to its tip gives ``H_roof = (tip - roof_edge) / (cot(el) - p)``,
@@ -40,6 +42,41 @@ def _ram(min_gb: float | None) -> None:
     if min_gb:
         from city2stl.resources import wait_for_ram  # noqa: PLC0415
         wait_for_ram(min_gb)
+
+
+#: Search windows reach this many times a footprint's tag (or, untagged, its ``hint``).
+CAP_FACTOR = 1.6
+#: An untagged footprint a seed reads over this (its ``hint``) is searched up to at least
+#: :data:`HINT_TALL_CAP_M` (review 2026-10-09 item 2: without a tag the windows stopped at 60 m
+#: (shadow, lean) and 80 m (sweep), so an untagged tower could never be read tall).
+HINT_TALL_M = 80.0
+HINT_TALL_CAP_M = 220.0
+
+
+def search_cap(f: dict, floor_m: float, top_m: float) -> float:
+    """How high one footprint's shadow, lean or sweep search goes, in metres:
+    ``CAP_FACTOR`` x its tag, at least ``floor_m`` (60 m shadow and lean, 80 m sweep), at most
+    ``top_m``. Untagged: also ``CAP_FACTOR`` x its ``hint`` (the highest drone or floors reading),
+    and at least :data:`HINT_TALL_CAP_M` when the hint is over :data:`HINT_TALL_M`."""
+    tag = float(f.get("tag") or 0.0)
+    cap = max(floor_m, CAP_FACTOR * tag)
+    if not tag:
+        hint = float(f.get("hint") or 0.0)
+        cap = max(cap, CAP_FACTOR * hint)
+        if hint > HINT_TALL_M:
+            cap = max(cap, HINT_TALL_CAP_M)
+    return min(top_m, cap)
+
+
+def _margin_h(f: dict) -> float:
+    """The height a :func:`measure_multi` block margin is sized for (``1.2 x h`` of lean or
+    shadow): the tag; untagged with a ``hint``, the sweep's reach (``search_cap / 1.2``); else
+    30 m."""
+    if f.get("tag"):
+        return float(f["tag"])
+    if f.get("hint"):
+        return search_cap(f, 80.0, 330.0) / 1.2
+    return 30.0
 
 
 @dataclass
@@ -105,7 +142,7 @@ def shadow_height(c: ShadowCtx, i) -> dict:
     P = b["P"]
     me = i + 1
     AG = np.vstack(P)
-    hcap = min(320.0, max(60.0, 1.6 * (b["tag"] or 0)))
+    hcap = search_cap(b, 60.0, 320.0)
     S, N = _lead_samples(P, ub)
     if len(S) < 4:
         return dict(height_m=None, conf=0.0, reason="no edge facing the shadow")
@@ -253,7 +290,7 @@ def lean_height(c: ShadowCtx, i) -> dict:
     b = c.B[i]
     P = b["P"]
     me = i + 1
-    hcap = min(320.0, max(60.0, 1.6 * (b["tag"] or 0)))
+    hcap = search_cap(b, 60.0, 320.0)
     S, N = [], []
     for pts in P:
         s, n = outline(pts)
@@ -523,7 +560,7 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
     for (bx, by), ids in sorted(blocks.items()):
         nb += 1
         _ram(ram_gb)
-        hmax = max([B[k]["tag"] or 30 for k in ids])
+        hmax = max(_margin_h(B[k]) for k in ids)
         MARG = int(min(450, max(80, 1.2 * hmax * max(max(SCN[n].cot for n in NAMES),
                                                       max(np.hypot(*Ls[n]) for n in NAMES)) + 40)) / M)
         x0, y0 = bx * BS - MARG, by * BS - MARG
@@ -656,7 +693,7 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
                                                  "lower_bound_m", "upper_bound_m")}
             P = [p - off + rREF / M for p in B[i]["P"]]
             pts = _interior_pts(P, M)
-            hcap = min(330.0, max(80.0, 1.6 * (B[i]["tag"] or 0)))
+            hcap = search_cap(B[i], 80.0, 330.0)
             HS = np.arange(0.0, hcap, 0.5)
             if len(pts) >= 20:
                 smp = {}
@@ -765,4 +802,5 @@ def finish_multi(res: dict) -> dict:
 
 
 __all__ = ["ShadowCtx", "shadow_height", "lean_height", "measure_single", "measure_multi",
-           "scene_pairs", "consensus", "combine", "finish_multi", "MIN_PAIR_DL", "COMBINE_CMIN"]
+           "scene_pairs", "consensus", "combine", "finish_multi", "search_cap", "MIN_PAIR_DL",
+           "COMBINE_CMIN", "CAP_FACTOR", "HINT_TALL_M", "HINT_TALL_CAP_M"]

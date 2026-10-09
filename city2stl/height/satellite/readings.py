@@ -23,7 +23,8 @@ wrong (LiDAR-checked; ``calibrate=False`` gives the 2026-10-07 readings):
 
 ``readings.json`` (``runs/satellite/<region>/readings.json``) holds ``{"_meta": {...}, fid:
 {"lat", "lon", "osm_id", "readings": [SatReading as dict]}}``; ``_meta.scenes`` lists the scene
-names and dates the readings come from (the cache key).
+names and dates the readings come from (the cache key). :func:`load` calibrates what it reads
+(2026-10-09), so a stored file is never used uncalibrated.
 """
 
 from __future__ import annotations
@@ -198,17 +199,31 @@ def save(path: str | os.PathLike, readings: dict, meta: dict, where: dict | None
     os.replace(tmp, p)
 
 
-def load(path: str | os.PathLike) -> tuple[dict, dict]:
+def load(path: str | os.PathLike, calibrate: bool = True) -> tuple[dict, dict]:
     """``(meta, {fid: {"lat", "lon", "osm_id", "readings": [SatReading]}})``; ({}, {}) when the
-    file is missing."""
+    file is missing.
+
+    ``calibrate`` (default): every footprint's readings go through :func:`calibrate`, so a file
+    written before 2026-10-08, or footprints an ``--add`` run kept, cannot reach fusion with an
+    uncalibrated low lean (review 2026-10-09: Cartagena's file had 178 leans under 40 m above
+    conf 0.3). ``meta["n_recalibrated"]``: footprints it changed (0: the file was calibrated).
+    ``calibrate=False``: the stored readings as written."""
     p = Path(path)
     if not p.exists():
         return {}, {}
     body = json.loads(p.read_text(encoding="utf-8"))
     meta = body.pop("_meta", {})
     out = {}
+    n = 0
     for fid, v in body.items():
-        out[fid] = dict(v, readings=[SatReading.from_json(r) for r in v.get("readings") or []])
+        rs = [SatReading.from_json(r) for r in v.get("readings") or []]
+        if calibrate:
+            cal = _calibrate(rs)
+            n += cal != rs
+            rs = cal
+        out[fid] = dict(v, readings=rs)
+    if calibrate:
+        meta = dict(meta, n_recalibrated=n)
     return meta, out
 
 

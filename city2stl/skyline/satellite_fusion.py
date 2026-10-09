@@ -5,9 +5,11 @@
 Opt-in per site: ``use_satellite_heights`` in ``sites/<region>.json``. The run only reads the file;
 it never measures or fetches imagery.
 
-- ``load_region``: readings per region footprint id; a reading is kept only when its stored
-  centroid is within ``MATCH_M`` of the run's footprint (ids are the sorted-centroid order of the
-  OSM dump, so another dump can renumber them); otherwise it is re-matched by centroid.
+- ``load_region``: readings per region footprint id, calibrated on load (``readings.calibrate``;
+  2026-10-09: a stored file written before calibration, or kept by ``--add``, is not used as
+  stored); a reading is kept only when its stored centroid is within ``MATCH_M`` of the run's
+  footprint (ids are the sorted-centroid order of the OSM dump, so another dump can renumber
+  them); otherwise it is re-matched by centroid.
 - ``fusion_readings``: ``footprint_detect.satellite_reading`` dicts per footprint for
   ``fuse_heights`` (``elevated_estimates``): drone-equivalent distance from sigma_log, shadows as
   lower bounds; ``ls`` (lean and shadow agreeing) replaces its lean and shadow.
@@ -57,11 +59,17 @@ def _dist_m(lat1, lon1, lat2, lon2) -> float:
 
 
 def load_region(region: str, records: Sequence, path: str | Path | None = None) -> dict:
-    """``{feature_id: [SatReading]}`` for the run's ``records``; {} when there is no file."""
-    meta, data = sr.load(path or readings_path(region))
+    """``{feature_id: [SatReading]}`` for the run's ``records``; {} when there is no file. The
+    readings are calibrated on load (``readings.load``): an uncalibrated file is logged (run
+    ``20_satellite_heights.py --recalibrate`` to rewrite it) but never used as stored."""
+    meta, data = sr.load(path or readings_path(region), calibrate=True)
     if not data:
         log.info("[satellite] no readings for %s (%s)", region, path or readings_path(region))
         return {}
+    if meta.get("n_recalibrated"):
+        log.warning("[satellite] %s: %d footprints' stored readings were not calibrated; "
+                    "calibrated on load (20_satellite_heights.py --recalibrate rewrites the file)",
+                    region, meta["n_recalibrated"])
     by_id = {r.feature_id: r for r in records}
     out, moved = {}, 0
     loose = []

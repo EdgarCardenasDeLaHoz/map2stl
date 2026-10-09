@@ -124,17 +124,19 @@ def _reading_status(seg: dict, row: dict | None, seed: str) -> tuple[str, str]:
     """(used, reason) for one seed's reading of one building. Used = the seed's reading is in
     the building's published aggregate (``per_seed_median_m``), so it was trusted and not left
     out by the tower-behind check. The reason comes from the segment when the pipeline wrote it
-    (``untrusted_reason`` / ``top_edge`` / ``behind``); otherwise only "not used" is known."""
-    if row is None:
-        return "no", "no published row"
-    used = seed in (row.get("per_seed_median_m") or {})
-    if used:
+    (``untrusted_reason`` / ``top_edge`` / ``behind``); otherwise only "not used" is known. A
+    footprint with no measured row (e.g. a tagged tower whose readings were all untrusted,
+    ``measured: false``) still shows the segment's reason; "no published row" only when there is
+    none (review 2026-10-09: 27 tagged towers, Palmetto among them, showed only that)."""
+    if row is not None and seed in (row.get("per_seed_median_m") or {}):
         return "yes", ""
     reason = seg.get("untrusted_reason") or ""
     if not reason and seg.get("behind"):
         reason = "tower behind"
     if not reason and seg.get("top_edge") and seg.get("top_edge") != "sky":
         reason = f"top edge: {seg.get('top_edge')}"
+    if row is None and not reason:
+        reason = "no published row"
     return "no", reason
 
 
