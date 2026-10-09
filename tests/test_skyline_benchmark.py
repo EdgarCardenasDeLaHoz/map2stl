@@ -677,3 +677,33 @@ def test_real_mesh_is_kept_with_tags(tmp_path, monkeypatch):
     fps = {k: _ring(x, 20, 25, 25) for k, x in zip("ABC", (20, 60, 100), strict=True)}
     truth = bm.footprint_truth("Towerville", fps, None, tags_m=dict.fromkeys("ABC", 150.0))
     assert all(r["status"] == "tiles_only" for r in truth.values())
+
+
+# --------------------------------------------------------------------------- truth age and keys
+
+
+@pytest.mark.parametrize("start_date,year", [
+    ("2017", 2017), ("2017-05-01", 2017), ("1920s", 1920), ("~1950", 1950),
+    ("2016..2018", 2018), ("C19", None), (None, None), ("", None)])
+def test_built_year(start_date, year):
+    assert bm.built_year(start_date) == year
+
+
+@pytest.mark.parametrize("start_date,years,flag", [
+    ("2019", [2018, 2018], bm.TEMPORAL_MAY_POSTDATE),
+    ("2018-11", [2018, 2018], bm.TEMPORAL_MAY_POSTDATE),    # the flight year: may postdate
+    ("1987", [2018, 2018], bm.TEMPORAL_PREDATES),
+    (None, [2018, 2018], bm.TEMPORAL_UNKNOWN),
+    ("2019", None, bm.TEMPORAL_UNKNOWN)])
+def test_temporal_flag(start_date, years, flag):
+    assert bm.temporal_flag(start_date, years) == flag
+
+
+def test_report_key_is_the_key_a_region_report_row_gets():
+    # region_pdf writes footprint_lonlat at 6 decimals; truth measured on the OSM ring (7) must
+    # be filed under the report's key, or no report row finds it (survey-only cities, 2026-10-09)
+    ring = [[-66.06032169999999, 18.4321396], [-66.0601624, 18.431970999999997],
+            [-66.0601, 18.4322], [-66.06032169999999, 18.4321396]]
+    written = [[round(x, 6), round(y, 6)] for x, y in ring]
+    assert bm.report_key(ring) == bm.footprint_key(written)
+    assert bm.report_key(ring) != bm.footprint_key(ring)

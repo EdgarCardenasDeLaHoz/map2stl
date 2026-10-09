@@ -36,8 +36,27 @@ logger = logging.getLogger(__name__)
 M_PER_DEG_LAT = 111_320.0
 #: Inward buffer before sampling a footprint, metres.
 ERODE_M = 1.0
-#: Roof statistic: percentile of the nDSM cells inside the footprint.
+#: Roof statistic: percentile of the nDSM cells inside the footprint. The headline truth
+#: (``survey_m``, ``truth_m``); the others in ``ROOF_STATS`` are stored beside it.
 ROOF_PERCENTILE = 95.0
+#: Roof statistics stored per footprint (review 2026-10-09 item 1): p95 stays the headline;
+#: max matches silhouette readings (drone, Street View, lean), p70 floor counts (3DBAG
+#: publishes median / p70 / max, HalifaxDT p95). ``(name, percentile)``.
+ROOF_STATS = (("p50", 50.0), ("p70", 70.0), ("p90", 90.0), ("p95", 95.0), ("max", 100.0))
+#: Version of the stored roof statistics (records carry it as ``roof_stats``; absent: only
+#: the p95). Bumped when ``ROOF_STATS`` / the ground ring change, never for the p95 itself.
+ROOF_STATS_VERSION = 1
+#: Ground statistic: p5 of the nDSM in the ring from the footprint outline to this many
+#: metres outside it (3DBAG: ground = p5 of the ground points within 4 m). The nDSM is height
+#: above the survey's own ground model, so this reads ~0 where that model fits the street and
+#: the plinth height where the building stands on a raised deck.
+GROUND_RING_M = 4.0
+GROUND_PERCENTILE = 5.0
+#: Which stored statistic each reading kind is measured against (method-matched truth,
+#: review §3 item 1): silhouettes reach the top of the roof, floor counts its main level.
+#: Kinds not listed are scored against the headline p95.
+METHOD_STAT = {"drone": "max", "street": "max", "street_view": "max", "lean": "max",
+               "multiview": "max", "stereo": "max", "shadow": "max", "floors": "p70"}
 #: Fewer valid cells than this and a source does not measure the building.
 MIN_CELLS = 4
 #: ...nor when under this fraction of the footprint's cells are valid: a survey that covers
@@ -55,8 +74,20 @@ TILE_M = 500.0
 TILE_PAD_M = 60.0
 #: Fetch resolution, metres per cell.
 RESOLUTION_M = 1.0
-#: Truth-height bands for the per-band table (metres, [lo, hi)).
+#: Truth-height bands for the per-band table (metres, [lo, hi)). The headline's bands, kept
+#: as they are so old summaries stay comparable; the review's and EUBUCCO's are below.
 BANDS = ((0.0, 30.0), (30.0, 60.0), (60.0, 100.0), (100.0, math.inf))
+#: The review's bands (2026-10-09 §4.4): <15 / 15-40 / 40-100 / >100 m.
+REVIEW_BANDS = ((0.0, 15.0), (15.0, 40.0), (40.0, 100.0), (100.0, math.inf))
+#: EUBUCCO's evaluation bands (0-5 / 5-10 / 10-20 / 20+ m), for comparison with its held-out
+#: MAEs (1.24 / 1.21 / 3.02 / 11.68 m).
+EUBUCCO_BANDS = ((0.0, 5.0), (5.0, 10.0), (10.0, 20.0), (20.0, math.inf))
+#: Camera-to-building distance bands for drone (and Street View) readings, metres.
+DISTANCE_BANDS = ((0.0, 500.0), (500.0, 1000.0), (1000.0, math.inf))
+#: "tol": a height is right when within max(TOL_REL x truth, TOL_ABS_M) of the truth
+#: (review §3 shared rules: 25 %, with a 2 m floor so a 4 m house is not judged to 1 m).
+TOL_REL = 0.25
+TOL_ABS_M = 2.0
 
 BENCHMARK_ROOT = Path(__file__).resolve().parent / "runs" / "benchmark"
 
@@ -137,6 +168,17 @@ def footprint_stat(ndsm: np.ndarray, transform, poly,
     (col, row) to (lon, lat). Height is None when fewer than ``min_cells`` are valid,
     or when under ``min_finite_fraction`` of the cells inside the footprint are.
     """
+    vals, n_inside = _cells(ndsm, transform, poly)
+    if vals is None:
+        return None, 0
+    if vals.size < min_cells or vals.size < min_finite_fraction * n_inside:
+        return None, int(vals.size)
+    return float(np.percentile(vals, percentile)), int(vals.size)
+
+
+def _cells(ndsm: np.ndarray, transform, poly) -> tuple[np.ndarray | None, int]:
+    """``(finite nDSM values inside poly, cells inside poly)``; ``(None, 0)`` when the polygon
+    misses the raster. A polygon smaller than a cell takes the cell under it."""
     from rasterio.features import geometry_mask
     from rasterio.windows import from_bounds
 
@@ -155,11 +197,55 @@ def footprint_stat(ndsm: np.ndarray, transform, poly,
         inside = geometry_mask([poly], out_shape=sub.shape, transform=sub_t, invert=True,
                                all_touched=True)
     vals = sub[inside]
-    n_inside = vals.size
-    vals = vals[np.isfinite(vals)]
-    if vals.size < min_cells or vals.size < min_finite_fraction * n_inside:
-        return None, int(vals.size)
-    return float(np.percentile(vals, percentile)), int(vals.size)
+    return vals[np.isfinite(vals)], int(vals.size)
+
+
+def _buffer_m(poly, metres: float):
+    """``poly`` grown by ``metres`` (local equirectangular frame), in lon/lat."""
+    from shapely import affinity
+
+    lat = poly.centroid.y
+    kx = M_PER_DEG_LAT * math.cos(math.radians(lat))
+    local = affinity.scale(poly, xfact=kx, yfact=M_PER_DEG_LAT, origin=(0, 0))
+    return affinity.scale(local.buffer(metres), xfact=1 / kx, yfact=1 / M_PER_DEG_LAT,
+                          origin=(0, 0))
+
+
+def ground_ring(outline, ring_m: float = GROUND_RING_M):
+    """The ring from a footprint's outline (not eroded) to ``ring_m`` outside it."""
+    return _buffer_m(outline, ring_m).difference(outline)
+
+
+def footprint_stats(ndsm: np.ndarray, transform, poly, outline=None,
+                    min_cells: int = MIN_CELLS,
+                    min_finite_fraction: float = MIN_FINITE_FRACTION) -> dict:
+    """Every stored statistic of one footprint: ``{roof_m: {p50, p70, p90, p95, max} | None,
+    cells, ground_p5_m, ground_cells, roof_stats}``.
+
+    ``poly``: the eroded footprint (as ``footprint_stat`` reads it; ``roof_m["p95"]`` is the
+    same number as ``footprint_stat``). ``outline``: the footprint before erosion, for the
+    ground ring (``ground_ring``); without it the ground is not measured. ``roof_m`` is None
+    when ``footprint_stat`` would return None; the ground needs ``min_cells`` valid cells.
+    """
+    out: dict = {"roof_m": None, "cells": 0, "ground_p5_m": None, "ground_cells": 0,
+                 "roof_stats": ROOF_STATS_VERSION}
+    vals, n_inside = _cells(ndsm, transform, poly)
+    if vals is not None:
+        out["cells"] = int(vals.size)
+        if vals.size >= min_cells and vals.size >= min_finite_fraction * n_inside:
+            roof = {name: float(np.percentile(vals, q)) for name, q in ROOF_STATS if q < 100}
+            roof["max"] = float(vals.max())
+            # the headline p95 exactly as footprint_stat computes it
+            roof["p95"] = float(np.percentile(vals, ROOF_PERCENTILE))
+            out["roof_m"] = {name: round(roof[name], 2) for name, _ in ROOF_STATS}
+    if outline is not None:
+        ring = ground_ring(outline)
+        g, _ = (None, 0) if ring.is_empty else _cells(ndsm, transform, ring)
+        if g is not None:
+            out["ground_cells"] = int(g.size)
+            if g.size >= min_cells:
+                out["ground_p5_m"] = round(float(np.percentile(g, GROUND_PERCENTILE)), 2)
+    return out
 
 
 # --------------------------------------------------------------------------- tiling
@@ -458,6 +544,11 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
                 hgt, cells = (None, 0) if g is None else footprint_stat(g[0], g[1], todo[k])
                 rec[f"{src}_m"] = None if hgt is None else round(hgt, 2)
                 rec[f"{src}_cells"] = cells
+            g = grids.get("survey")
+            if g is not None:  # the stored roof statistics of the survey side (item 1)
+                st = footprint_stats(g[0], g[1], todo[k], outline=_polygon(footprints[k]))
+                rec.update(survey_roof_m=st["roof_m"], survey_ground_p5_m=st["ground_p5_m"],
+                           roof_stats=st["roof_stats"])
             rec["status"], truth_m = classify(rec["survey_m"], rec["tiles_m"])
             rec["truth_m"] = None if truth_m is None else round(truth_m, 2)
             rec["stat"] = STAT_VERSION  # absent: version 1 (tiles grouped by the run)
@@ -488,6 +579,58 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
         out = {k: _drop_tiles(r) if r.get("tiles_m") is not None else r
                for k, r in out.items()}
     return out
+
+
+def report_key(ring) -> str:
+    """``footprint_key`` of a ring as a region report writes it (``heights.json`` rounds
+    ``footprint_lonlat`` to 6 decimals), so truth measured on an OSM ring (7 decimals) is filed
+    under the key the report's row will have."""
+    return footprint_key([[round(float(x), 6), round(float(y), 6)] for x, y, *_ in ring])
+
+
+# --------------------------------------------------------------------------- truth age
+
+#: ``temporal`` of a truth record (review 2026-10-09 item 1, as 3DBAG's
+#: ``_LATEST_BUT_OUTDATED``): the survey may have flown before the building stood.
+TEMPORAL_MAY_POSTDATE = "may_postdate"   # OSM start_date in or after the survey's last year
+TEMPORAL_PREDATES = "predates"           # start_date before the survey's first year
+TEMPORAL_UNKNOWN = "unknown"             # no start_date (most buildings), or no survey year
+
+
+def built_year(start_date) -> int | None:
+    """The latest year an OSM ``start_date`` names ("2017-05-01" -> 2017, "1920s" -> 1920,
+    "2016..2018" -> 2018, "~1950" -> 1950), or None. The latest, so a range that may reach past
+    the survey is flagged."""
+    import re
+
+    years = [int(y) for y in re.findall(r"(?<!\d)(1[0-9]{3}|20[0-9]{2})(?!\d)", str(start_date or ""))]
+    return max(years) if years else None
+
+
+def temporal_flag(start_date, survey_years) -> str:
+    """``TEMPORAL_*`` for a building with OSM ``start_date`` read by a survey flown in
+    ``survey_years`` (``(first, last)``). The survey's last year counts as "may postdate":
+    a building finished in the flight year may or may not be in the point cloud."""
+    y = built_year(start_date)
+    if y is None or not survey_years:
+        return TEMPORAL_UNKNOWN
+    return TEMPORAL_MAY_POSTDATE if y >= int(survey_years[-1]) else TEMPORAL_PREDATES
+
+
+def osm_start_dates(bbox_nsew, timeout_s: int = 120) -> dict[str, str]:
+    """``{"way/123": start_date}`` for OSM buildings and building parts with a ``start_date``
+    in ``bbox_nsew`` (one Overpass query; the region's OSM cache drops the tag)."""
+    from geo2stl.osm import overpass_query
+
+    n, s, e, w = bbox_nsew
+    b = f"({s},{w},{n},{e})"
+    q = (f"[out:json][timeout:{timeout_s}];("
+         f'way["building"]["start_date"]{b};relation["building"]["start_date"]{b};'
+         f'way["building:part"]["start_date"]{b};relation["building:part"]["start_date"]{b};'
+         f");out tags;")
+    return {f"{el['type']}/{el['id']}": str(el["tags"]["start_date"])
+            for el in overpass_query(q, timeout_s=timeout_s, backoff_s=5.0)
+            if (el.get("tags") or {}).get("start_date")}
 
 
 def refresh_survey_truth(region: str, footprints: dict[str, list],

@@ -11,7 +11,12 @@ source would spend the monthly free cap, decision 2026-10-07).
     survey_footprint_heights(region, footprints, provider=None) -> {key: record}
 
 A record is ``{survey_m, survey_cells, provider, years, stat}`` (``years``: ``(first, last)`` survey
-year from ``providers/survey.py::years_for_bbox``, or None). Cached per region in
+year from ``providers/survey.py::years_for_bbox``, or None), plus the stored roof statistics
+(``benchmark.footprint_stats``, review 2026-10-09 item 1): ``roof_m`` ``{p50, p70, p90, p95, max}``
+(``roof_m["p95"] == survey_m``, the headline), ``ground_p5_m`` / ``ground_cells`` (p5 of the nDSM in a
+4 m ring outside the footprint) and ``roof_stats`` (``benchmark.ROOF_STATS_VERSION``). Records
+cached before the roof statistics existed have only ``survey_m``; ``roof_stats=True`` re-reads them
+(the tile's nDSM usually comes from the provider's raster cache, so no network). Cached per region in
 ``runs/survey/<region>.json``; a tile whose read failed (``SurveyError`` or any other error) is
 returned with ``error`` and not cached, so a down endpoint never pins "no survey here". A tile
 the survey does not cover is a complete answer (``survey_m`` None) and is cached.
@@ -114,10 +119,33 @@ def _bounded(fn, items, workers: int):
                 del res
 
 
+def _stale(rec: dict | None, provider: str, roof_stats: bool) -> bool:
+    """Whether a cached record must be read again: another provider or stat version, or (with
+    ``roof_stats``) no current roof statistics."""
+    rec = rec or {}
+    return (rec.get("provider") != provider or rec.get("stat") != bm.STAT_VERSION
+            or (roof_stats and rec.get("roof_stats") != bm.ROOF_STATS_VERSION))
+
+
+def measure(grid, poly, ring) -> dict:
+    """One footprint's record fields from a tile's ``(ndsm, transform)`` (None: not covered):
+    ``survey_m`` (the p95, ``benchmark.footprint_stat``), ``survey_cells`` and the roof
+    statistics (``benchmark.footprint_stats``; ``ring``: the footprint before erosion)."""
+    if grid is None:
+        return {"survey_m": None, "survey_cells": 0, "roof_m": None, "ground_p5_m": None,
+                "ground_cells": 0, "roof_stats": bm.ROOF_STATS_VERSION}
+    hgt, cells = bm.footprint_stat(grid[0], grid[1], poly)
+    st = bm.footprint_stats(grid[0], grid[1], poly, outline=bm._polygon(ring))
+    return {"survey_m": None if hgt is None else round(hgt, 2), "survey_cells": cells,
+            "roof_m": st["roof_m"], "ground_p5_m": st["ground_p5_m"],
+            "ground_cells": st["ground_cells"], "roof_stats": st["roof_stats"]}
+
+
 def survey_footprint_heights(region: str, footprints: dict[str, list],
                              provider: str | None = None, *,
                              resolution_m: float = bm.RESOLUTION_M,
-                             refresh: bool = False, workers: int = 1) -> dict[str, dict]:
+                             refresh: bool = False, workers: int = 1,
+                             roof_stats: bool = False) -> dict[str, dict]:
     """Survey height record per footprint key (``benchmark.footprint_key``).
 
     ``footprints``: key -> lon/lat ring. ``provider``: a ``providers/survey.py`` name; by
@@ -126,6 +154,9 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
     reused unless ``refresh``; older records are re-measured. ``workers`` > 1 reads that many
     tiles at once (threads; the reads wait on the network and on numpy); results are taken
     and cached one at a time, so a stopped run keeps every finished tile.
+
+    ``roof_stats``: also re-measure cached records without the current roof statistics
+    (``roof_stats`` != ``benchmark.ROOF_STATS_VERSION``). Every new read stores them anyway.
     """
     if not footprints:
         return {}
@@ -135,8 +166,7 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
         return {}
     cache = load_cache(region)
     todo = {k: bm._erode(bm._polygon(ring), bm.ERODE_M) for k, ring in footprints.items()
-            if refresh or (cache.get(k) or {}).get("provider") != provider
-            or (cache.get(k) or {}).get("stat") != bm.STAT_VERSION}
+            if refresh or _stale(cache.get(k), provider, roof_stats)}
     fresh: dict[str, dict] = {}
     tiles = bm.tiles_for(todo, resolution_m=resolution_m,
                          part=lambda p: bm.survey_part(provider, p))
@@ -160,10 +190,8 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
                             "years": None, "error": str(exc)}
             continue
         for k in tile.keys:
-            hgt, cells = (None, 0) if grid is None else bm.footprint_stat(grid[0], grid[1],
-                                                                          todo[k])
-            rec = {"survey_m": None if hgt is None else round(hgt, 2), "survey_cells": cells,
-                   "provider": provider, "years": years, "stat": bm.STAT_VERSION}
+            rec = measure(grid, todo[k], footprints[k])
+            rec.update(provider=provider, years=years, stat=bm.STAT_VERSION)
             fresh[k] = cache[k] = rec
         save_cache(region, cache)  # checkpoint, then drop the tile's raster before the next
         del grid

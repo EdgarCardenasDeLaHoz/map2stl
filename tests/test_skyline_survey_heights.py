@@ -257,3 +257,86 @@ def test_parallel_tile_reads_give_the_same_records(monkeypatch):
     one = sh.survey_footprint_heights("benidorm_a", fps, "cnig_mdsn")
     four = sh.survey_footprint_heights("benidorm_b", fps, "cnig_mdsn", workers=4)
     assert one == four and len(one) == 4
+
+
+# --------------------------------------------------------------------------- roof statistics
+# (review 2026-10-09 item 1: p50 / p70 / p90 / p95 / max plus ground p5 per footprint)
+
+
+def test_roof_statistics_are_stored_and_p95_is_the_headline(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _synthetic_ndsm(b, r))
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
+    for k, (lo, hi) in (("low", (12.0, 15.0)), ("tall", (60.0, 66.0))):
+        rec = got[k]
+        roof = rec["roof_m"]
+        assert list(roof) == [name for name, _ in bm.ROOF_STATS]
+        assert roof["p95"] == rec["survey_m"]                     # one headline number
+        assert lo < roof["p50"] < roof["p70"] < roof["p90"] < roof["p95"] <= roof["max"] <= hi
+        assert rec["ground_p5_m"] == 0.0 and rec["ground_cells"] > 100   # flat ground around
+        assert rec["roof_stats"] == bm.ROOF_STATS_VERSION
+    assert sh.load_cache("benidorm")["tall"]["roof_m"] == got["tall"]["roof_m"]
+
+
+def test_ground_ring_reads_a_raised_plinth(monkeypatch):
+    def plinth(bbox, res=1.0):
+        arr, t = _synthetic_ndsm(bbox, res)
+        ring = np.array(FOOTPRINTS["low"])
+        h, wd = arr.shape
+        rows, cols = np.mgrid[0:h, 0:wd]
+        lon, lat = t * (cols + 0.5, rows + 0.5)
+        pad_lon, pad_lat = 10 / KX, 10 / bm.M_PER_DEG_LAT
+        near = ((lon >= ring[:, 0].min() - pad_lon) & (lon <= ring[:, 0].max() + pad_lon)
+                & (lat >= ring[:, 1].min() - pad_lat) & (lat <= ring[:, 1].max() + pad_lat))
+        arr[near & (arr == 0)] = 3.0                              # a 3 m deck around 'low'
+        return arr, t
+
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: plinth(b, r))
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
+    assert got["low"]["ground_p5_m"] == 3.0 and got["tall"]["ground_p5_m"] == 0.0
+
+
+def test_footprint_stats_matches_footprint_stat_and_needs_the_outline_for_ground():
+    bbox = (LAT + 300 / bm.M_PER_DEG_LAT, LAT - 10 / bm.M_PER_DEG_LAT, LON + 300 / KX, LON - 10 / KX)
+    arr, t = _field_ndsm(bbox)
+    for ring in FOOTPRINTS.values():
+        outline = bm._polygon(ring)
+        poly = bm._erode(outline, bm.ERODE_M)
+        p95, cells = bm.footprint_stat(arr, t, poly)
+        st = bm.footprint_stats(arr, t, poly)
+        assert st["roof_m"]["p95"] == round(p95, 2) and st["cells"] == cells
+        assert st["ground_p5_m"] is None and st["ground_cells"] == 0
+        assert bm.footprint_stats(arr, t, poly, outline=outline)["ground_cells"] > 0
+
+
+def test_records_without_roof_stats_are_kept_unless_asked(monkeypatch):
+    reads = []
+
+    def fake(p, b, r=1.0):
+        reads.append(b)
+        return _synthetic_ndsm(b, r)
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    old = {k: {"survey_m": 13.5 if k == "low" else 64.0, "survey_cells": 784,
+               "provider": "cnig_mdsn", "years": [2008, 2015], "stat": bm.STAT_VERSION}
+           for k in FOOTPRINTS}                                    # cached before item 1
+    sh.save_cache("benidorm", old)
+    assert sh.survey_footprint_heights("benidorm", FOOTPRINTS) == old and reads == []
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS, roof_stats=True)
+    assert len(reads) == 1 and all(r["roof_stats"] == bm.ROOF_STATS_VERSION for r in got.values())
+    sh.survey_footprint_heights("benidorm", FOOTPRINTS, roof_stats=True)
+    assert len(reads) == 1                                         # now current: not read again
+
+
+def test_not_covered_records_carry_empty_roof_stats(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda *a, **k: None)
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS, roof_stats=True)
+    assert all(r["roof_m"] is None and r["roof_stats"] == bm.ROOF_STATS_VERSION
+               for r in got.values())
+
+
+def test_footprint_truth_stores_the_survey_roof_statistics(monkeypatch):
+    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    truth = bm.footprint_truth("benidorm", FOOTPRINTS, "cnig_mdsn", use_tiles=False)
+    for rec in truth.values():
+        assert rec["survey_roof_m"]["p95"] == rec["survey_m"]
+        assert rec["survey_ground_p5_m"] == 0.0
