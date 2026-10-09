@@ -263,6 +263,42 @@ Two constraints follow:
     floors[fid])`, source `withheld:high_rise`, with `region_pdf` passing
     `floors=elevated_state["floors"]`. Blocked on the user's call: the single-over-2x-prior rule
     (4a73d5a) would turn every such value back into the prior.
+- 2026-10-08, satellite coverage and confidence (review of the Cartagena v8/v9 reports):
+  - Palmetto Eliptic (b0598) had satellite readings all along (`readings.json`: lean 136.4 m conf
+    0.92, ls 136.1, shadow >= 135.3, stereo 101.5). heights.json lost them: tagged footprints no
+    seed read get their row in `region_pdf._write_heights_json` without `satellite` (none of the
+    131 / 132 `measured: false` rows of v8 / v9 has it). The `satellite=` argument to `_write_heights_json` (tag
+    witness, in progress in `region_pdf.py`) fixes it.
+  - Coverage: Wayback tiles only covered the drone-seed area (756 of 3,018 region footprints,
+    27 of 34 towers tagged >= 40 m). `20_satellite_heights.py --fetch --add` now fetches each
+    scene inside its own outline in its release (`scene.scene_polygon`; 2023-02-19_WV02 covers
+    1,274 footprints, the other six all) and measures only the new footprints.
+    First pass (`--fids`: every footprint a seed sees and every tower): 922 of 3,018 measured
+    (916 with readings, was 749). Seed-seen footprints with readings 393 -> 553 of 559, with a
+    lean / ls >= 40 m at conf >= 0.5 32 -> 44. Towers tagged >= 40 m (tags and levels, 34):
+    readings 27 -> 34, lean / ls 9 -> 12, lean or multiview 11 -> 14, stereo 11 -> 17. The 7 new
+    ones are levels-tagged 45-64 m and read 35-88 m (b1088 ls 61 / 58 m, b2616 ls 53 / 51).
+    The whole-region pass (2,269 footprints, one process, ~2.5 s each) writes `readings.json`
+    when it finishes; `--recalibrate` follows.
+  - Confidence (decision "Satellite lean under 40 m is never confident; stereo under a confident
+    tall lean is dropped"): Ravello's lean 38 m at conf 1.0 and Allure's stereo 77 m at 0.83 are
+    not podium footprints (both outlines fit their roofs) but peak-shape confidences. Chicago
+    LiDAR: lean 15-40 m at conf >= 0.7 within 25 % 1 of 61; stereo 1.25x or more under a confident
+    tall lean 1 of 20 (the lean 16 of 20). `readings.calibrate` caps the one and drops the other:
+    Chicago stereo >= 40 m within 25 % 0.53 -> 0.57, multiview 0.80 -> 0.84. Cartagena: Allure's
+    and Palmetto's stereo (77 / 101.5 m) dropped, Ravello's lean conf 0.3; 35 untagged footprints
+    lose "satellite says low" for the tower-behind test (re-check step 6's flags).
+  - seed_1 hi-res lost Palmetto's drone reading through its pose, not a gate:
+    `refine_on_outline`'s fine pass moves the camera 10 m W for 0.115 deg of misfit (a flat
+    valley), turning the 454 m-away footprint 1.3 deg off the tower; 27 of 54 core columns then
+    hit a depth step at 36 m, the 27/27 tie goes to "depth" and the median reads 51 m (untrusted).
+    Every other pose in the valley reads 128-131 m, trusted. Not the fill cap, tower_behind, the
+    trust thresholds, a seam or the outline gate. Undoing small nudges (gain < 0.3 deg) for seeds
+    1/4/5 brings Palmetto (131 m) but loses Ravello and adds Allure at 61 m from two seeds: not
+    landed. Open: make `measure_footprints` tolerate 1-2 deg of bearing error per footprint.
+    Also lost since the r3 spin states: b0776 (tag 100, depth edge, roof fit conf 0.37), b1114
+    (tag 190, trusted fill 197 m outvoted by satellite stereo 289 m); Allure, b0628, b1158 lost
+    wrong readings.
 
 - 2026-10-08, cadastre floors (low-rise heights): `height/providers/co_catastro.py` and
   `skyline/cadastre_heights.py` (opt-in `use_cadastre_heights`, off); validation and the

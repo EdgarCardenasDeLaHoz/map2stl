@@ -49,6 +49,34 @@ providers are merged and ranked, and how height accuracy is measured. Related:
   The publishing hook (`withhold_untagged_street_view(cadastre=)`, `region_pdf`) is written out
   in the `cadastre_heights` docstring for the owner of those files.
 
+### 2026-10-08 — Satellite lean under 40 m is never confident; stereo under a confident tall lean is dropped
+- **Decision:** `city2stl/height/satellite/readings.py::calibrate` (applied in
+  `footprint_readings`; `20_satellite_heights.py --recalibrate` for stored files):
+  - a lean under 40 m keeps its height but its confidence is capped at 0.3 (`LOW_LEAN_MAX_CONF`;
+    the peak-shape value stays in `extra.conf_peak`);
+  - a stereo or multiview reading that a lean of >= 40 m at conf >= 0.7 is 1.25x or more above is
+    dropped; its height stays in the lean's `extra` (`stereo_under_lean`).
+- **Why:** Cartagena review of v8/v9. Ravello (published 144 m) had lean 38 m at conf 1.0; Allure
+  (180 m) had stereo 77 m at conf 0.83 beside a correct lean of 168 m. The confidences are peak
+  shapes, not reliabilities. Chicago LiDAR (`S/satellite_cities/val`, stored v1/w4 results):
+  - lean 15-40 m at conf >= 0.7 is within 25 % of truth 1 of 61 times (44 % under 0.6x), 3-15 m
+    1 of 16; of confident (>= 0.5) leans under 40 m, 57 of 110 are on buildings of 40 m or more;
+  - with such a lean 1.25x or more above it, stereo is within 25 % 1 of 20 times, the lean 16 of 20.
+  - Effect: stereo >= 40 m within 25 % 0.53 -> 0.57 (n 479 -> 449), multiview 0.80 -> 0.84
+    (51 -> 49); the 66 dropped stereo/multiview readings were within 25 % 3 % of the time, their
+    leans 55 %. Confident leans under 40 m 108 -> 0. Miami's reference scene has no lean (near
+    nadir): no change there.
+- **Not podiums:** both Cartagena footprints fit their roofs (lean crops,
+  `S/sat_cov/lean_*.png`). Ravello's 38 m is a bright feature part way up the facade; Allure's 77 m
+  stereo a lower match. A "footprint much larger than the matched roof" rule would not catch
+  either; the cross-method rule does.
+- **Consequence:** the cap changes neither fusion (the weights table already drops lean < 40 m)
+  nor the tiers (they ignore confidence); a dropped stereo is one satellite reading fewer in both.
+  The tower-behind test (`elevated._sat_max`, conf >= 0.5) no longer takes such a
+  lean as "satellite says low": 35 of Cartagena's 749 Bocagrande footprints (none tagged) lose
+  that cue. Re-check step 6's flags with `seed_experiment.py --remeasure --behind`.
+- **Supersedes / superseded by:** refines the 2026-10-07 satellite weights and stereo entries.
+
 ### 2026-10-08 — Floor counts flag high-rises and join fusion; they never publish alone
 - **Why:** F-SKY26 steps 4 and 5. Untagged towers no drone read fall to the ~12 m prior; floor
   counts (MobileSAM instances, `floor_bands.pano_floors`) say which plots hold towers and give a
