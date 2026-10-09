@@ -463,3 +463,21 @@ def test_a_floors_count_its_own_seed_contradicts_leaves_the_fusion():
     b = _seed_with("seed_4", [], fids)
     b.floors = [count]
     assert [e.feature_id for e in el.elevated_estimates([a, b])] == []
+
+
+def test_tower_behind_counts_a_low_lean_with_a_confident_peak_as_satellite_low():
+    """2026-10-09: calibrate caps a low lean's conf at 0.3 and keeps the peak in
+    extra["conf_peak"]; the veto (only) takes that peak at >= 0.7 as 'satellite low'."""
+    low = _m(0, 10, 20, 110.0, 600.0)
+    s = _seed_with("seed_1", [low], ["w/1"], {0: (("w/9", 150.0, None),)})
+    g = [{"method": "lean", "height_m": 160.0, "conf": 0.9}]
+
+    def lean(peak):
+        return {"method": "lean", "height_m": 20.0, "conf": 0.3,
+                "extra": {"conf_peak": peak} if peak is not None else {}}
+    assert el.tower_behind([s], {"w/1": [lean(0.8)], "w/9": g}) == {
+        ("seed_1", "w/1"): ("w/9", 150.0, 160.0)}
+    assert el.tower_behind([s], {"w/1": [lean(0.5)], "w/9": g}) == {}      # peak not confident
+    assert el.tower_behind([s], {"w/1": [lean(None)], "w/9": g}) == {}     # no peak kept
+    assert el.tower_behind([s], {"w/1": [dict(lean(0.8), height_m=95.0)], "w/9": g}) == {}
+    assert el._sat_max([lean(0.8)]) is None          # fusion/tiers/floors keep the calibrated 0.3

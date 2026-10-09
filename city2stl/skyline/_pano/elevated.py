@@ -1015,6 +1015,8 @@ def _untrust_behind(m, explained, instances, pano):
 #: out (0-38 a seed). Miami has no satellite readings, so nothing changes there.
 SAT_LOW_M = 40.0
 SAT_LOW_CONF = 0.5
+#: A lean under SAT_LOW_M counts as low for the veto when its uncapped peak confidence is >= this.
+SAT_LOW_PEAK_CONF = 0.7
 SAT_LOW_FACTOR = 2.0
 SAT_LOW_FLOOR_M = 5.0
 SAT_LOW_METHODS = ("ls", "lean", "stereo", "multiview")
@@ -1139,13 +1141,30 @@ def _sat_fields(r) -> tuple[str, float, float]:
     return str(r.method), float(r.height_m), float(r.conf)
 
 
-def _sat_max(rs) -> float | None:
+def _lean_peak_conf(r) -> float:
+    """A lean's peak-shape confidence before ``calibrate`` capped it (``extra["conf_peak"]``)."""
+    ex = r.get("extra") if isinstance(r, dict) else getattr(r, "extra", None)
+    try:
+        return float((ex or {}).get("conf_peak", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _sat_max(rs, *, peak_lean: bool = False) -> float | None:
     """Largest confident satellite reading (:data:`SAT_LOW_METHODS`, conf >= SAT_LOW_CONF, at
     least :data:`SAT_MIN_M`); a confident shadow (a lower bound) at or over :data:`SAT_LOW_M`
-    counts too, so it keeps the footprint from looking low."""
-    v = [h for k, h, c in map(_sat_fields, rs or ())
-         if c >= SAT_LOW_CONF and ((k in SAT_LOW_METHODS and h >= SAT_MIN_M)
-                                   or (k == "shadow" and h >= SAT_LOW_M))]
+    counts too, so it keeps the footprint from looking low. ``peak_lean`` (the tower-behind veto
+    only): a lean under :data:`SAT_LOW_M` whose uncapped peak confidence was >= SAT_LOW_PEAK_CONF counts
+    too, although fusion and the tiers keep its calibrated 0.3 (2026-10-09)."""
+    v = []
+    for r in rs or ():
+        k, h, c = _sat_fields(r)
+        if peak_lean and k == "lean" and h < SAT_LOW_M:
+            if _lean_peak_conf(r) >= SAT_LOW_PEAK_CONF:
+                c = max(c, SAT_LOW_CONF)
+        if c >= SAT_LOW_CONF and ((k in SAT_LOW_METHODS and h >= SAT_MIN_M)
+                                  or (k == "shadow" and h >= SAT_LOW_M)):
+            v.append(h)
     return max(v) if v else None
 
 
@@ -1161,7 +1180,7 @@ def tower_behind(seeds: list[ElevatedSeed], satellite_raw: dict | None) -> dict:
         for m in s.measured:
             if trusted(m):
                 drone.setdefault(s.feature_ids[m.footprint], []).append(float(m.height_m))
-    smax = {f: _sat_max(rs) for f, rs in satellite_raw.items()}
+    smax = {f: _sat_max(rs, peak_lean=True) for f, rs in satellite_raw.items()}
     out = {}
     for s in seeds:
         for m in s.measured:
