@@ -62,9 +62,14 @@ def test_rule_table_lists_exactly_the_addendum_pairs():
         {"lean", "shadow"}, {"floors", "drone"})}
 
 
-def test_agree_is_25_percent_of_the_larger():
-    assert agree(100, 75) and agree(75, 100)
-    assert not agree(100, 74)
+def test_agree_is_25_percent_of_the_smaller():
+    # review item 5 (2026-10-09): |ln a/b| <= ln 1.25, symmetric; was 25 % of the larger (1.33)
+    assert agree(100, 80) and agree(80, 100) and agree(125, 100)
+    assert not agree(100, 75) and not agree(75, 100) and not agree(126, 100)
+    # Palmetto: lean + shadow 136 against the tag 156 (1.15) still agrees
+    assert agree(135.9, 156.0)
+    assert agree(0, 0) and not agree(0, 5) and not agree(-5, 5)
+    assert agree(100, 74, rel=0.40) and not agree(100, 90, rel=0.05)    # an explicit tolerance
 
 
 # --------------------------------------------------------------------------- tiers

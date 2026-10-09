@@ -57,7 +57,7 @@ import time
 from pathlib import Path
 
 from ._core.height import TAGGED_SOURCES, untagged_fallback, withhold_untagged_street_view
-from ._core.tiers import tier_counts, tier_fields
+from ._core.tiers import selection_reason, tier_counts, tier_fields
 from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
@@ -91,11 +91,15 @@ from .seed_selection import (
     _screen_locations,
 )
 from .streetview_io import _parse_streetview_url, _resolve_api_key
+from .tier_display import tag_disagreements
 
 logger = logging.getLogger(__name__)
 
 
-#: ``heights.json`` layout version; 2 added ``tier_counts`` and per-row tiers (F-SKY26).
+#: ``heights.json`` layout version; 2 added ``tier_counts`` and per-row tiers (F-SKY26). Additive
+#: since (still 2, 2026-10-09): ``selection_reason`` on every row, ``measured_m`` /
+#: ``measured_methods`` / ``tag_disagrees`` on tagged rows a measurement disagrees with, and the
+#: top-level ``tag_disagreements`` list. The ``verified_2`` rename is the v3 bump.
 HEIGHTS_SCHEMA_VERSION = 2
 
 
@@ -189,7 +193,9 @@ def _write_heights_json(
 
     ``satellite``: ``{feature_id: [SatReading]}`` (``satellite_fusion.load_region``): an
     unmeasured tagged row's readings, so one agreeing reading can verify its ``osm_tag``
-    (``tiers.tag_witness``).
+    (``tiers.tag_witness``) and an agreeing pair can disagree with it (``tag_disagrees``).
+    Unmeasured rows get their ``selection_reason`` here; ``tag_disagreements`` lists every
+    tagged row whose measurement disagrees with its published tag (logged too).
 
     The aggregation is the pipeline's actual answer, and it used to live only
     inside a rendered figure. Anything that wants to score the run — a vendor
@@ -245,16 +251,24 @@ def _write_heights_json(
                          tag_m=float(rec.height_tag_m), tag_source=rec.height_source)
         extra = ({"satellite": {r.method: [round(r.height_m, 1), round(r.conf, 2)]
                                 for r in sat_rs}} if sat_rs else {})
-        rows.append({"feature_id": rec.feature_id, "name": rec.name, "measured": False,
-                     "effective_height_m": float(rec.height_tag_m),
-                     "effective_height_source": rec.height_source, "n_views": 0,
-                     "n_seeds": 0, "per_seed_median_m": {},
-                     "centroid_lat": rec.centroid_lat, "centroid_lon": rec.centroid_lon,
-                     "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
-                     "height_source": rec.height_source, "footprint_lonlat": ring,
-                     **extra, **tf,
-                     "no_survey_height_m": float(rec.height_tag_m),
-                     "no_survey_source": rec.height_source, "no_survey_tier": tf["tier"]})
+        row = {"feature_id": rec.feature_id, "name": rec.name, "measured": False,
+               "effective_height_m": float(rec.height_tag_m),
+               "effective_height_source": rec.height_source, "n_views": 0,
+               "n_seeds": 0, "per_seed_median_m": {},
+               "centroid_lat": rec.centroid_lat, "centroid_lon": rec.centroid_lon,
+               "area_m2": rec.area_m2, "height_tag_m": rec.height_tag_m,
+               "height_source": rec.height_source, "footprint_lonlat": ring,
+               **extra, **tf,
+               "no_survey_height_m": float(rec.height_tag_m),
+               "no_survey_source": rec.height_source, "no_survey_tier": tf["tier"]}
+        row["selection_reason"] = selection_reason(row)
+        rows.append(row)
+    # tagged rows whose measurement disagrees with the published tag (review item 6): the tag
+    # stays published, both values are listed here and on the row (tier_display.tag_note)
+    disagreements = tag_disagreements(rows)
+    for d in disagreements:
+        logger.info(f"[tiers] {d['name']} ({d['feature_id']}): measured {d['measured_m']:.0f} m "
+                    f"({', '.join(d['measured_methods'])}) vs tag {d['tag_m']:.0f} m; tag published")
 
     doc = {
         # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c)
@@ -264,6 +278,7 @@ def _write_heights_json(
         "n_building_records": len(building_records),
         "known_heights": known_heights or [],
         "tier_counts": tier_counts(rows),
+        "tag_disagreements": disagreements,
         "buildings": rows,
     }
     try:

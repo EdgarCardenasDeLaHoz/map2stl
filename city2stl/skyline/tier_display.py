@@ -12,13 +12,18 @@ Survey rows (2d) name their provider in ``survey_provider`` (also read: ``survey
 needs its licence line printed with it (``survey_attributions``). A height resting on a cadastre
 (``tier_methods`` or the published source names ``cadastre``; ``cadastre_heights``) needs the
 cadastre's attribution and share-alike line (``height_attributions`` prints both kinds).
+
+Measured vs tag (review item 6, 2026-10-09): a tagged row whose agreeing readings sit more than
+10 % from its published tag (``tag_disagrees``) shows both values and the reason (``tag_note``, in
+``tier_hover``; ``tag_disagreements`` / ``tag_disagreement_lines`` for lists). The hover also says
+why the value was published (``selection_reason``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from ._core.tiers import TIERS, VERIFIED_TIERS
+from ._core.tiers import TAG_DISAGREE_REL, TIERS, VERIFIED_TIERS, selection_reason
 
 #: tier -> short label shown in tables and legends.
 TIER_LABELS = {
@@ -35,7 +40,7 @@ TIER_SHORT = {"survey": "survey", "verified_2": "verified", "tag": "tag", "singl
 #: tier -> one plain line saying what it means (legends, hover).
 TIER_HINTS = {
     "survey": "measured by an airborne lidar survey",
-    "verified_2": "two independent readings agree within 25 %",
+    "verified_2": "two independent readings agree within 25 % of the smaller",
     "tag": "the building's OpenStreetMap height or levels tag",
     "single": "one kind of image reading, not confirmed by a second",
     "prior": "no usable reading; the height model's estimate",
@@ -105,10 +110,12 @@ def with_unmeasured_tags(rows: Sequence[dict], records: Iterable) -> list[dict]:
                 not in ("osm_tag", "osm_levels") or not getattr(rec, "height_tag_m", None)):
             continue
         seen.add(fid)
-        out.append({"feature_id": fid, "name": getattr(rec, "name", fid), "measured": False,
-                    "effective_height_m": float(rec.height_tag_m),
-                    "effective_height_source": rec.height_source, "n_seeds": 0,
-                    "tier": "tag", "tier_methods": ["osm_tag"], "verified": False})
+        row = {"feature_id": fid, "name": getattr(rec, "name", fid), "measured": False,
+               "effective_height_m": float(rec.height_tag_m),
+               "effective_height_source": rec.height_source, "n_seeds": 0,
+               "tier": "tag", "tier_methods": ["osm_tag"], "verified": False}
+        row["selection_reason"] = selection_reason(row)
+        out.append(row)
     return out
 
 
@@ -154,7 +161,66 @@ def tier_hover(row: dict) -> str:
         text += ". Disputed by: " + ", ".join(str(m) for m in disputed)
     if row.get("prior_disagrees") and t == "single":
         text += ". More than 2x away from the prior"
+    note = tag_note(row)
+    if note:
+        text += ". " + note
+    if row.get("selection_reason"):
+        text += ". Published because: " + str(row["selection_reason"])
     return text
+
+
+def tag_note(row: dict) -> str | None:
+    """Both values and the reason, when a tagged row's agreeing readings disagree with its
+    published tag (``tag_disagrees``, review item 6), else None: "Measured 136 m (lean, shadow)
+    vs OSM tag 156 m (13 % lower); the tag is published until the user decides"."""
+    if not row.get("tag_disagrees") or row.get("measured_m") is None:
+        return None
+    try:
+        m = float(row["measured_m"])
+        tag = float(row.get("height_tag_m") or row.get("effective_height_m"))
+    except (TypeError, ValueError):
+        return None
+    methods = ", ".join(str(x) for x in row.get("measured_methods") or ()) or "readings"
+    off = 100.0 * (m - tag) / tag if tag else 0.0
+    return (f"Measured {m:.0f} m ({methods}) vs OSM tag {tag:.0f} m "
+            f"({abs(off):.0f} % {'lower' if off < 0 else 'higher'}); the tag is published until "
+            f"the user decides")
+
+
+def tag_disagreements(rows: Iterable[dict]) -> list[dict]:
+    """Every tagged row whose measurement disagrees with its published tag by more than
+    ``TAG_DISAGREE_REL`` (``tag_disagrees``): ``{feature_id, name, tag_m, measured_m,
+    measured_methods, off_pct, tier}``, largest disagreement first. For the report lists and
+    ``heights.json``'s ``tag_disagreements``."""
+    out = []
+    for r in rows:
+        if not r.get("tag_disagrees") or r.get("measured_m") is None:
+            continue
+        tag = r.get("height_tag_m") or r.get("effective_height_m")
+        if not tag:
+            continue
+        m = float(r["measured_m"])
+        out.append({"feature_id": r.get("feature_id"), "name": r.get("name"),
+                    "tag_m": float(tag), "measured_m": m,
+                    "measured_methods": list(r.get("measured_methods") or ()),
+                    "off_pct": round(100.0 * (m - float(tag)) / float(tag), 1),
+                    "tier": row_tier(r)})
+    return sorted(out, key=lambda d: -abs(d["off_pct"]))
+
+
+def tag_disagreement_lines(rows: Iterable[dict], limit: int = 12) -> list[str]:
+    """Plain lines for a report page: one per ``tag_disagreements`` row (both values and the
+    reason), at most ``limit``, with a heading; [] when there are none."""
+    ds = tag_disagreements(rows)
+    if not ds:
+        return []
+    lines = [f"Measured vs OSM tag (> {TAG_DISAGREE_REL:.0%} apart; tag published, the user decides):"]
+    for d in ds[:limit]:
+        lines.append(f"  {str(d['name'] or d['feature_id'])[:18]:<18} tag {d['tag_m']:4.0f} m  "
+                     f"measured {d['measured_m']:4.0f} m ({', '.join(d['measured_methods'])})")
+    if len(ds) > limit:
+        lines.append(f"  ... and {len(ds) - limit} more")
+    return lines
 
 
 def withheld_note(row: dict) -> str | None:
@@ -259,4 +325,5 @@ __all__ = ["CADASTRE_ATTRIBUTIONS", "SOURCE_LABELS", "SURVEY_ATTRIBUTIONS", "TIE
            "uses_cadastre",
            "TIER_LABELS", "TIER_SHORT", "drone_disagreements", "drone_seeds", "UNVERIFIED_TIERS", "VERIFIED_TIERS", "is_unverified", "row_tier",
            "source_label", "survey_attributions", "survey_provider", "survey_providers",
+           "tag_disagreement_lines", "tag_disagreements", "tag_note",
            "tier_counts", "tier_hover", "with_unmeasured_tags", "withheld_note"]

@@ -52,19 +52,52 @@ withheld. It stays ``single`` (``single_support`` names why) when
 Neither counts when the satellite says the plot is low (its largest confident reading is under
 40 m, the tower-behind test's rule): such a reading is withheld. Cartagena v10 withheld 302
 singles (median 70 m), most of Bocagrande's towers among them.
+
+Agreement (``agree``; review item 5, 2026-10-09): two readings agree when the larger is at most
+``1 + tol`` times the smaller (``|ln a/b| <= ln(1 + tol)``, i.e. ``tol`` of the *smaller*), ``tol``
+from ``AGREE_TOL`` by the smaller value's band (<15 / 15-40 / 40-100 / >100 m), fitted on labelled
+pairs; plus a metre floor (``AGREE_FLOOR_M``) below ``AGREE_FLOOR_BELOW_M``, off until low-rise
+labels can accept it. Until 2026-10-09 it was 25 % of the larger (a ratio up to 1.33).
+
+Measured vs tag (review item 6, ``tag_measurement``): a tagged row whose corroborating pair agrees
+with itself but sits more than ``TAG_DISAGREE_REL`` from the tag keeps publishing the tag and
+carries ``measured_m``, ``measured_methods`` and ``tag_disagrees`` (Palmetto: lean 136 + shadow
+135 against the tag 156). The user decides any switch.
+
+``selection_reason``: why a published row's value was chosen, on every row (as ``withheld_reason``
+says why a reading was not).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 
 #: Tiers, best first.
 TIERS = ("survey", "verified_2", "tag", "single", "prior")
 #: Tiers whose height is checked by something other than the image that produced it.
 VERIFIED_TIERS = ("survey", "verified_2")
-#: Two readings agree when they differ by at most this share of the larger: the benchmark's
-#: "within 25 %" yardstick.
+#: The base agreement tolerance: two readings agree when the larger is at most ``1 + AGREE_REL``
+#: times the smaller (25 % of the smaller; the benchmark's "within 25 %" yardstick). Bands may
+#: tighten it (``AGREE_TOL``). Until 2026-10-09: 25 % of the larger.
 AGREE_REL = 0.25
+#: Bands of the agreement table, by the smaller of the two values: ``(upper bound m, name)``.
+AGREE_BANDS = ((15.0, "<15"), (40.0, "15-40"), (100.0, "40-100"), (math.inf, ">100"))
+#: band -> tolerance (review item 5, fitted 2026-10-09 by ``S/tiers/fit.py``): the loosest of
+#: 5-25 % at which P(both readings within max(25 %, 2 m) of truth | they agree) >= 0.85, on 528
+#: labelled pairs (the satellite validation's 7 LiDAR cities + Miami drone harness; tag + witness,
+#: drone + drone, drone / tag + satellite, lean + shadow). 40-100 m: 25 % gives 0.89 (n agree 54,
+#: held out by city 0.93); > 100 m: 0.99 (n 216, held out 0.99). < 15 m and 15-40 m: no tolerance
+#: reaches 0.85 (2 and 7 agreeing pairs, about half right), so they keep 25 %.
+AGREE_TOL = {"<15": 0.25, "15-40": 0.25, "40-100": 0.25, ">100": 0.25}
+#: Metre floor: below ``AGREE_FLOOR_BELOW_M`` two readings also agree within this many metres
+#: (the review's max(25 %, 2 m): 25 % of a 4 m house is 1 m, under LiDAR-vs-LiDAR noise). Off
+#: (0) since 2026-10-09: on the labelled pairs its only new corroboration was wrong (tag 3 m +
+#: lean 4.2 m, truth 12.5 m), and the < 15 m band has 2 corroborated buildings, short of the
+#: review's 30 (acceptance rule §4.5). ``REVIEW_FLOOR_M`` is the value to switch it on with.
+AGREE_FLOOR_M = 0.0
+REVIEW_FLOOR_M = 2.0
+AGREE_FLOOR_BELOW_M = 15.0
 #: Satellite readings verify a drone reading only at or above this height: below 40 m, lean
 #: and stereo are dropped and shadows are 0.05-weight (decision 2026-10-07).
 SAT_MIN_M = 40.0
@@ -90,9 +123,38 @@ def label(r: dict) -> str:
     return f"{r['kind']}:{r['seed']}" if r.get("seed") else r["kind"]
 
 
-def agree(a: float, b: float, rel: float = AGREE_REL) -> bool:
-    """Whether two heights differ by at most ``rel`` of the larger."""
-    return abs(a - b) <= rel * max(abs(a), abs(b))
+def agree_band(h: float) -> str:
+    """The ``AGREE_BANDS`` name of a height (the smaller of two readings)."""
+    for top, name in AGREE_BANDS:
+        if h < top:
+            return name
+    return AGREE_BANDS[-1][1]
+
+
+def agree_tol(a: float, b: float) -> float:
+    """The tolerance two readings are held to: ``AGREE_TOL`` of the smaller one's band."""
+    return AGREE_TOL.get(agree_band(min(abs(a), abs(b))), AGREE_REL)
+
+
+def log_ratio(a: float, b: float) -> float:
+    """``|ln(a / b)|`` of two heights (inf when one is not positive, 0 when both are equal)."""
+    a, b = float(a), float(b)
+    if a <= 0 or b <= 0:
+        return 0.0 if a == b else math.inf
+    return abs(math.log(a / b))
+
+
+def agree(a: float, b: float, rel: float | None = None, floor_m: float | None = None) -> bool:
+    """Whether two heights agree: the larger at most ``1 + tol`` times the smaller, ``tol`` =
+    ``rel`` or, by default, the band tolerance (``agree_tol``); or, when the smaller is under
+    ``AGREE_FLOOR_BELOW_M``, within ``floor_m`` metres (default ``AGREE_FLOOR_M``, 0 = off).
+    Symmetric. ``tag_witness``, ``verified_pair``, the tag check, ``disputed_by`` and
+    ``single_support`` all use it."""
+    tol = agree_tol(a, b) if rel is None else rel
+    if log_ratio(a, b) <= math.log1p(tol) + 1e-12:
+        return True
+    floor = AGREE_FLOOR_M if floor_m is None else floor_m
+    return bool(floor) and min(abs(a), abs(b)) < AGREE_FLOOR_BELOW_M and abs(a - b) <= floor
 
 
 def _different_seeds(a: dict, b: dict) -> bool:
@@ -134,7 +196,7 @@ def verified_pair(readings: Sequence[dict]) -> tuple[dict, dict] | None:
         for b in rs[i + 1:]:
             if not (independent(a, b) and agree(a["value_m"], b["value_m"])):
                 continue
-            d = abs(a["value_m"] - b["value_m"]) / max(a["value_m"], b["value_m"])
+            d = log_ratio(a["value_m"], b["value_m"])
             if best_d is None or d < best_d:
                 best, best_d = (a, b), d
     return best
@@ -169,10 +231,34 @@ def tag_witness(readings: Sequence[dict], tag_m: float | None,
         v = r.get("value_m")
         if v is None or v <= 0 or not _can_witness(r) or not agree(v, float(tag_m)):
             continue
-        d = abs(v - float(tag_m))
+        d = log_ratio(v, float(tag_m))
         if best_d is None or d < best_d:
             best, best_d = r, d
     return best
+
+
+#: A tagged row's agreeing pair more than this share from the tag (on the smaller value) is shown
+#: beside it (``tag_measurement``; review item 6, 2026-10-09).
+TAG_DISAGREE_REL = 0.10
+
+
+def tag_measurement(readings: Sequence[dict], tag_m: float | None) -> dict:
+    """What a tagged row's readings measured, when that disagrees with the published tag: the
+    independent agreeing pair (``verified_pair``) whose mean is more than ``TAG_DISAGREE_REL``
+    from ``tag_m`` gives ``{"measured_m", "measured_methods", "tag_disagrees": True}``; else {}.
+    The tag stays published (the user decides any switch); one reading alone is not a
+    measurement here (``tag_witness`` judges it). Palmetto (v11): lean 136.4 + shadow 135.3 =
+    135.9 against the tag 156."""
+    if tag_m is None or float(tag_m) <= 0:
+        return {}
+    pair = verified_pair(readings)
+    if pair is None:
+        return {}
+    m = _pair_value(pair)
+    if log_ratio(m, float(tag_m)) <= math.log1p(TAG_DISAGREE_REL):
+        return {}
+    return {"measured_m": round(m, 1), "measured_methods": sorted(label(r) for r in pair),
+            "tag_disagrees": True}
 
 
 def verification_tier(readings: Sequence[dict], tag_m: float | None = None,
@@ -208,7 +294,9 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
                 prior_m: float | None = None, prior_source: str | None = None,
                 tag_source: str | None = None) -> dict:
     """The tier fields of a published row: ``tier``, ``tier_methods``, ``verified``,
-    ``disputed_by`` and ``prior_disagrees``.
+    ``disputed_by`` and ``prior_disagrees``; on a tagged row whose agreeing pair is more than
+    ``TAG_DISAGREE_REL`` from the tag also ``measured_m``, ``measured_methods`` and
+    ``tag_disagrees`` (``tag_measurement``).
 
     ``disputed_by``: the methods of an independent agreeing pair that disagrees with
     ``published_m`` (e.g. two drone seeds against the tag); such a pair never verifies the
@@ -229,8 +317,11 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
     prior_disagrees = bool(
         tier == "single" and prior_m and published_m
         and max(prior_m, published_m) > PRIOR_DISAGREE_FACTOR * min(prior_m, published_m))
-    return {"tier": tier, "tier_methods": methods, "verified": tier in VERIFIED_TIERS,
-            "disputed_by": disputed_by, "prior_disagrees": prior_disagrees}
+    out = {"tier": tier, "tier_methods": methods, "verified": tier in VERIFIED_TIERS,
+           "disputed_by": disputed_by, "prior_disagrees": prior_disagrees}
+    if tag_m is not None and survey is None:
+        out.update(tag_measurement(readings, tag_m))
+    return out
 
 
 def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
@@ -275,6 +366,54 @@ def single_support(value_m: float | None, satellite: Sequence[tuple] = (),
     if high_rise:
         out.append(HIGH_RISE_SUPPORT)
     return out
+
+
+#: Why a published row's value was chosen (``selection_reason``), by its published source.
+SELECTION_REASONS = {
+    "survey": "survey lidar height",
+    "osm_tag": "OSM height tag: tags are published over image readings",
+    "osm_levels": "OSM levels tag: tags are published over image readings",
+    "elevated": "median of the drone seeds' trusted readings",
+    "satellite": "satellite-only height: its best reading has sigma_log <= 0.25",
+    "high_rise": "floor counts flagged a high-rise: floors x storey + 3 m",
+    "cadastre": "cadastre floors x storey",
+    "prior": "no usable reading: the height prior",
+    "street": "Street View reading (withholding off)",
+}
+
+
+def selection_reason(row: dict) -> str:
+    """Why the row publishes its ``effective_height_m`` (the selection-reason counterpart of
+    ``withheld_reason``, as 3DBAG records one): ``SELECTION_REASONS`` by the published source,
+    plus what qualifies it: a measurement that disagrees with a published tag
+    (``tag_disagrees``), the support that kept a single over 2x the prior (``single_support``),
+    the withheld reading behind a published prior (``withheld_reason``)."""
+    src = str(row.get("effective_height_source") or "")
+    base = src.split(":", 1)[1] if src.startswith("withheld:") else src
+    if row.get("tier") == "survey" or base.startswith("survey"):
+        return SELECTION_REASONS["survey"]
+    if base in ("osm_tag", "osm_levels"):
+        out = SELECTION_REASONS[base]
+        if row.get("tag_disagrees") and row.get("measured_m") is not None:
+            out += (f"; measured {float(row['measured_m']):.0f} m "
+                    f"({', '.join(map(str, row.get('measured_methods') or ()))}) disagrees by more "
+                    f"than {TAG_DISAGREE_REL:.0%}: the tag stays published until the user decides")
+        return out
+    if base in ("elevated", "satellite", "high_rise"):
+        out = SELECTION_REASONS[base]
+        if row.get("single_support"):
+            out += ("; over 2x the prior, kept: supported by "
+                    + ", ".join(map(str, row["single_support"])))
+        return out
+    if base.endswith("cadastre"):
+        return SELECTION_REASONS["cadastre"]
+    if src.startswith("withheld:"):
+        if row.get("withheld_reason"):
+            return f"the height prior: the reading was withheld ({row['withheld_reason']})"
+        if row.get("drone_seen"):
+            return SELECTION_REASONS["prior"] + " (the drone seeds that saw it gave none)"
+        return SELECTION_REASONS["prior"]
+    return SELECTION_REASONS["street"] if src else "no published height"
 
 
 def tier_counts(rows: Sequence[dict]) -> dict[str, int]:
