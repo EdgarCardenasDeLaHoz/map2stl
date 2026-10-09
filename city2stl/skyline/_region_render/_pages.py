@@ -593,9 +593,8 @@ def _render_heights_page(pdf, building_heights: list[dict],
         VERIFIED_TIERS,
         drone_disagreements,
         drone_seeds,
+        height_attributions,
         row_tier,
-        survey_attributions,
-        survey_providers,
         tier_counts,
         with_unmeasured_tags,
     )
@@ -649,7 +648,7 @@ def _render_heights_page(pdf, building_heights: list[dict],
                          f"{TIER_SHORT[row_tier(r)]:<9}"
                          f"d={float(r.get('seed_disagreement_m', 0.0) or 0.0):4.0f}")
     ax.text(0.0, 1.0, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=8.5)
-    attributions = survey_attributions(survey_providers(rows))
+    attributions = height_attributions(rows)
     if attributions:
         fig.text(0.02, 0.03, "\n".join(attributions), fontsize=7.5, va="bottom", color="#333333")
     pdf.savefig(fig, bbox_inches="tight")

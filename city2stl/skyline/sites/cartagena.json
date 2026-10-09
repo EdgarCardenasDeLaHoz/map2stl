@@ -18,6 +18,8 @@
   "use_satellite_footprints": false,
   "use_satellite_heights": true,
   "_use_satellite_heights_note": "F-SKY26 step 7 (2026-10-07): runs/satellite/cartagena/readings.json from scripts/20_satellite_heights.py (7 Wayback scenes 2021-2026, LG01 reference); the run only reads it.",
+  "use_cadastre_heights": false,
+  "_use_cadastre_heights_note": "Opt-in (2026-10-08, docs/decisions/building-heights.md): AMB cadastre floors (datos.gov.co d7hk-qg8h, CC BY-SA 4.0) replace the prior on matched non-PH low-rises and join the tiers; off until the colonial floor counts are spot-checked.",
   "use_cross_view_scoring": true,
   "use_pano_coastline_recovery": true,
   "drive_pano_recovery_anchor": true,

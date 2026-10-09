@@ -9,7 +9,9 @@ Colours: Okabe-Ito, safe for the common colour-vision deficiencies; ``single`` i
 
 Survey rows (2d) name their provider in ``survey_provider`` (also read: ``survey_source`` and an
 ``effective_height_source`` of ``survey:<provider>``). Every provider a report shows heights from
-needs its licence line printed with it (``survey_attributions``).
+needs its licence line printed with it (``survey_attributions``). A height resting on a cadastre
+(``tier_methods`` or the published source names ``cadastre``; ``cadastre_heights``) needs the
+cadastre's attribution and share-alike line (``height_attributions`` prints both kinds).
 """
 
 from __future__ import annotations
@@ -76,6 +78,7 @@ SOURCE_LABELS = {
     "constant": "default height",
     "street_view": "Street View",
     "survey": "survey lidar",
+    "cadastre": "cadastre floors",
 }
 
 
@@ -213,6 +216,34 @@ def survey_providers(rows: Iterable[dict]) -> dict[str, int]:
     return out
 
 
+#: Cadastre dataset -> the attribution and share-alike line CC BY-SA 4.0 asks for. Published
+#: heights derived from it carry the same licence.
+CADASTRE_ATTRIBUTIONS = {
+    "cartagena": ("Building floors: Catastro Distrital de Cartagena de Indias, Área Metropolitana "
+                  "de Barranquilla (AMB), datos.gov.co d7hk-qg8h. CC BY-SA 4.0; heights derived "
+                  "from it are shared under the same licence."),
+}
+
+
+def uses_cadastre(row: dict) -> bool:
+    """Whether the row's published height or its tier rests on a cadastre reading."""
+    src = str(row.get("effective_height_source") or "")
+    return src.endswith("cadastre") or "cadastre" in (row.get("tier_methods") or ())
+
+
+def cadastre_attributions(rows: Iterable[dict]) -> list[str]:
+    """The licence lines for the cadastres these rows' heights rest on."""
+    names = sorted({str((r.get("cadastre") or {}).get("dataset") or "cartagena")
+                    for r in rows if uses_cadastre(r)})
+    return [CADASTRE_ATTRIBUTIONS.get(n, f"Building floors: {n} cadastre (CC BY-SA 4.0).")
+            for n in names]
+
+
+def height_attributions(rows: Sequence[dict]) -> list[str]:
+    """Every licence line a report of these rows prints: survey providers, then cadastres."""
+    return survey_attributions(survey_providers(rows)) + cadastre_attributions(rows)
+
+
 def survey_attributions(providers: Iterable[str]) -> list[str]:
     """The licence lines for these providers, de-duplicated, in a stable order."""
     lines: list[str] = []
@@ -223,7 +254,9 @@ def survey_attributions(providers: Iterable[str]) -> list[str]:
     return lines
 
 
-__all__ = ["SOURCE_LABELS", "SURVEY_ATTRIBUTIONS", "TIERS", "TIER_COLORS", "TIER_HINTS",
+__all__ = ["CADASTRE_ATTRIBUTIONS", "SOURCE_LABELS", "SURVEY_ATTRIBUTIONS", "TIERS",
+           "TIER_COLORS", "TIER_HINTS", "cadastre_attributions", "height_attributions",
+           "uses_cadastre",
            "TIER_LABELS", "TIER_SHORT", "drone_disagreements", "drone_seeds", "UNVERIFIED_TIERS", "VERIFIED_TIERS", "is_unverified", "row_tier",
            "source_label", "survey_attributions", "survey_provider", "survey_providers",
            "tier_counts", "tier_hover", "with_unmeasured_tags", "withheld_note"]

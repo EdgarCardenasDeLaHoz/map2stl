@@ -42,6 +42,7 @@ from city2stl.skyline.tier_display import (
     TIER_HINTS,
     TIER_LABELS,
     VERIFIED_TIERS,
+    cadastre_attributions,
     survey_attributions,
     survey_providers,
     tier_counts,
@@ -373,7 +374,8 @@ async def reports_heights(region_dir: str):
         "tiers": {t: {"label": TIER_LABELS[t], "color": TIER_COLORS[t], "hint": TIER_HINTS[t]}
                   for t in counts},
         "survey": {"providers": providers,
-                   "attributions": survey_attributions(providers)},
+                   "attributions": survey_attributions(providers)
+                   + cadastre_attributions(buildings)},
         "n_buildings": len(buildings),
         "height_sources": sources,
         "height_p10": _pct(0.10),

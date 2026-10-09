@@ -670,6 +670,12 @@ def _load_site_use_satellite_heights(region_name: str) -> bool:
     Default False."""
     return bool(_read_site_config(region_name).get("use_satellite_heights", False))
 
+def _load_site_use_cadastre_heights(region_name: str) -> bool:
+    """Per-region opt-in for cadastre floor counts (``cadastre_heights``,
+    ``city2stl.height.providers.co_catastro``): matched low-rises publish floors x storey
+    instead of the prior, and the cadastre joins the verification tiers. Default False."""
+    return bool(_read_site_config(region_name).get("use_cadastre_heights", False))
+
 def _load_site_use_satellite_footprints(region_name: str) -> bool:
     """Per-region opt-in for Microsoft Buildings polygons. True →
     ``fetch_microsoft_buildings_for_bbox`` runs and the de-duped

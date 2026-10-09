@@ -76,11 +76,10 @@ from .tier_display import (  # noqa: E402
     VERIFIED_TIERS,
     drone_disagreements,
     drone_seeds,
+    height_attributions,
     is_unverified,
     row_tier,
     source_label,
-    survey_attributions,
-    survey_providers,
     tier_counts,
     tier_hover,
     with_unmeasured_tags,
@@ -962,7 +961,7 @@ def _tier_summary_html(rows: list[dict], stored: dict | None = None) -> str:
         f'{html.escape(TIER_LABELS[t])} <b>{n}</b> '
         f'<span class="small">({100.0 * n / total:.0f} %)</span></span>'
         for t, n in counts.items())
-    attributions = survey_attributions(survey_providers(rows))
+    attributions = height_attributions(rows)
     attr_html = "".join(f'<p class="small attr">{html.escape(a)}</p>' for a in attributions)
     return (f'<p><b>{n_ver} of {total}</b> published heights are verified ({pct:.0f} %); '
             f'{total - n_ver} are unverified.</p>\n'
