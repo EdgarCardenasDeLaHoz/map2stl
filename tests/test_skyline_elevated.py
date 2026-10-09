@@ -430,3 +430,36 @@ def test_floors_flag_high_rises_join_fusion_and_never_publish_alone():
     assert [(e.feature_id, e.view_name.split("_0")[0]) for e in est] == [("w/v", "seed_1")]
     # floors-only footprints (w/u, the tagged ones) emit nothing
     assert {e.feature_id for e in est} == {"w/v"}
+
+
+def test_a_floors_count_its_own_seed_contradicts_leaves_the_fusion():
+    """Cartagena v10 (2026-10-09): seed_1 read b0582 (Hotel Cartagena Plaza) at 66 m with its base
+    in view (shadow 66, stereo 61) and its own count said 35 floors (148 m); the count anchored the
+    fusion and the plot lost its drone height. A count its own seed's base-visible reading
+    contradicts leaves the fusion; another seed's count still verifies or disputes."""
+    from city2stl.skyline import floor_bands as fl
+
+    fids = ["w/t1", "w/t2", "w/t3", "w/p"]
+    tags = [{"fid": f, "floors": n, "base_seen": True, "spread": 0.02, "n_strips": 4,
+             "instance": i, "name": f, "tag_m": n * 4.0 + 3.0}
+            for i, (f, n) in enumerate([("w/t1", 20.0), ("w/t2", 30.0), ("w/t3", 40.0)])]
+    count = {"fid": "w/p", "floors": 35.0, "base_seen": False, "spread": 0.02, "n_strips": 4,
+             "instance": 7, "name": "p", "tag_m": None}
+    a = _seed_with("seed_1", [_m(3, 10, 20, 66.0, 500.0)], fids)
+    a.floors = tags + [count]
+    est = el.elevated_estimates([a])
+    assert [(e.feature_id, e.estimated_height_m) for e in est] == [("w/p", 66.0)]
+    assert est.floors["w/p"]["high_rise_seen"]                       # the flag is unchanged
+    ents = el.floor_entries([a])
+    kept, dropped = el.drop_contradicted_floors([a], fl.floor_readings(ents, est.storey))
+    assert [(f, s) for f, s, _h, _own in dropped] == [("w/p", "seed_1")]
+    assert all(d["footprint"] != "w/p" for rs in kept.values() for d in rs)
+    # an agreeing count stays (15 floors x 4 + 3 = 63 m vs 66 m)
+    a.floors = tags + [dict(count, floors=15.0)]
+    assert el.drop_contradicted_floors([a], fl.floor_readings(el.floor_entries([a]),
+                                                              est.storey))[1] == []
+    # the same count from another seed, which read nothing there, still disputes the reading
+    a.floors = tags
+    b = _seed_with("seed_4", [], fids)
+    b.floors = [count]
+    assert [e.feature_id for e in el.elevated_estimates([a, b])] == []

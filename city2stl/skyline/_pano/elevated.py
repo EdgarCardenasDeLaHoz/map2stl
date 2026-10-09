@@ -1178,12 +1178,54 @@ class ElevatedEstimates(list):
         self.storey = storey
 
 
+#: A floors reading agrees with the same seed's base-visible reading of its plot within this
+#: share (:func:`drop_contradicted_floors`).
+FLOORS_SAME_SEED_AGREE = 0.25
+
+
+def drop_contradicted_floors(seeds: list[ElevatedSeed], readings: dict) -> tuple[dict, list]:
+    """``(readings kept, dropped)``: :func:`floor_bands.floor_readings` without the counts that
+    the same seed's own base-visible reading of the plot (trusted or not) contradicts by more
+    than :data:`FLOORS_SAME_SEED_AGREE`. One image cannot overrule itself: the count is an
+    instance matched to the plot by range (and usually takes its "base in view" from that very
+    reading), so a count far from the reading is another building's facade.
+
+    Cartagena v10 (2026-10-09): such counts anchored the fusion over trusted drone readings that
+    satellite readings confirmed, and four plots lost their drone height: b0582 Hotel Cartagena
+    Plaza (seed_1 66 m, shadow 66, stereo 61; seed_1's count 35 floors = 148 m), b0426 (seed_4 72,
+    stereo 74.5; seed_5's count 98.5 m against its own 72 m), b0635 (seed_4 44, lean 53.5 / 1.0,
+    stereo 44; seed_6's count 73 m against its own 49 m), b0075 (seed_4 67; seed_5's count 35 m
+    against its own 118 m). 20 of 145 counts drop; the b1158 catch (drone 183 m) and every
+    tagged plot are unchanged. ``dropped``: ``(fid, seed, floors height, own heights)``."""
+    own: dict = {}
+    for s in seeds:
+        for m in s.measured:
+            if m.base_visible:
+                own.setdefault((s.seed_name, s.feature_ids[m.footprint]), []).append(
+                    float(m.height_m))
+    kept, dropped = {}, []
+    tol = FLOORS_SAME_SEED_AGREE
+    for key, rs in readings.items():
+        out = []
+        for d in rs:
+            hs = own.get((d.get("seed"), d["footprint"]), ())
+            h = float(d["height_m"])
+            if hs and not any(abs(h - x) <= tol * max(h, x) for x in hs):
+                dropped.append((d["footprint"], d.get("seed"), h, list(hs)))
+            else:
+                out.append(d)
+        if out:
+            kept[key] = out
+    return kept, dropped
+
+
 def floors_info(seeds: list[ElevatedSeed], satellite_raw: dict | None = None):
     """``(floors info per fid, storey calibration, fusion readings)`` of the seeds' floor counts
     (F-SKY26 steps 4/5): the city's storey from the counts with their base in view on
     ``osm_tag`` plots (``floor_bands.calibrate_storey``), the high-rise flag
     (``floor_bands.high_rise_plots``, >= 10 floors, a lower bound counts, never on a plot whose
-    confident satellite readings are all under 40 m), and ``floor_bands.floor_readings``."""
+    confident satellite readings are all under 40 m), and ``floor_bands.floor_readings`` less the
+    counts the same seed's own reading contradicts (:func:`drop_contradicted_floors`)."""
     from .. import floor_bands as fl
 
     ents = floor_entries(seeds)
@@ -1211,6 +1253,12 @@ def floors_info(seeds: list[ElevatedSeed], satellite_raw: dict | None = None):
                  storey_reliable=cal.reliable, sat_low=f in low,
                  floors_m=round(fl.floors_height(d["floors"], storey), 1))
     readings = fl.floor_readings(ents, cal) if FLOORS_IN_FUSION else {}
+    if readings:
+        readings, dropped = drop_contradicted_floors(seeds, readings)
+        if dropped:
+            logger.info("[elevated] floors: %d readings left out of fusion (the same seed's own "
+                        "reading of the plot disagrees by more than %.0f %%)", len(dropped),
+                        100 * FLOORS_SAME_SEED_AGREE)
     return info, cal, readings
 
 
@@ -1305,7 +1353,7 @@ def elevated_estimates(seeds: list[ElevatedSeed],
 
 
 __all__ = ["ElevatedSeed", "ElevatedEstimates", "measure_elevated_seed", "elevated_estimates",
-           "seed_floors", "floors_info", "trusted", "pano_result",
+           "seed_floors", "floors_info", "drop_contradicted_floors", "trusted", "pano_result",
            "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M", "measure_waterline",
            "outline_gate"]
 
