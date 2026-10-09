@@ -125,7 +125,7 @@ Two constraints follow:
   `tier_methods`, `verified`, `disputed_by`, `prior_disagrees`; `heights.json` has
   `schema_version: 2` and `tier_counts`. Published values unchanged: replaying the old and new
   `withhold_untagged_street_view` on Miami (375 rows) and Cartagena v7 (449 rows) gives identical
-  value, source and `street_view_m` on every row. Cartagena v7 tiers: verified_2 3, single 74
+  value, source and `street_view_m` on every row. Cartagena v7 tiers: verified_2 (now `corroborated`) 3, single 74
   (69 `prior_disagrees`), tag 13, prior 359; Miami (no drone seeds): tag 227, prior 148.
 - 2026-10-07, step 2b done: `skyline/survey_heights.py` (`pick_provider`,
   `survey_footprint_heights`, cache `runs/survey/<region>.json`, a failed tile not cached, no 3D
@@ -370,7 +370,7 @@ Two constraints follow:
   v12_tiers: the 7 towers are unchanged; verified_2 43 -> 42 (the rule: 4 rows lose it, 3 of them
   drop to the prior; `d2f2d5e` adds 3); Palmetto is the one `tag_disagrees`. The criterion
   "verified_2 >= 0.85" is met only from 40 m up. Open: the call sites in fusion, satellite
-  readings and elevated, the PDF / HTML display lines, the `verified_2` rename, low-rise labels
+  readings and elevated, the PDF / HTML display lines, the `verified_2` rename (done 2026-10-09), low-rise labels
   for the floor.
 - 2026-10-09, support ratio (decision "A tall satellite reading supports a single within 1.5x, not
   the strict `agree`"; `45f5c41`, `8e26925`): Cartagena v12_support against v12_tiers, one row
@@ -441,13 +441,14 @@ verification, and survey LiDAR where it is free. Design review findings:
 Steps:
 - **2a. Tier labels, no value changes.**
   - `_core/tiers.py::verification_tier` / `::independent`.
-  - Tiers: `survey`, `verified_2`, `tag`, `single`, `prior`.
-  - `verified_2` counts: drone+drone; drone+satellite (lean, multiview, or stereo at 40 m or
+  - Tiers: `survey`, `corroborated`, `tag`, `single`, `prior` (`corroborated` was `verified_2` until
+    2026-10-09; see the decision of that date).
+  - `corroborated` counts: drone+drone; drone+satellite (lean, multiview, or stereo at 40 m or
     more); lean+shadow over 100 m; floors+drone from different seeds.
-  - `verified_2` does not count: shadow+shadow, stereo+stereo, floors+drone from the same seed,
+  - `corroborated` does not count: shadow+shadow, stereo+stereo, floors+drone from the same seed,
     street+street.
   - A `single` reading more than 2x from the prior gets `prior_disagrees`.
-  - `heights.json` gets `schema_version: 2` and `tier_counts`.
+  - `heights.json` gets `schema_version: 2` and `tier_counts` (3 since 2026-10-09: the tier rename).
 - **2b. Per-footprint survey reader.**
   - `skyline/survey_heights.py`: same p95 statistic as the truth (`benchmark.footprint_stat`).
   - Provider years in `providers/survey.py`.
@@ -468,8 +469,8 @@ Steps:
 Success criteria:
 - the survey-blind headline is identical to before on all 8 cities;
 - fresh survey rows are within 25 % of `tiles_m` at least 90 % of the time;
-- within-25 % falls in tier order (`verified_2` at least 0.85: the benchmark now reports the
+- within-25 % falls in tier order (`corroborated` at least 0.85: the benchmark now reports the
   false-corroborated rate per region, `bench.*.pipeline.false_corroborated`, 2026-10-09; n = 0 so
   far, no truth city has a corroborated row; on the labelled pairs the criterion holds only from
   40 m up);
-- no `verified_2` rests only on correlated methods.
+- no `corroborated` row rests only on correlated methods.

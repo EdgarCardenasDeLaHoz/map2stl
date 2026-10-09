@@ -5,6 +5,25 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-09 — The `verified_2` tier is renamed `corroborated`
+- **Decision:**
+  - Tier `verified_2` is now `corroborated` in the tier value, `tier_counts`, the labels
+    ("Corroborated"), the legends, the PDF / HTML tables and the benchmark. Meaning unchanged: two
+    independent readings agree (or an OSM height tag one independent reading agrees with).
+  - `heights.json` `schema_version` 3 (was 2). Schema 1-2 files stay readable:
+    `_core/tiers.py::upgrade_tiers` / `canonical_tier` map `verified_2` on read (row `tier` and
+    `no_survey_tier`, `tier_counts` keys); `benchmark.load_report`, `score_by_tier`,
+    `tier_display.row_tier` / `tier_counts` and so the `/reports` heights API use them.
+  - Kept: function and field names (`verified_pair`, `VERIFIED_TIERS`, the row field `verified`,
+    "N of M verified" in the reports). Not renamed because they are internal, or a wider change
+    than the tier name.
+- **Why:** user, 2026-10-09: "verified" is for survey or human review; two independent methods
+  agreeing is "corroborated". The benchmark already called the failure rate false-corroboration.
+- **Rejected:** rewriting old `heights.json` files (read-time mapping keeps them as the run wrote
+  them); renaming `verified_pair` (cheap but churns the call sites for no reader gain).
+- **Historical entries** below keep the name they were written with.
+- **Source:** commit `c3a3fe9`; `tests/test_skyline_tiers.py::test_old_verified_2_reads_as_corroborated`.
+
 ### 2026-10-09 — Cartagena runs footprint ownership with the cadastre occluders
 - **Decision:**
   - Site flags `use_ownership` and `use_cadastre_occluders`, both true in `sites/cartagena.json`.
@@ -16,7 +35,7 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Measured** (replay `Cartagena_v14` against `Cartagena_v13_sat`):
   - the 7 towers unchanged; 10 of 10 tag-correct readings kept;
   - used drone readings on non-PH 1-3-floor plots 53 -> 2; b0490 now 11 m;
-  - tiers verified_2 / tag / single / prior 38 / 136 / 127 / 715 -> 34 / 136 / 131 / 718 (v14).
+  - tiers verified_2 (now `corroborated`) / tag / single / prior 38 / 136 / 127 / 715 -> 34 / 136 / 131 / 718 (v14).
 - **Supersedes / superseded by:** the **Default** bullet of the ownership entry, for Cartagena.
 - **Source:** commit `86dca7a`; gate script scratch `own2/gate14.py`; tier map
   `runs/region_reports/Cartagena_v14_skyline_report/tiers_map.png`.
@@ -372,7 +391,7 @@ providers are merged and ranked, and how height accuracy is measured. Related:
   `seed_experiment.py` (fusion, elevated) and `test_satellite_heights.py` plus the 7-city tables
   (readings). The PDF / HTML-table display lines for `tag_disagrees` are also not wired.
 - **Supersedes / superseded by:** the "within 25 %" of the 2026-10-07 tier entry (25 % of the
-  larger). The `verified_2` rename is a later entry.
+  larger). The rename to `corroborated` is the 2026-10-09 entry at the top.
 - **Source:** commit `b04b22f`; scratch `tiers/` (scripts and logs); Cartagena replay
   `runs/region_reports/Cartagena_v12_tiers_skyline_report/`.
 
