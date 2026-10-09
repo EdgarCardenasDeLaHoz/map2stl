@@ -1,0 +1,8 @@
+{
+  "name": "mayaguez",
+  "_note": "Low-rise truth city for the Google Open Buildings 2.5D prior (review 2026-10-09 item 4): downtown Mayaguez and the UPRM campus. Survey: USGS 3DEP PR/VI 2018 (USGS_LPC_PR_PRVI_*_2018). Inside Google 2.5D coverage (PRI), S2 cell 8c02c. No drone seeds.",
+  "north": 18.2150,
+  "south": 18.1950,
+  "east": -67.1350,
+  "west": -67.1550
+}
