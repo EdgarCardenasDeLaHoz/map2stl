@@ -61,6 +61,20 @@ def test_the_closest_pair_is_by_ratio():
     assert tiers.verified_pair(rs) == (rs[0], rs[2])
 
 
+def test_corroboration_keeps_the_strict_agree():
+    """The single-support ratio (``SUPPORT_RATIO`` 1.5, the user, 2026-10-09) does not loosen
+    corroboration: a 1.3x pair of independent readings is still not a ``verified_2``, nor does it
+    witness a tag."""
+    assert tiers.SUPPORT_RATIO == 1.5 and not agree(60.0, 78.0) and agree(60.0, 74.0)
+    pair = [R("drone", 60.0, "seed_1"), R("drone", 78.0, "seed_2")]
+    assert tier_fields(pair, published_m=69.0)["tier"] != "verified_2"
+    assert tiers.verified_pair(pair) is None
+    near = [R("drone", 60.0, "seed_1"), R("drone", 74.0, "seed_2")]          # 1.23x
+    assert tier_fields(near, published_m=67.0)["tier"] == "verified_2"
+    assert tiers.tag_witness([R("drone", 78.0, "seed_1")], 60.0, "osm_tag") is None
+    assert tiers.tag_witness([R("drone", 74.0, "seed_1")], 60.0, "osm_tag") is not None
+
+
 # --------------------------------------------------------------------------- measured vs tag
 
 def test_palmetto_measurement_disagrees_with_its_tag():

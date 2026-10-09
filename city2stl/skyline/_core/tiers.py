@@ -42,10 +42,11 @@ farther tower's top, and the 164 singles over 2x the prior had a median of ~99 m
 Refinement (the user's choice, 2026-10-09, ``single_support``): only an *unsupported* single is
 withheld. It stays ``single`` (``single_support`` names why) when
 
-- a validated satellite reading of ``SUPPORT_MIN_M`` or more agrees with it within ``AGREE_REL``
-  (or is the single itself): lean at conf >= 0.7, lean + shadow (``ls``), multiview at conf
-  >= 0.3 (``SUPPORT_MIN_CONF``; Chicago LiDAR: lean over 100 m within 25 % 94 %, multiview over
-  40 m 84 %; plain stereo at 40-100 m only ~59 %, so stereo alone never supports), or
+- a validated satellite reading of ``SUPPORT_MIN_M`` or more is within ``SUPPORT_RATIO`` (1.5x,
+  not the strict ``agree``) of it (or is the single itself): lean at conf >= 0.7, lean + shadow
+  (``ls``), multiview at conf >= 0.3 (``SUPPORT_MIN_CONF``; Chicago LiDAR: lean over 100 m within
+  25 % 94 %, multiview over 40 m 84 %; plain stereo at 40-100 m only ~59 %, so stereo alone never
+  supports), or
 - floor counts flagged the plot a high-rise (``floor_bands.high_rise_plots``; the flag already
   carries the satellite veto): ``HIGH_RISE_SUPPORT``.
 
@@ -148,8 +149,8 @@ def agree(a: float, b: float, rel: float | None = None, floor_m: float | None = 
     """Whether two heights agree: the larger at most ``1 + tol`` times the smaller, ``tol`` =
     ``rel`` or, by default, the band tolerance (``agree_tol``); or, when the smaller is under
     ``AGREE_FLOOR_BELOW_M``, within ``floor_m`` metres (default ``AGREE_FLOOR_M``, 0 = off).
-    Symmetric. ``tag_witness``, ``verified_pair``, the tag check, ``disputed_by`` and
-    ``single_support`` all use it."""
+    Symmetric. ``tag_witness``, ``verified_pair``, the tag check and ``disputed_by`` use it;
+    ``single_support`` does not (it uses the looser ``SUPPORT_RATIO``)."""
     tol = agree_tol(a, b) if rel is None else rel
     if log_ratio(a, b) <= math.log1p(tol) + 1e-12:
         return True
@@ -334,6 +335,13 @@ def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
 
 #: A satellite reading supports a single over 2x the prior only at or above this height.
 SUPPORT_MIN_M = 40.0
+#: How close a validated tall satellite reading must be to a single to support it: the larger at
+#: most this many times the smaller (|ln a/b| <= ln 1.5). Looser than the corroboration ``agree``
+#: (ratio 1.25 since b04b22f) on purpose, the user's decision of 2026-10-09: the stricter ``agree``
+#: dropped the support of b0691 (drone 55.9 m, lean 72.5 m at conf 1.0) and b0806 (drone 62.8 m,
+#: lean 48.4 m), which then published 16-19 m priors. Corroboration (verified_2, ``verified_pair``,
+#: ``tag_witness``) keeps ``agree``.
+SUPPORT_RATIO = 1.5
 #: Validated satellite methods (``single_support``) and the confidence each needs: lean at 0.7
 #: (Chicago LiDAR: lean over 100 m within 25 % 94 %), lean + shadow agreeing (``ls``) at any,
 #: multiview at 0.3 (over 40 m within 25 % 84 %). Stereo is not listed (40-100 m: ~59 %).
@@ -353,8 +361,8 @@ def validated_satellite(method: str, height_m: float | None, conf: float | None)
 def single_support(value_m: float | None, satellite: Sequence[tuple] = (),
                    high_rise: bool = False, satellite_low: bool = False) -> list[str]:
     """Why a ``single`` reading over 2x the prior is kept (the user's refinement, 2026-10-09):
-    the validated satellite methods (``validated_satellite``) that agree with ``value_m`` within
-    ``AGREE_REL``, sorted, plus ``HIGH_RISE_SUPPORT`` when floor counts flagged the plot. Empty
+    the validated satellite methods (``validated_satellite``) within ``SUPPORT_RATIO`` of
+    ``value_m``, sorted, plus ``HIGH_RISE_SUPPORT`` when floor counts flagged the plot. Empty
     (withhold it) when nothing supports it, or when ``satellite_low`` (the plot's confident
     satellite readings are all under 40 m: a tower-behind case). ``satellite``: ``(method,
     height_m, conf)`` per reading. A satellite single whose value is such a reading agrees with
@@ -362,7 +370,8 @@ def single_support(value_m: float | None, satellite: Sequence[tuple] = (),
     if value_m is None or satellite_low:
         return []
     out = sorted({str(m) for m, h, c in satellite
-                  if validated_satellite(m, h, c) and agree(float(h), float(value_m))})
+                  if validated_satellite(m, h, c)
+                  and log_ratio(float(h), float(value_m)) <= math.log(SUPPORT_RATIO) + 1e-12})
     if high_rise:
         out.append(HIGH_RISE_SUPPORT)
     return out

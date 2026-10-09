@@ -7,6 +7,7 @@ import pytest
 from city2stl.skyline._core.height import withhold_untagged_street_view
 from city2stl.skyline._core.tiers import (
     INDEPENDENT,
+    SUPPORT_RATIO,
     agree,
     independent,
     reading,
@@ -330,8 +331,9 @@ def test_single_over_2x_publishes_prior_and_keeps_the_reading(monkeypatch):
 
 
 def test_single_support_rule():
-    """The refined 2x rule (the user, 2026-10-09): validated satellite >= 40 m within 25 %, or
-    the high-rise flag; never stereo alone, never on a satellite-low plot."""
+    """The refined 2x rule (the user, 2026-10-09): validated satellite >= 40 m within 1.5x
+    (``SUPPORT_RATIO``), or the high-rise flag; never stereo alone, never on a satellite-low
+    plot."""
     assert single_support(62.0, [("lean", 60.4, 1.0), ("stereo", 64.2, 1.0)]) == ["lean"]
     assert single_support(62.0, [("lean", 60.4, 0.7)]) == ["lean"]
     assert single_support(54.0, [("lean", 53.5, 0.64), ("stereo", 54.0, 0.83)]) == []
@@ -340,13 +342,51 @@ def test_single_support_rule():
     assert single_support(80.0, [("multiview", 75.0, 0.29)]) == []
     assert single_support(120.0, [("ls", 110.0, 0.3)]) == ["ls"]
     assert single_support(39.0, [("lean", 39.0, 1.0)]) == []            # under 40 m
-    assert single_support(100.0, [("lean", 70.0, 1.0)]) == []           # 30 % off: disagrees
+    assert single_support(100.0, [("lean", 70.0, 1.0)]) == ["lean"]     # 1.43x: within 1.5x
+    assert single_support(100.0, [("lean", 60.0, 1.0)]) == []           # 1.67x: too far
     assert single_support(100.0, [("shadow", 100.0, 1.0)]) == []        # a lower bound
     assert single_support(100.0, [("lean", 95.0, 0.9), ("multiview", 98.0, 0.5)],
                           high_rise=True) == ["lean", "multiview", "high_rise_floors"]
     assert single_support(100.0, [], high_rise=True) == ["high_rise_floors"]
     assert single_support(100.0, [("lean", 95.0, 0.9)], high_rise=True, satellite_low=True) == []
     assert single_support(None, [("lean", 95.0, 0.9)]) == []
+
+
+def test_support_ratio_is_one_and_a_half(monkeypatch):
+    """The user's decision of 2026-10-09: a validated tall satellite reading supports a single
+    within 1.5x (either side), the strict ``agree`` (1.25) having dropped b0691 and b0806."""
+    assert SUPPORT_RATIO == 1.5
+    assert single_support(55.9, [("lean", 72.5, 1.0)]) == ["lean"]         # b0691: 1.30x
+    assert single_support(62.8, [("lean", 48.4, 1.0)]) == ["lean"]         # b0806: 1.30x, below
+    assert single_support(60.0, [("lean", 90.0, 1.0)]) == ["lean"]         # exactly 1.5x
+    assert single_support(90.0, [("lean", 60.0, 1.0)]) == ["lean"]
+    assert single_support(60.0, [("lean", 96.0, 1.0)]) == []               # 1.6x
+    assert single_support(96.0, [("lean", 60.0, 1.0)]) == []
+    assert single_support(60.0, [("lean", 96.0, 1.0), ("multiview", 80.0, 0.5)]) == ["multiview"]
+    assert single_support(80.0, [("lean", 53.0, 0.69)]) == []              # still needs conf 0.7
+    assert single_support(80.0, [("lean", 39.0, 1.0)]) == []               # and 40 m
+    assert not agree(55.9, 72.5) and not agree(60.0, 78.0)                 # agree stays 1.25
+
+
+def test_b0691_b0806_publish_their_drone_readings(monkeypatch):
+    """Cartagena v12 replay: the drone single and a lean 1.3x off it keep the single; a lean
+    1.6x off it does not."""
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    cases = {"b0691": (55.9, [("lean", 72.5, 1.0)]), "b0806": (62.8, [("lean", 48.4, 1.0)]),
+             "far": (60.0, [("lean", 96.0, 1.0)])}
+    rows, sat = [], {}
+    for fid, (drone, rs) in cases.items():
+        row, sat[fid] = _sat_single(fid, rs, {"seed_1": drone})
+        rows.append(row)
+    withhold_untagged_street_view(rows, [_rec(f, "default") for f in cases],
+                                  fallback=lambda r: (17.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"}, satellite=sat)
+    a, b, far = rows
+    assert (a["tier"], a["effective_height_m"], a["single_support"]) == ("single", 55.9, ["lean"])
+    assert (b["tier"], b["effective_height_m"], b["single_support"]) == ("single", 62.8, ["lean"])
+    assert (far["tier"], far["effective_height_m"]) == ("prior", 17.0)
+    assert "single_support" not in far
 
 
 def _sat_single(fid, readings, per_seed=None):
