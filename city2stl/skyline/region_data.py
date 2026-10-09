@@ -670,6 +670,13 @@ def _load_site_use_satellite_heights(region_name: str) -> bool:
     Default False."""
     return bool(_read_site_config(region_name).get("use_satellite_heights", False))
 
+def _load_site_ownership_flags(region_name: str) -> tuple[bool | None, bool | None]:
+    """Site flags ``use_ownership`` / ``use_cadastre_occluders`` (None = absent; the env vars
+    ``SKYLINE_OWNERSHIP`` / ``SKYLINE_CADASTRE_OCCLUDERS`` still override)."""
+    cfg = _read_site_config(region_name)
+    f = lambda k: bool(cfg[k]) if k in cfg else None  # noqa: E731
+    return f("use_ownership"), f("use_cadastre_occluders")
+
 def _load_site_use_cadastre_heights(region_name: str) -> bool:
     """Per-region opt-in for cadastre floor counts (``cadastre_heights``,
     ``city2stl.height.providers.co_catastro``): matched low-rises publish floors x storey

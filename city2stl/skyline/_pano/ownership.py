@@ -694,12 +694,23 @@ def _env_flag(name: str, default: bool) -> bool:
     return default if v is None or v == "" else v.strip().lower() not in ("0", "false", "no", "off")
 
 
+#: Site flags (``use_ownership``, ``use_cadastre_occluders``), set per run by
+#: :func:`set_site_flags`; None = not set. The environment variables still override.
+_SITE: dict = {"own": None, "cad": None}
+
+
+def set_site_flags(own: bool | None, cad: bool | None) -> None:
+    _SITE["own"], _SITE["cad"] = own, cad
+
+
 def enabled() -> bool:
-    return _env_flag("SKYLINE_OWNERSHIP", OWNERSHIP)
+    d = OWNERSHIP if _SITE["own"] is None else _SITE["own"]
+    return _env_flag("SKYLINE_OWNERSHIP", d)
 
 
 def cadastre_enabled() -> bool:
-    return _env_flag("SKYLINE_CADASTRE_OCCLUDERS", CADASTRE_OCCLUDERS)
+    d = CADASTRE_OCCLUDERS if _SITE["cad"] is None else _SITE["cad"]
+    return _env_flag("SKYLINE_CADASTRE_OCCLUDERS", d)
 
 
 def _cadastre_for(pano: fd.Pano, records) -> tuple[dict | None, list | None]:

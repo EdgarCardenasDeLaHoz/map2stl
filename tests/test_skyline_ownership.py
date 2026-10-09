@@ -209,3 +209,24 @@ def test_degenerate_and_nan_footprints_are_skipped_and_no_full_pano_arrays_are_b
     assert list(sc.by_fp) == [3] and sc.isb is None and sc.dz is None
     v = sc.assess(_reading(sc, 3, _elev(50.0, 385.0), 385.0))
     assert v.owner == "self" and v.corners == (None, None)
+
+
+def test_site_flags_default_and_env_override(monkeypatch):
+    from city2stl.skyline._pano import ownership as o
+    monkeypatch.delenv("SKYLINE_OWNERSHIP", raising=False)
+    monkeypatch.delenv("SKYLINE_CADASTRE_OCCLUDERS", raising=False)
+    try:
+        o.set_site_flags(True, True)
+        assert o.enabled() and o.cadastre_enabled()
+        monkeypatch.setenv("SKYLINE_OWNERSHIP", "0")
+        assert not o.enabled() and o.cadastre_enabled()
+        o.set_site_flags(None, None)
+        monkeypatch.delenv("SKYLINE_OWNERSHIP")
+        assert not o.enabled()
+    finally:
+        o.set_site_flags(None, None)
+
+
+def test_cartagena_site_flags():
+    from city2stl.skyline.region_data import _load_site_ownership_flags
+    assert _load_site_ownership_flags("cartagena") == (True, True)

@@ -73,6 +73,7 @@ from .region_data import (
     _load_site_elevated_seeds,
     _load_site_max_plausible_height_m,
     _load_site_negative_seeds,
+    _load_site_ownership_flags,
     _load_site_pano_only_pdf,
     _load_site_render_pdf,
     _load_site_seed_urls,
@@ -592,6 +593,8 @@ def run_region_pdf_report(
     if negative_seeds:
         logger.info(f"[negative_seeds] {sorted(negative_seeds)}")
     logger.info(f"[max_plausible_height_m] {max_plausible_height_m:.0f}")
+    from ._pano import ownership as _own  # noqa: PLC0415
+    _own.set_site_flags(*_load_site_ownership_flags(region_name))
     elevated_state = None
     if elevated_seeds:
         logger.info(f"[elevated_seeds] {sorted(elevated_seeds)}")
