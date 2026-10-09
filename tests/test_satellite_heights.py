@@ -159,14 +159,19 @@ def test_tiers_with_satellite(monkeypatch):
     assert ssr["satellite_lower_bound"]                       # shadows only: a lower bound
     assert lo["effective_height_source"] == "withheld:prior" and lo["tier"] == "prior"
     assert lo["satellite"] == {"shadow": [20.0, 0.9]}
-    # rule on: the satellite-only single (130 m vs a 12 m prior) publishes the prior
+    # rule on (refined by the user, 2026-10-09): the lean-only single (130 m at conf 0.8 vs a
+    # 12 m prior) is a validated reading, so it stays; the shadows-only one publishes the prior
     monkeypatch.setenv("SKYLINE_WITHHOLD_SINGLE", "1")
-    rows = [{"feature_id": "s", "effective_height_m": 50.0, "effective_height_source": "geometric",
-             "per_seed_median_m": {"seed_9": 50.0}}]
-    withhold_untagged_street_view(rows, [_rec("s", "default")], fallback=lambda r: (12.0, "prior"),
+    rows = [{"feature_id": f, "effective_height_m": 50.0, "effective_height_source": "geometric",
+             "per_seed_median_m": {"seed_9": 50.0}} for f in ("s", "ss")]
+    withhold_untagged_street_view(rows, [_rec("s", "default"), _rec("ss", "default")],
+                                  fallback=lambda r: (12.0, "prior"),
                                   measured_seeds={"seed_1"}, satellite=sat)
-    assert rows[0]["effective_height_m"] == 12.0 and rows[0]["tier"] == "prior"
-    assert rows[0]["single_source"] == "withheld:satellite" and rows[0]["single_reading_m"] == 130.0
+    s, ssr = rows
+    assert s["effective_height_m"] == 130.0 and s["tier"] == "single"
+    assert s["single_support"] == ["lean"] and "withheld_reason" not in s
+    assert ssr["effective_height_m"] == 12.0 and ssr["tier"] == "prior"
+    assert ssr["single_source"] == "withheld:satellite" and ssr["single_reading_m"] > 24.0
 
 
 def test_elevated_estimates_skip_satellite_keys_and_satellite_can_dispute():
