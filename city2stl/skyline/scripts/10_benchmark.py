@@ -14,6 +14,16 @@ publish a survey height are scored against 3D Tiles alone (``survey_rows``), and
 separately (``tiers``). Writes ``summary.json`` beside the reports, a ``benchmark.html`` page into each scored report
 (``benchmark_report.write_benchmark_page``, linked from its index), and prints one table.
 
+Beside that headline (unchanged), each result carries ``bench`` (review 2026-10-09 item 1,
+``benchmark.bench_tables``): the truth mode, band x tier in the review's bands (<15 / 15-40 /
+40-100 / >100 m) and EUBUCCO's (0-5 / 5-10 / 10-20 / 20+), band x method x camera-distance band,
+and the pipeline metrics (coverage, false-corroborated rate, withhold precision / recall), each
+cell with n, MAE, median AE, bias, P90 AE, tol (within max(25 %, 2 m)) and the shares off by > 5 m
+and > 10 m. A region whose truth is survey-only (no 3D Tiles: San Juan, Honolulu, Fort Lauderdale)
+is single-source: its headline scores n = 0 as before, and ``single_source`` scores its
+``survey_only`` records, printed in a table of their own. ``--tables-out`` writes the printed
+tables to a file too; ``--cached-truth`` scores cached truth only (no survey reads).
+
 Every flag that changes the heights is pinned to ``PINNED_FLAGS`` in each region's process (the
 values the 2026-10-04 baseline ran with), so a developer's shell cannot leak into a run;
 ``--keep-env`` lets the shell's values through, for trying a flag. ``summary.json`` records the
@@ -23,7 +33,9 @@ flags each region ran with and whether Street View signing was on (it changes th
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
+import io
 import json
 import logging
 import os
@@ -114,7 +126,7 @@ def _newest_report(region: str) -> Path | None:
 
 
 def score_report(heights: Path, region: str | None = None, use_tiles: bool = True,
-                 refresh_truth: bool = False) -> dict:
+                 refresh_truth: bool = False, cached_truth: bool = False) -> dict:
     name, buildings = bm.load_report(heights)
     region = region or bm.region_key(name)
     provider = bm.REGIONS.get(region)
@@ -123,13 +135,19 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
                         region)
     tags = {b["key"]: float(b["height_tag_m"]) for b in buildings
             if b.get("height_tag_m") is not None and b.get("height_source") != "default"}
-    truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
-                               provider, use_tiles=use_tiles, refresh=refresh_truth,
-                               tags_m=tags)
+    if cached_truth:  # no reads: footprints without a cached record are unmeasured
+        cache = bm.load_truth_cache(region)
+        truth = {b["key"]: cache[b["key"]] for b in buildings if b["key"] in cache}
+    else:
+        truth = bm.footprint_truth(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
+                                   provider, use_tiles=use_tiles, refresh=refresh_truth,
+                                   tags_m=tags)
+    from city2stl.skyline import survey_heights as sh
     from city2stl.skyline.region_data import _load_site_elevated_seeds
 
+    elevated = set(_load_site_elevated_seeds(region) or ())
     # tiers for a report from before F-SKY26 2a, from the site's drone seeds
-    buildings = bm.label_tiers(buildings, set(_load_site_elevated_seeds(region) or ()))
+    buildings = bm.label_tiers(buildings, elevated)
     # the headline is the survey-blind answer (F-SKY26 2c): survey rows would be scored
     # against a truth they are half of; they are scored against 3D Tiles alone instead
     result = {"region": region, "report": str(heights), "survey": provider,
@@ -144,6 +162,15 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
             bm.withheld_buildings(buildings, "model", region), truth)
         result["withheld_simulated_constant"] = bm.score_buildings(
             bm.withheld_buildings(buildings, "constant"), truth)
+    # item 1 (review 2026-10-09): band x tier, band x method x distance, pipeline metrics
+    result["bench"] = bm.bench_tables(buildings, truth, elevated=elevated,
+                                      seeds=bm.seed_positions(region),
+                                      survey_cache=sh.load_cache(region))
+    if result["bench"]["truth_mode"] == bm.SINGLE_SOURCE:
+        # survey-only truth (no 3D Tiles cross-check): scored, but reported apart
+        scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE)
+        result["single_source"] = bm.score_buildings(
+            buildings, scored, pred_field="no_survey_height_m", statuses=("survey_only",))
     known = bm.score_known(heights, region)
     if known:  # published heights (Cartagena: the only truth; 3D Tiles have no buildings there)
         result["known"] = known
@@ -192,6 +219,95 @@ def print_tiers(results: list[dict]) -> None:
         print(f"{r['region']:22s} " + " ".join(f"{c:>14s}" for c in cells))
 
 
+def print_single_source(results: list[dict]) -> None:
+    """The headline table for single-source regions (survey-only truth, no 3D Tiles)."""
+    ss = [{**r["single_source"], "region": r["region"]} for r in results if r.get("single_source")]
+    if not ss:
+        return
+    print()
+    print("single-source regions (survey-only truth, no 3D Tiles cross-check; scored on "
+          "survey_only records; buildings that may postdate the survey left out)")
+    print_table(ss)
+
+
+_CELL = "{n:>4} {mae:>6} {bias:>6} {tol:>5}"
+
+
+def _cell(e: dict | None) -> str:
+    if not e or not e.get("n"):
+        return _CELL.format(n="-", mae="", bias="", tol="")
+    return _CELL.format(n=e["n"], mae=_fmt(e.get("mae_m"), "6.1f"),
+                        bias=_fmt(e.get("bias_m"), "+6.1f"), tol=_fmt(e.get("tol"), "5.0%"))
+
+
+_TIER_ORDER = ("survey", "verified_2", "corroborated", "tag", "single", "prior", "unlabelled")
+
+
+def print_band_tier(results: list[dict], key: str = "band_tier",
+                    title: str = "review bands") -> None:
+    """Band x tier, one block per region: n, MAE, bias and tol per cell."""
+    for r in results:
+        bench = r.get("bench") or {}
+        table = bench.get(key) or {}
+        seen = {t for row in table.values() for t in row}
+        tiers = [t for t in _TIER_ORDER if t in seen]
+        tiers += [*sorted(seen - {*tiers, "all"}), "all"]
+        print()
+        print(f"{r['region']}: band x tier, {title} ({bench.get('truth_mode')}, truth "
+              f"{bench.get('truth_status')} {bench.get('truth_stat')}; cell: n MAE bias tol)")
+        print(f"{'band':8s} " + " ".join(f"{t:>23s}" for t in tiers))
+        for band, row in table.items():
+            print(f"{band:8s} " + " ".join(f"{_cell(row.get(t)):>23s}" for t in tiers))
+
+
+def print_band_detail(results: list[dict]) -> None:
+    """Every metric per review band (all tiers together), and the pipeline metrics."""
+    for r in results:
+        bench = r.get("bench") or {}
+        print()
+        print(f"{r['region']}: review bands, all tiers ({bench.get('truth_mode')}; "
+              f"{bench.get('n_scored_truth')} scored, {bench.get('with_roof_stats')} with roof "
+              f"stats; excluded {bench.get('excluded')}; truth age {bench.get('truth_age')})")
+        print(f"{'band':8s} {'n':>5s} {'MAE':>6s} {'medAE':>6s} {'bias':>6s} {'P90AE':>6s} "
+              f"{'tol':>5s} {'>5m':>5s} {'>10m':>5s}")
+        for band, row in (bench.get("band_tier") or {}).items():
+            e = row.get("all") or {"n": 0}
+            print(f"{band:8s} {e['n']:5d} {_fmt(e.get('mae_m'), '6.1f')} "
+                  f"{_fmt(e.get('median_ae_m'), '6.1f')} {_fmt(e.get('bias_m'), '+6.1f')} "
+                  f"{_fmt(e.get('p90_ae_m'), '6.1f')} {_fmt(e.get('tol'), '5.0%')} "
+                  f"{_fmt(e.get('over_5m'), '5.0%')} {_fmt(e.get('over_10m'), '5.0%')}")
+        p = bench.get("pipeline") or {}
+        cov, fc = p.get("coverage") or {}, p.get("false_corroborated") or {}
+        wh = (p.get("withhold") or {}).get("all") or {}
+        print(f"  coverage {cov.get('non_prior')}/{cov.get('rows')} = "
+              f"{_fmt(cov.get('share'), '.1%')} (rows with truth "
+              f"{_fmt(cov.get('share_with_truth'), '.1%')}); false-corroborated "
+              f"{fc.get('wrong')}/{fc.get('n')} = {_fmt(fc.get('rate'), '.1%')}; withhold "
+              f"precision {_fmt(wh.get('precision'), '.1%')} ({wh.get('withheld_wrong')}/"
+              f"{wh.get('withheld')}), recall {_fmt(wh.get('recall'), '.1%')} (of "
+              f"{wh.get('wrong')} wrong readings)")
+
+
+def print_band_method(results: list[dict]) -> None:
+    """Band x method x camera-distance band (review bands): n, MAE, bias, tol, and the
+    method-matched truth's MAE / tol (max for silhouettes, p70 for floors) where stored."""
+    for r in results:
+        table = (r.get("bench") or {}).get("band_method") or {}
+        if not table:
+            continue
+        print()
+        print(f"{r['region']}: band x method x distance "
+              f"(cell: n MAE bias tol | matched stat MAE tol)")
+        for band in (*bm.REVIEW_LABELS, "all"):
+            for m, dists in sorted((table.get(band) or {}).items()):
+                for d, e in sorted(dists.items(), key=lambda x: (x[0] == "all", x[0])):
+                    mt = e.get("matched")
+                    mtxt = (f" | {mt['stat']} {_fmt(mt.get('mae_m'), '6.1f')} "
+                            f"{_fmt(mt.get('tol'), '5.0%')}"
+                            if mt and mt.get("stat") != "p95" else "")
+                    print(f"  {band:7s} {m:11s} {d:9s} {_cell(e)}{mtxt}")
+
+
 def print_known(region: str, known: dict) -> None:
     """Published heights, tower by tower: the report, the drone seeds, Street View, OSM tag."""
     print()
@@ -221,6 +337,10 @@ def main() -> int:
                     help="re-measure truth for footprints already in the region's truth cache")
     ap.add_argument("--keep-env", action="store_true",
                     help="don't pin PINNED_FLAGS: run with the shell's SKYLINE_* values")
+    ap.add_argument("--cached-truth", action="store_true",
+                    help="score cached truth only: no survey or 3D Tiles reads")
+    ap.add_argument("--tables-out", type=Path, default=None,
+                    help="also write the printed tables to this file")
     args = ap.parse_args()
     env = _region_env(args.keep_env)
 
@@ -241,7 +361,8 @@ def main() -> int:
             results.append({"region": region, "error": "no report"})
             continue
         results.append(score_report(heights, region, use_tiles=not args.no_tiles,
-                                    refresh_truth=args.refresh_truth))
+                                    refresh_truth=args.refresh_truth,
+                                    cached_truth=args.cached_truth))
 
     summary = {
         "stamp": stamp, "git": _git_head(),
@@ -253,15 +374,26 @@ def main() -> int:
         "results": results,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
-    print_table([r for r in results if "error" not in r])
-    print_tiers([r for r in results if "error" not in r])
-    for r in results:
-        if r.get("known"):
-            print_known(r["region"], r["known"])
-    for r in results:
-        if "error" in r:
-            print(f"{r['region']}: {r['error']}")
-    print(f"\nsummary: {out_dir / 'summary.json'}")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ok = [r for r in results if "error" not in r]
+        print_table(ok)
+        print_tiers(ok)
+        for r in results:
+            if r.get("known"):
+                print_known(r["region"], r["known"])
+        print_single_source(ok)
+        print_band_detail(ok)
+        print_band_tier(ok)
+        print_band_tier(ok, "band_tier_eubucco", "EUBUCCO bands")
+        print_band_method(ok)
+        for r in results:
+            if "error" in r:
+                print(f"{r['region']}: {r['error']}")
+        print(f"\nsummary: {out_dir / 'summary.json'}")
+    print(buf.getvalue(), end="")
+    if args.tables_out:
+        args.tables_out.write_text(buf.getvalue(), encoding="utf-8")
     return 0
 
 

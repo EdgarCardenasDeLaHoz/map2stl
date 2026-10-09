@@ -735,16 +735,18 @@ def relative_metrics(pred: np.ndarray, truth: np.ndarray) -> dict:
             "spearman": None if rho is None or math.isnan(rho) else round(rho, 3)}
 
 
-def per_view_relative(buildings: list[dict], truth: dict[str, dict], min_buildings: int = 5) -> dict:
+def per_view_relative(buildings: list[dict], truth: dict[str, dict], min_buildings: int = 5,
+                      statuses: tuple[str, ...] = ("confirmed",)) -> dict:
     """Relative metrics inside each single view (one image, one camera), pooled.
 
     ``pair_order`` pools pairs over all views with at least ``min_buildings`` confirmed
-    buildings; ``median_spearman`` is the median over those views.
+    buildings (``statuses``: the truth statuses scored); ``median_spearman`` is the median over
+    those views.
     """
     by_view: dict[str, list[tuple[float, float]]] = {}
     for b in buildings:
         t = truth.get(b["key"])
-        if not t or t["status"] != "confirmed":
+        if not t or t["status"] not in statuses:
             continue
         for v in b.get("views") or []:
             if v.get("height_m") is not None:
@@ -818,8 +820,10 @@ def withheld_buildings(buildings: list[dict], fallback: str = "constant",
 
 
 def score_buildings(buildings: list[dict], truth: dict[str, dict],
-                    pred_field: str = "effective_height_m") -> dict:
-    """Score a run's buildings against ``truth`` (confirmed buildings only).
+                    pred_field: str = "effective_height_m",
+                    statuses: tuple[str, ...] = ("confirmed",)) -> dict:
+    """Score a run's buildings against ``truth`` (confirmed buildings only; ``statuses``
+    widens that, e.g. ``("survey_only",)`` for a single-source region, ``score_report``).
 
     Returns overall errors, errors per truth-height band, per view count and per seed
     count, the status counts, and the OSM-tag yardstick (how far the tags themselves
@@ -838,7 +842,7 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
         status = t["status"] if t else "unmeasured"
         status_counts[status] = status_counts.get(status, 0) + 1
         pred = b.get(pred_field, b.get("effective_height_m"))
-        if status == "confirmed" and pred is not None:
+        if status in statuses and pred is not None and t["truth_m"] is not None:
             rows.append((float(pred), float(t["truth_m"]), int(b.get("n_views") or 0),
                          int(b.get("n_seeds") or 0), b.get("height_tag_m"),
                          b.get("height_source")))
@@ -867,7 +871,7 @@ def score_buildings(buildings: list[dict], truth: dict[str, dict],
                     (("tagged", tg_mask), ("untagged", ~tg_mask))},
         # Scale-free: does the taller building come out taller? City-wide and inside each view.
         "relative": {"city": relative_metrics(pred, tru),
-                     "per_view": per_view_relative(buildings, truth)},
+                     "per_view": per_view_relative(buildings, truth, statuses=statuses)},
     }
     tagged = [(r[0], r[1], float(r[4])) for r in rows
               if r[4] is not None and r[5] not in (None, "default")]
@@ -955,6 +959,329 @@ def score_by_tier(buildings: list[dict], truth: dict[str, dict],
             pred, ref = (np.array(c) for c in zip(*by[tier], strict=True))
             out[tier] = _errors(pred, ref)
     return out
+
+
+# --------------------------------------------------------------------------- band tables (item 1)
+# Review 2026-10-09 §3 item 1 / §4.4: a benchmark that can prove or refuse a change, by height
+# band and by tier. Beside the headline (``score_buildings``, unchanged), not instead of it.
+
+#: Truth modes of a region's scored footprints (``truth_mode``).
+TWO_SOURCE = "two_source"        # survey + 3D Tiles, cross-checked: ``confirmed`` rows score
+SINGLE_SOURCE = "single_source"  # survey only (no 3D Tiles read): ``survey_only`` rows score
+NO_TRUTH = "none"
+#: Tiers whose rows claim two independent readings agree (``verified_2``; ``corroborated`` is
+#: the review's proposed name for it, item 6): a wrong one is a false corroboration.
+CORROBORATED_TIERS = ("verified_2", "corroborated")
+#: Tiers that publish an image reading (``single`` and the corroborated ones).
+READING_TIERS = ("single", *CORROBORATED_TIERS)
+
+
+def _band_label(lo: float, hi: float, kind: str = "review") -> str:
+    if kind == "review":
+        return (f"<{hi:.0f}" if lo == 0 else f">{lo:.0f}" if math.isinf(hi)
+                else f"{lo:.0f}-{hi:.0f}")
+    return f"{lo:.0f}+" if math.isinf(hi) else f"{lo:.0f}-{hi:.0f}"
+
+
+REVIEW_LABELS = tuple(_band_label(lo, hi) for lo, hi in REVIEW_BANDS)
+EUBUCCO_LABELS = tuple(_band_label(lo, hi, "eubucco") for lo, hi in EUBUCCO_BANDS)
+DISTANCE_LABELS = tuple(_band_label(lo, hi) for lo, hi in DISTANCE_BANDS)
+
+
+def band_of(value: float, bands=REVIEW_BANDS, labels=REVIEW_LABELS) -> str | None:
+    """The label of the ``[lo, hi)`` band holding ``value``."""
+    for (lo, hi), lab in zip(bands, labels, strict=True):
+        if lo <= value < hi:
+            return lab
+    return None
+
+
+def tol_m(truth):
+    """The "tol" yardstick at ``truth`` metres: max(``TOL_REL`` x truth, ``TOL_ABS_M``)."""
+    return np.maximum(TOL_REL * np.asarray(truth, float), TOL_ABS_M)
+
+
+def band_errors(pred, truth) -> dict:
+    """The review's metrics (§4.4) of predictions against truth: n, MAE, median AE, signed
+    bias, P90 AE, ``tol`` (share within max(25 %, 2 m) of truth) and the shares off by more
+    than 5 m and 10 m."""
+    pred, truth = np.asarray(pred, float), np.asarray(truth, float)
+    if pred.size == 0:
+        return {"n": 0}
+    err = pred - truth
+    ae = np.abs(err)
+    return {"n": int(pred.size), "mae_m": round(float(ae.mean()), 2),
+            "median_ae_m": round(float(np.median(ae)), 2), "bias_m": round(float(err.mean()), 2),
+            "p90_ae_m": round(float(np.percentile(ae, 90)), 2),
+            "tol": round(float(np.mean(ae <= tol_m(truth))), 3),
+            "over_5m": round(float(np.mean(ae > 5.0)), 3),
+            "over_10m": round(float(np.mean(ae > 10.0)), 3)}
+
+
+def truth_mode(buildings: list[dict], truth: dict[str, dict]) -> str:
+    """``TWO_SOURCE`` when any of the report's footprints has a 3D Tiles reading (confirmed,
+    disputed or tiles-only truth), else ``SINGLE_SOURCE`` when any has survey-only truth, else
+    ``NO_TRUTH``. A single-source region (San Juan, Honolulu, Fort Lauderdale: no 3D Tiles,
+    monthly cap) scores its survey-only records, reported apart."""
+    st = {truth[b["key"]]["status"] for b in buildings if b["key"] in truth}
+    if st & {"confirmed", "disputed", "tiles_only"}:
+        return TWO_SOURCE
+    return SINGLE_SOURCE if "survey_only" in st else NO_TRUTH
+
+
+def scoring_truth(truth: dict[str, dict], mode: str) -> tuple[dict[str, dict], dict]:
+    """``(truth records scored, exclusions)``. Two-source: ``confirmed`` only (the headline's
+    rule). Single-source: ``survey_only``, less the records whose building may postdate the
+    survey (``temporal`` ``may_postdate``, from OSM ``start_date``): the survey may show a
+    construction site."""
+    want = "confirmed" if mode == TWO_SOURCE else "survey_only"
+    out, excluded = {}, {"may_postdate": 0}
+    for k, r in truth.items():
+        if r.get("status") != want or r.get("truth_m") is None:
+            continue
+        if mode == SINGLE_SOURCE and r.get("temporal") == TEMPORAL_MAY_POSTDATE:
+            excluded["may_postdate"] += 1
+            continue
+        out[k] = r
+    return out, excluded
+
+
+def attach_roof_stats(truth: dict[str, dict], survey_cache: dict[str, dict]) -> dict[str, dict]:
+    """``truth`` with each record's stored roof statistics (``roof_m``) taken from the survey
+    cache (``survey_heights``) when the record has none of its own."""
+    out = {}
+    for k, r in truth.items():
+        roof = r.get("roof_m") or r.get("survey_roof_m")
+        if roof is None and (s := survey_cache.get(k)) and s.get("roof_m"):
+            r = {**r, "roof_m": s["roof_m"], "ground_p5_m": s.get("ground_p5_m")}
+        out[k] = r
+    return out
+
+
+def matched_truth(rec: dict, stat: str) -> float | None:
+    """The truth for a reading measured against roof statistic ``stat`` (``METHOD_STAT``):
+    the headline ``truth_m`` moved by the survey's (stat - p95). None without stored stats."""
+    if stat == "p95":
+        return float(rec["truth_m"])
+    roof = rec.get("roof_m") or rec.get("survey_roof_m") or {}
+    if roof.get(stat) is None or roof.get("p95") is None:
+        return None
+    return float(rec["truth_m"]) + float(roof[stat]) - float(roof["p95"])
+
+
+def seed_positions(region: str) -> dict[str, tuple[float, float]]:
+    """``seed name -> (lat, lon)`` for the region's seeds as a run names them: ``seed_<i>``
+    from the site's ``seed_urls`` (1-based, as ``region_pdf`` numbers them) and the persisted
+    auto-proposals (``runs/auto_proposals/<region>.json``). Web / Commons seeds have none."""
+    from .streetview_io import _parse_streetview_url
+
+    out: dict[str, tuple[float, float]] = {}
+    site = Path(__file__).parent / "sites" / f"{region.lower()}.json"
+    if site.exists():
+        cfg = json.loads(site.read_text(encoding="utf-8-sig"))
+        for i, url in enumerate(cfg.get("seed_urls") or []):
+            got = _parse_streetview_url(str(url))
+            if got is not None:
+                out[f"seed_{i + 1}"] = (float(got[0]), float(got[1]))
+    auto = BENCHMARK_ROOT.parent / "auto_proposals" / f"{region.lower()}.json"
+    if auto.exists():
+        d = json.loads(auto.read_text(encoding="utf-8"))
+        for p in (d.get("points") if isinstance(d, dict) else d) or []:
+            if p.get("name") and p.get("lat") is not None:
+                out.setdefault(p["name"], (float(p["lat"]), float(p["lon"])))
+    return out
+
+
+def _dist_m(a: tuple[float, float], lat: float, lon: float) -> float:
+    return math.hypot((a[0] - lat) * M_PER_DEG_LAT,
+                      (a[1] - lon) * M_PER_DEG_LAT * math.cos(math.radians(lat)))
+
+
+def method_readings(b: dict, elevated=(), seeds: dict | None = None) -> list[dict]:
+    """Every reading a report row carries, ``{method, value_m, dist_m}``: ``drone`` (an
+    elevated seed's median) and ``street`` (another seed's; ``photo`` for web / Commons seeds)
+    with the camera's distance to the building (None when the seed's position is unknown),
+    ``floors`` (count x storey), the satellite readings by kind, the OSM tag (``osm_tag`` /
+    ``osm_levels``) and ``prior`` on rows that publish it. ``dist_m`` is None for methods
+    without a camera position."""
+    from ._core.height import TAGGED_SOURCES
+
+    seeds = seeds or {}
+    lat, lon = b.get("centroid_lat"), b.get("centroid_lon")
+    out = []
+    for name, v in (b.get("per_seed_median_m") or {}).items():
+        if v is None:
+            continue
+        kind = ("drone" if name in elevated else
+                "photo" if name.startswith(("commons_", "web_", "flickr_")) else "street")
+        pos = seeds.get(name)
+        d = _dist_m(pos, lat, lon) if pos and lat is not None else None
+        out.append({"method": kind, "value_m": float(v), "dist_m": d})
+    if b.get("floors") and b.get("storey_m"):
+        out.append({"method": "floors", "value_m": float(b["floors"]) * float(b["storey_m"]),
+                    "dist_m": None})
+    for kind, val in (b.get("satellite") or {}).items():
+        h = val[0] if isinstance(val, (list, tuple)) else val
+        if h is not None:
+            out.append({"method": str(kind), "value_m": float(h), "dist_m": None})
+    if b.get("height_tag_m") is not None and b.get("height_source") in TAGGED_SOURCES:
+        out.append({"method": b["height_source"], "value_m": float(b["height_tag_m"]),
+                    "dist_m": None})
+    src = b.get("no_survey_source") or b.get("effective_height_source") or ""
+    pub = b.get("no_survey_height_m", b.get("effective_height_m"))
+    if pub is not None and (src.startswith("withheld:prior") or src in ("prior_gbm", "default")):
+        out.append({"method": "prior", "value_m": float(pub), "dist_m": None})
+    return out
+
+
+def _pred_tier(b: dict) -> tuple[float | None, str]:
+    """The survey-blind published height and its tier (what the headline scores)."""
+    pred = b.get("no_survey_height_m", b.get("effective_height_m"))
+    return (None if pred is None else float(pred),
+            b.get("no_survey_tier") or b.get("tier") or "unlabelled")
+
+
+def band_tier_table(buildings: list[dict], truth: dict[str, dict], bands=REVIEW_BANDS,
+                    labels=REVIEW_LABELS) -> dict:
+    """``{band: {tier: band_errors, "all": band_errors}}`` (plus band ``"all"``) of the
+    survey-blind published height against ``truth`` (the records ``scoring_truth`` keeps),
+    banded by truth."""
+    cells: dict[tuple[str, str], list[tuple[float, float]]] = {}
+    for b in buildings:
+        t = truth.get(b["key"])
+        pred, tier = _pred_tier(b)
+        if t is None or pred is None:
+            continue
+        band = band_of(float(t["truth_m"]), bands, labels)
+        for bk in (band, "all"):
+            for tk in (tier, "all"):
+                cells.setdefault((bk, tk), []).append((pred, float(t["truth_m"])))
+    out: dict[str, dict] = {bk: {} for bk in (*labels, "all")}
+    for (bk, tk), pairs in cells.items():
+        p, tr = zip(*pairs, strict=True)
+        out[bk][tk] = band_errors(p, tr)
+    return out
+
+
+def band_method_table(buildings: list[dict], truth: dict[str, dict], elevated=(),
+                      seeds: dict | None = None, bands=REVIEW_BANDS,
+                      labels=REVIEW_LABELS) -> dict:
+    """``{band: {method: {distance band: errors}}}`` of every reading (``method_readings``)
+    against the headline truth (p95), with the method-matched truth (``METHOD_STAT``: max for
+    silhouettes, p70 for floors) beside it as ``matched`` where the stats are stored. Every
+    method has distance band ``"all"``; readings with a camera position (drone, street) are
+    also split by its distance to the building (``DISTANCE_BANDS``)."""
+    cells: dict[tuple[str, str, str], list[tuple[float, float, float | None]]] = {}
+    for b in buildings:
+        t = truth.get(b["key"])
+        if t is None:
+            continue
+        band = band_of(float(t["truth_m"]), bands, labels)
+        for r in method_readings(b, elevated, seeds):
+            row = (r["value_m"], float(t["truth_m"]),
+                   matched_truth(t, METHOD_STAT.get(r["method"], "p95")))
+            dists = ("all",) if r["dist_m"] is None else (
+                band_of(r["dist_m"], DISTANCE_BANDS, DISTANCE_LABELS), "all")
+            for bk in (band, "all"):
+                for dk in dists:
+                    cells.setdefault((bk, r["method"], dk), []).append(row)
+    out: dict[str, dict] = {}
+    for (bk, m, dk), rows in sorted(cells.items()):
+        e = band_errors([r[0] for r in rows], [r[1] for r in rows])
+        mt = [(r[0], r[2]) for r in rows if r[2] is not None]
+        if mt:
+            me = band_errors([p for p, _ in mt], [t for _, t in mt])
+            e["matched"] = {"stat": METHOD_STAT.get(m, "p95"), "n": me["n"],
+                            "mae_m": me["mae_m"], "bias_m": me["bias_m"], "tol": me["tol"]}
+        out.setdefault(bk, {}).setdefault(m, {})[dk] = e
+    return out
+
+
+def pipeline_metrics(buildings: list[dict], truth: dict[str, dict]) -> dict:
+    """The review's pipeline metrics (§4.4).
+
+    - ``coverage``: share of the report's rows publishing a non-prior value (survey-blind tier
+      neither ``prior`` nor unlabelled), over all rows and over the rows with truth;
+    - ``false_corroborated``: corroborated rows (``CORROBORATED_TIERS``) off by more than tol;
+    - ``withhold``: readings the pipeline held back (a withheld single, ``single_reading_m``;
+      a Street View value on a row publishing ``withheld:*``) among all image readings
+      (those plus the published ones, tiers ``READING_TIERS``). Precision: share of withheld
+      readings that were wrong (off by more than tol). Recall: share of wrong readings that
+      were withheld. ``single`` / ``street`` restrict the withheld side to one kind.
+    """
+    def covered(b):
+        return _pred_tier(b)[1] not in ("prior", "unlabelled")
+
+    with_truth = [b for b in buildings if b["key"] in truth]
+    n_cov, n_cov_t = sum(map(covered, buildings)), sum(map(covered, with_truth))
+    out = {"coverage": {"rows": len(buildings), "non_prior": n_cov,
+                        "share": round(n_cov / len(buildings), 3) if buildings else None,
+                        "rows_with_truth": len(with_truth), "non_prior_with_truth": n_cov_t,
+                        "share_with_truth": (round(n_cov_t / len(with_truth), 3)
+                                             if with_truth else None)}}
+    corr, readings = [], []
+    for b in with_truth:
+        tm = float(truth[b["key"]]["truth_m"])
+        tol = float(tol_m(tm))
+        pred, tier = _pred_tier(b)
+        if tier in CORROBORATED_TIERS and pred is not None:
+            corr.append(abs(pred - tm) > tol)
+        if tier in READING_TIERS and pred is not None:
+            readings.append(("published", tier, abs(pred - tm) > tol))
+        src = b.get("no_survey_source") or b.get("effective_height_source") or ""
+        if b.get("single_reading_m") is not None:
+            readings.append(("withheld", "single", abs(float(b["single_reading_m"]) - tm) > tol))
+        if src.startswith("withheld:") and b.get("street_view_m") is not None:
+            readings.append(("withheld", "street", abs(float(b["street_view_m"]) - tm) > tol))
+    out["false_corroborated"] = {"n": len(corr), "wrong": int(sum(corr)),
+                                 "rate": round(sum(corr) / len(corr), 3) if corr else None}
+
+    def pr(rows):
+        held = [w for s, _, w in rows if s == "withheld"]
+        wrong = [s == "withheld" for s, _, w in rows if w]
+        return {"readings": len(rows), "withheld": len(held), "withheld_wrong": int(sum(held)),
+                "precision": round(sum(held) / len(held), 3) if held else None,
+                "wrong": len(wrong),
+                "recall": round(sum(wrong) / len(wrong), 3) if wrong else None}
+
+    out["withhold"] = {"all": pr(readings),
+                       **{k: pr([r for r in readings if r[0] == "published" or r[1] == k])
+                          for k in ("single", "street")}}
+    return out
+
+
+def bench_tables(buildings: list[dict], truth: dict[str, dict], *, elevated=(),
+                 seeds: dict | None = None, survey_cache: dict | None = None) -> dict:
+    """Every item-1 table for one report: the truth mode, band x tier (review and EUBUCCO
+    bands), band x method x distance, the pipeline metrics and the truth age counts.
+    ``truth``: ``footprint_truth``'s records for the report's footprints; ``survey_cache``:
+    ``survey_heights.load_cache(region)``, for the stored roof statistics."""
+    mode = truth_mode(buildings, truth)
+    scored, excluded = scoring_truth(truth, mode)
+    if survey_cache:
+        scored = attach_roof_stats(scored, survey_cache)
+    keys = {b["key"] for b in buildings}
+    ages: dict[str, int] = {}
+    for k, r in truth.items():
+        if k in keys and r.get("status") in ("confirmed", "survey_only"):
+            a = r.get("temporal") or TEMPORAL_UNKNOWN
+            ages[a] = ages.get(a, 0) + 1
+    return {
+        "truth_mode": mode,
+        "truth_status": {TWO_SOURCE: "confirmed", SINGLE_SOURCE: "survey_only"}.get(mode),
+        "truth_stat": f"p{ROOF_PERCENTILE:.0f}",
+        "tol_rule": {"rel": TOL_REL, "abs_m": TOL_ABS_M},
+        "n_scored_truth": sum(1 for b in buildings if b["key"] in scored),
+        "excluded": excluded,
+        "truth_age": ages,
+        "with_roof_stats": sum(1 for b in buildings
+                               if (scored.get(b["key"]) or {}).get("roof_m")
+                               or (scored.get(b["key"]) or {}).get("survey_roof_m")),
+        "band_tier": band_tier_table(buildings, scored),
+        "band_tier_eubucco": band_tier_table(buildings, scored, EUBUCCO_BANDS, EUBUCCO_LABELS),
+        "band_method": band_method_table(buildings, scored, elevated, seeds),
+        "pipeline": pipeline_metrics(buildings, scored),
+    }
 
 
 # --------------------------------------------------------------------------- published heights
