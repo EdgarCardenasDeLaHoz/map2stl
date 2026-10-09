@@ -271,7 +271,7 @@ def test_roof_statistics_are_stored_and_p95_is_the_headline(monkeypatch):
         roof = rec["roof_m"]
         assert list(roof) == [name for name, _ in bm.ROOF_STATS]
         assert roof["p95"] == rec["survey_m"]                     # one headline number
-        assert lo < roof["p50"] < roof["p70"] < roof["p90"] < roof["p95"] <= roof["max"] <= hi
+        assert lo < roof["p50"] < roof["p70"] < roof["p90"] < roof["p95"] < roof["p99"] <= roof["max"] <= hi
         assert rec["ground_p5_m"] == 0.0 and rec["ground_cells"] > 100   # flat ground around
         assert rec["roof_stats"] == bm.ROOF_STATS_VERSION
     assert sh.load_cache("benidorm")["tall"]["roof_m"] == got["tall"]["roof_m"]

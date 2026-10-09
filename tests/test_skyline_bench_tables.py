@@ -104,11 +104,12 @@ def test_method_readings_and_distance_bands(monkeypatch):
                    ("floors", None): 30.0, ("lean", None): 52.0, ("shadow", None): 30.0,
                    ("osm_tag", None): 48.0, ("prior", None): 20.0}
     truth = {"a": {"status": "confirmed", "truth_m": 50.0,
-                   "roof_m": {"p50": 44.0, "p70": 46.0, "p90": 49.0, "p95": 50.0, "max": 58.0}}}
+                   "roof_m": {"p50": 44.0, "p70": 46.0, "p90": 49.0, "p95": 50.0, "p99": 58.0,
+                              "max": 90.0}}}
     tab = bm.band_method_table([row], truth, elevated={"seed_1"}, seeds=seeds)["40-100"]
     assert tab["drone"]["<500"]["mae_m"] == 11.0 and tab["street"][">1000"]["n"] == 1
     assert set(tab["lean"]) == {"all"}                          # no camera: no distance band
-    assert tab["drone"]["<500"]["matched"] == {"stat": "max", "n": 1, "mae_m": 3.0,
+    assert tab["drone"]["<500"]["matched"] == {"stat": "p99", "n": 1, "mae_m": 3.0,
                                                "bias_m": 3.0, "tol": 1.0}
     assert tab["floors"]["all"]["matched"]["stat"] == "p70"      # 30 vs 46
     assert tab["floors"]["all"]["matched"]["mae_m"] == 16.0
@@ -116,20 +117,22 @@ def test_method_readings_and_distance_bands(monkeypatch):
 
 
 def test_matched_truth_shifts_two_source_truth_by_the_survey_statistics():
-    rec = {"truth_m": 51.0, "survey_roof_m": {"p70": 46.0, "p95": 50.0, "max": 58.0}}
-    assert bm.matched_truth(rec, "max") == 59.0 and bm.matched_truth(rec, "p70") == 47.0
+    rec = {"truth_m": 51.0, "survey_roof_m": {"p70": 46.0, "p95": 50.0, "p99": 58.0}}
+    assert bm.matched_truth(rec, "p99") == 59.0 and bm.matched_truth(rec, "p70") == 47.0
     assert bm.matched_truth(rec, "p95") == 51.0
-    assert bm.matched_truth({"truth_m": 51.0}, "max") is None
+    assert bm.matched_truth({"truth_m": 51.0}, "p99") is None
 
 
 def test_attach_roof_stats_from_the_survey_cache():
-    truth = {"a": {"truth_m": 50.0}, "b": {"truth_m": 9.0, "roof_m": {"p95": 9.0}}}
+    truth = {"a": {"truth_m": 50.0}, "b": {"truth_m": 9.0, "roof_m": {"p95": 9.0}},
+             "c": {"truth_m": 9.0, "roof_m": {"p95": 9.0}}}
     cache = {"a": {"roof_m": {"p95": 50.0, "max": 55.0}, "ground_p5_m": 0.1},
-             "b": {"roof_m": {"p95": 99.0}}}
+             "b": {"roof_m": {"p95": 9.0, "p99": 9.5}}}
     got = bm.attach_roof_stats(truth, cache)
     assert got["a"]["roof_m"]["max"] == 55.0 and got["a"]["ground_p5_m"] == 0.1
-    assert got["b"]["roof_m"] == {"p95": 9.0}                    # its own stats are kept
-    assert "roof_m" not in truth["a"]                            # input untouched
+    assert got["b"]["roof_m"]["p99"] == 9.5                       # the survey cache is newer
+    assert got["c"]["roof_m"] == {"p95": 9.0}                     # none there: its own
+    assert "roof_m" not in truth["a"]                             # input untouched
 
 
 def test_pipeline_metrics():

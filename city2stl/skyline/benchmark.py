@@ -47,12 +47,17 @@ ERODE_M = 1.0
 #: (``survey_m``, ``truth_m``); the others in ``ROOF_STATS`` are stored beside it.
 ROOF_PERCENTILE = 95.0
 #: Roof statistics stored per footprint (review 2026-10-09 item 1): p95 stays the headline;
-#: max matches silhouette readings (drone, Street View, lean), p70 floor counts (3DBAG
-#: publishes median / p70 / max, HalifaxDT p95). ``(name, percentile)``.
-ROOF_STATS = (("p50", 50.0), ("p70", 70.0), ("p90", 90.0), ("p95", 95.0), ("max", 100.0))
+#: the roof top matches silhouette readings (drone, Street View, lean), p70 floor counts (3DBAG
+#: publishes median / p70 / max, HalifaxDT p95). ``(name, percentile)``. The raw max is
+#: stored as asked, but single noise cells make it useless as truth on some surveys (Miami's
+#: 2019 topobathy: max over p95 + 20 m on 24 % of 914 records, up to 294 m; Honolulu 1.7 %),
+#: so the silhouettes' statistic is p99 (2.8 % and 1.0 %).
+ROOF_STATS = (("p50", 50.0), ("p70", 70.0), ("p90", 90.0), ("p95", 95.0), ("p99", 99.0),
+              ("max", 100.0))
 #: Version of the stored roof statistics (records carry it as ``roof_stats``; absent: only
 #: the p95). Bumped when ``ROOF_STATS`` / the ground ring change, never for the p95 itself.
-ROOF_STATS_VERSION = 1
+#: 1: p50 / p70 / p90 / p95 / max; 2: + p99.
+ROOF_STATS_VERSION = 2
 #: Ground statistic: p5 of the nDSM in the ring from the footprint outline to this many
 #: metres outside it (3DBAG: ground = p5 of the ground points within 4 m). The nDSM is height
 #: above the survey's own ground model, so this reads ~0 where that model fits the street and
@@ -60,10 +65,10 @@ ROOF_STATS_VERSION = 1
 GROUND_RING_M = 4.0
 GROUND_PERCENTILE = 5.0
 #: Which stored statistic each reading kind is measured against (method-matched truth,
-#: review §3 item 1): silhouettes reach the top of the roof, floor counts its main level.
-#: Kinds not listed are scored against the headline p95.
-METHOD_STAT = {"drone": "max", "street": "max", "street_view": "max", "lean": "max",
-               "multiview": "max", "stereo": "max", "shadow": "max", "floors": "p70"}
+#: review §3 item 1): silhouettes reach the top of the roof (p99, the spike-robust top; see
+#: ``ROOF_STATS``), floor counts its main level. Kinds not listed: the headline p95.
+METHOD_STAT = {"drone": "p99", "street": "p99", "photo": "p99", "lean": "p99",
+               "multiview": "p99", "stereo": "p99", "shadow": "p99", "floors": "p70"}
 #: Fewer valid cells than this and a source does not measure the building.
 MIN_CELLS = 4
 #: ...nor when under this fraction of the footprint's cells are valid: a survey that covers
@@ -1119,12 +1124,12 @@ def scoring_truth(truth: dict[str, dict], mode: str) -> tuple[dict[str, dict], d
 
 
 def attach_roof_stats(truth: dict[str, dict], survey_cache: dict[str, dict]) -> dict[str, dict]:
-    """``truth`` with each record's stored roof statistics (``roof_m``) taken from the survey
-    cache (``survey_heights``) when the record has none of its own."""
+    """``truth`` with each record's stored roof statistics (``roof_m``) from the survey cache
+    (``survey_heights``, the newest statistics: it is re-read when ``ROOF_STATS_VERSION`` moves),
+    else the record's own (``roof_m`` / ``survey_roof_m``)."""
     out = {}
     for k, r in truth.items():
-        roof = r.get("roof_m") or r.get("survey_roof_m")
-        if roof is None and (s := survey_cache.get(k)) and s.get("roof_m"):
+        if (s := survey_cache.get(k)) and s.get("roof_m"):
             r = {**r, "roof_m": s["roof_m"], "ground_p5_m": s.get("ground_p5_m")}
         out[k] = r
     return out
