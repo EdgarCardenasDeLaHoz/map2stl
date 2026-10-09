@@ -264,6 +264,12 @@ Two constraints follow:
     `floors=elevated_state["floors"]`. Blocked on the user's call: the single-over-2x-prior rule
     (4a73d5a) would turn every such value back into the prior.
 
+- 2026-10-08, cadastre floors (low-rise heights): `height/providers/co_catastro.py` and
+  `skyline/cadastre_heights.py` (opt-in `use_cadastre_heights`, off); validation and the
+  propiedad-horizontal finding in decision "Cadastre floors (Cartagena, AMB) as an opt-in height
+  source". Not wired into `withhold_untagged_street_view` / `region_pdf` yet (busy with v10): the
+  hook is in the `cadastre_heights` docstring.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:

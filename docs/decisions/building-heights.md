@@ -5,6 +5,50 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-08 — Cadastre floors (Cartagena, AMB) as an opt-in height source; propiedad horizontal never published
+- **Decision:** `city2stl/height/providers/co_catastro.py` reads the AMB cadastre `Construccion`
+  layer (datos.gov.co `d7hk-qg8h`: range reads of ~25 MB of a 1.2 GB zip, cleaned layer cached
+  90 days) and matches it to model footprints: the largest-overlap polygon or the union of the
+  parts lying inside, IoU >= 0.3; floors = the tallest part. Height = floors x storey + roof:
+  - storey 3.0 m + 1 m roof; colonial Centro, San Diego and Getsemaní 4.5 m; over 10 floors
+    4.13 m (skyline storey calibration) + 3 m;
+  - published only for non-PH predios with 1-10 floors (confidence 0.7 for 1-5, 0.6 for 6-10).
+    Propiedad horizontal (digit 22 of the predial number is 9) and towers never publish;
+  - skyline: `cadastre_heights.py`, site flag `use_cadastre_heights` (off). A publishable match
+    replaces the prior, so the 2x rule now withholds a lone drone reading over twice the cadastre
+    height; a confident satellite reading >= 40 m that disagrees vetoes it. Cadastre + one drone,
+    lean, multiview or stereo >= 40 m reading is `verified_2` (the user's rule). Reports print the
+    CC BY-SA 4.0 attribution and share-alike line (`tier_display.height_attributions`).
+- **Why (v9 region, 3,018 OSM footprints; tables in the 2026-10-08 report):**
+  - Match: 2,092 footprints (69 %), 1,363 publishable, 719 PH. 55 % of the 12,427 cadastre
+    polygons in the box touch no OSM footprint (Bocagrande 20 %, Manga 15 %, Centro 3 %).
+  - Publishable vs OSM `height` tags: n 8, median abs error 0.5 m, 88 % within 25 % (all under
+    10 m, in Espinal). No height tag on a publishable match in the target barrios.
+  - PH vs tags: n 16, median abs error 28 m, 19 % within 25 %. Hotel Estelar (52 floors), Gran
+    Bay Club (42) and Nautica read 1 floor. Seed_6 drone pano: PH "1 floor" b0748 and b0666 are
+    12-15-floor blocks, PH "4 floors" b0791 about 10.
+  - Towers: 16 of 48 matched v9 confirmed / tagged rows >= 30 m read <= 3 floors; median abs
+    error 29 m. Floors are not a tower source here.
+  - R2 floors (`yk9q-cw89`) on non-PH matches: 82 % exact, 97 % within one floor (n 1,175; same
+    office, so a consistency check). R2 has no floors for PH units.
+  - OSM `building:levels`: 33 % exact, 85 % within one (n 52). In the colonial barrios the
+    cadastre is lower in 26 of 47 (OSM 2 / cadastre 1: 13).
+  - Satellite (weak at these heights): multi-scene shadows vs <= 5-floor matches, median abs
+    error 3.2 m, 26 % within 25 % (shadows read 7-8 m for 1- and 2-floor houses alike);
+    stereo / multiview conf >= 0.5, median abs error 2.0-2.5 m; 13 of 249 stereo readings are
+    >= 40 m on a "low" match (a tower's podium polygon): hence the veto.
+  - On v9 it would change 117 prior rows (median 12.1 m; cadastre median 7 m lower) and 62 lone
+    drone readings of 25-233 m on 1-3-floor cadastre houses. Of those 70 singles, 39 have a
+    confident satellite reading under 25 m (the building is low), 10 one over 25 m.
+- **Not adopted:** a synthetic `building:levels` tag (`height_from_tags` has one 3.2 m storey plus
+  a roof level, and the row would count as OSM-tagged and train the prior); `altura_tot` (97 %
+  are the 3.0 m default); +1 m for commercial ground floors (`height_m(commercial=)` exists,
+  unused: on the shadows commercial and other 1-floor predios read 7.3 and 7.5 m).
+- **Open:** colonial floor counts and the 4.5 m storey are unchecked (no tags, no drone or
+  satellite coverage of the old town): spot-check 20-30 facades before relying on them there.
+  The publishing hook (`withhold_untagged_street_view(cadastre=)`, `region_pdf`) is written out
+  in the `cadastre_heights` docstring for the owner of those files.
+
 ### 2026-10-08 — Floor counts flag high-rises and join fusion; they never publish alone
 - **Why:** F-SKY26 steps 4 and 5. Untagged towers no drone read fall to the ~12 m prior; floor
   counts (MobileSAM instances, `floor_bands.pano_floors`) say which plots hold towers and give a
