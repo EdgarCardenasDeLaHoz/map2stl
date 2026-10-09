@@ -357,6 +357,20 @@ def test_drone_seen_footprint_without_a_reading_gets_a_prior_row(monkeypatch):
     assert (b["effective_height_m"], b["effective_height_source"]) == (14.0, "withheld:prior_gbm")
     assert b["tier"] == "prior" and b["weighted_height_m"] == 14.0
     json.dumps(rows)
+    # the prior predicts only the records it was built on: the drone-seen ones come from a
+    # second, wider prior (v10 run 1: 368 rows added, all but the satellite / high-rise ones
+    # dropped again for want of a prior)
+    from city2stl.skyline.region_pdf import _chain_fallbacks
+    narrow = lambda r: (14.0 if r.feature_id == "kept" else None, "prior_gbm")  # noqa: E731
+    wide = lambda r: (20.0, "prior_gbm")                                         # noqa: E731
+    fb = _chain_fallbacks(narrow, wide)
+    assert fb(recs[0]) == (14.0, "prior_gbm") and fb(recs[1]) == (20.0, "prior_gbm")
+    assert _chain_fallbacks(None, wide) is None                       # the constant stays
+    assert _chain_fallbacks(narrow, None)(recs[1]) == (None, "prior_gbm")
+    rows3 = _drone_seen_rows([rows[0]], recs, prs, {"seed_1", "seed_4"})
+    withhold_untagged_street_view(rows3, recs, fallback=fb, measured_seeds={"seed_1", "seed_4"})
+    _fill_unread_heights(rows3)
+    assert [(r["feature_id"], r["effective_height_m"]) for r in rows3] == [("behind", 20.0)]
     # with the withhold flag off there is no prior: the row is dropped again
     monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "0")
     rows2 = _drone_seen_rows([], recs, prs, {"seed_1"})

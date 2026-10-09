@@ -144,6 +144,24 @@ def _drone_seen_rows(building_heights: list, building_records: list[BuildingReco
     return out
 
 
+def _chain_fallbacks(*fallbacks):
+    """One ``withhold_untagged_street_view`` fallback from several: the first that gives a
+    height (``untagged_prior.fallback_for`` gives None for a record it was not built on). None
+    when the first is None (the constant fallback), so the constant still applies to all."""
+    if not fallbacks or fallbacks[0] is None:
+        return None
+    fbs = [f for f in fallbacks if f is not None]
+
+    def fallback(rec):
+        got = (None, None)
+        for f in fbs:
+            got = f(rec)
+            if got[0] is not None:
+                return got
+        return got
+    return fallback
+
+
 def _fill_unread_heights(rows: list[dict]) -> None:
     """Give ``_drone_seen_rows`` rows their published height as median / weighted height (the
     report pages plot ``weighted_height_m``); drop the ones that got no height."""
@@ -597,14 +615,20 @@ def run_region_pdf_report(
     # footprints a drone seed measured but whose readings all were left out (tower behind,
     # untrusted, disputed) get a row too, so the prior publishes for them (F-SKY26, 2026-10-08)
     _unread = _drone_seen_rows(building_heights, building_records, pano_results, elevated_seeds)
+    _est_recs = [r for r in building_records if r.feature_id in _est_ids]
+    _fallback = untagged_fallback(_est_recs, region=region_name)
     if _unread:
         logger.info(f"[elevated] {len(_unread)} untagged footprint(s) measured by a drone seed "
                     f"with no usable reading: prior row added")
         building_heights.extend(_unread)
+        # the prior predicts only the records it is given: the estimated ones keep their
+        # neighbours (and values); the drone-seen ones get theirs from the wider set
+        _ids = {row["feature_id"] for row in _unread}
+        _fallback = _chain_fallbacks(_fallback, untagged_fallback(
+            _est_recs + [r for r in building_records if r.feature_id in _ids], region=region_name))
     n_withheld = withhold_untagged_street_view(
         building_heights, building_records,
-        fallback=untagged_fallback([r for r in building_records if r.feature_id in _est_ids],
-                                   region=region_name),
+        fallback=_fallback,
         measured_seeds=set(elevated_seeds or ()), satellite=satellite,
         floors=(elevated_state or {}).get("floors"))
     _fill_unread_heights(building_heights)
