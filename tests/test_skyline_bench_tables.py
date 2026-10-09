@@ -81,7 +81,7 @@ def test_single_source_scores_survey_only_and_drops_buildings_newer_than_the_sur
              "new": {"status": "survey_only", "truth_m": 4.0, "temporal": bm.TEMPORAL_MAY_POSTDATE}}
     t = bm.bench_tables(rows, truth)
     assert t["truth_mode"] == bm.SINGLE_SOURCE and t["truth_status"] == "survey_only"
-    assert t["n_scored_truth"] == 2 and t["excluded"] == {"may_postdate": 1}
+    assert t["n_scored_truth"] == 2 and t["excluded"] == {"may_postdate": 1, "nested": 0}
     assert t["truth_age"] == {"predates": 1, "unknown": 1, "may_postdate": 1}
     assert bm.score_buildings(rows, truth)["overall"] == {"n": 0}     # the headline: as before
     scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE)
@@ -206,3 +206,27 @@ def test_seed_positions_from_the_report_pages_win(tmp_path, monkeypatch):
     assert got == {"seed_4": (25.75242, -80.19027), "auto_180_2000m": (18.4613, -66.0803)}
     pos = bm.seed_positions("miami", rep)
     assert pos["seed_4"] == (25.75242, -80.19027)                     # beats the site URL
+
+
+def test_nested_footprints_are_left_out_of_the_tables():
+    # a podium part under a tower outline: the survey sees the tower top, not the podium's own
+    def sq(x0, y0, w):
+        d = w / 111_320.0
+        x, y = -157.83 + x0 / 111_320.0, 21.28 + y0 / 111_320.0
+        return [[x, y], [x + d, y], [x + d, y + d], [x, y + d], [x, y]]
+
+    rows = [_row("tower", 110.0, "tag", footprint_lonlat=sq(0, 0, 40), height_tag_m=110.0),
+            _row("podium", 20.0, "tag", footprint_lonlat=sq(5, 5, 30),        # inside the tower,
+                 height_tag_m=20.0),                                          # covers 56 % of it
+            _row("next", 30.0, "tag", footprint_lonlat=sq(35, 0, 40))]        # 1/8 overlap
+    assert bm.nested_keys(rows) == {"podium"}
+    same = [_row("outline", 0, "tag", footprint_lonlat=sq(0, 0, 40), height_tag_m=110.0),
+            _row("part", 0, "tag", footprint_lonlat=sq(0, 0, 40), height_tag_m=20.0)]
+    assert bm.nested_keys(same) == {"part"}                       # one polygon, two tags
+    untagged = [_row("big", 0, "prior", footprint_lonlat=sq(0, 0, 40)),
+                _row("small", 0, "prior", footprint_lonlat=sq(5, 5, 30))]
+    assert bm.nested_keys(untagged) == {"small"}                  # no tags: the larger is above
+    truth = {k: {"status": "survey_only", "truth_m": 110.0 if k != "next" else 31.0}
+             for k in ("tower", "podium", "next")}
+    t = bm.bench_tables(rows, truth, nested=bm.nested_keys(rows))
+    assert t["excluded"]["nested"] == 1 and t["band_tier"]["all"]["all"]["n"] == 2

@@ -173,12 +173,14 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     truth_pub = {**{b["key"]: cache[b["key"]] for b in published if b["key"] in cache}, **truth}
     n_fp = json.loads(Path(heights).read_text(encoding="utf-8")).get("n_building_records")
     kw = {"elevated": elevated, "seeds": bm.seed_positions(region, Path(heights).parent),
-          "survey_cache": sh.load_cache(region)}
+          "survey_cache": sh.load_cache(region),
+          # building:part slices under another footprint: no top surface of their own
+          "nested": bm.nested_keys(published)}
     result["bench"] = {"measured": bm.bench_tables(buildings, truth, **kw),
                        "published": bm.bench_tables(published, truth_pub, n_footprints=n_fp, **kw)}
     if result["bench"]["measured"]["truth_mode"] == bm.SINGLE_SOURCE:
         # survey-only truth (no 3D Tiles cross-check): scored, but reported apart
-        scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE)
+        scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE, kw["nested"])
         result["single_source"] = bm.score_buildings(
             buildings, scored, pred_field="no_survey_height_m", statuses=("survey_only",))
     known = bm.score_known(heights, region)

@@ -1106,18 +1106,57 @@ def truth_mode(buildings: list[dict], truth: dict[str, dict]) -> str:
     return SINGLE_SOURCE if "survey_only" in st else NO_TRUTH
 
 
-def scoring_truth(truth: dict[str, dict], mode: str) -> tuple[dict[str, dict], dict]:
+#: A footprint with this share of its area under another footprint of the report is "nested"
+#: (an OSM ``building:part`` slice inside an outline, a podium part under a tower part): the
+#: survey and 3D Tiles see only the top of the stack, so neither measures the lower part's own
+#: height. Honolulu 2026-10-09: 236 of 1,118 published rows with truth sit under a taller
+#: footprint; without them the tag tier's MAE drops 23.1 -> 14.9 m (40-100 m) and 37.3 -> 26.2 m
+#: (>100 m).
+NESTED_COVER = 0.5
+
+
+def nested_keys(buildings: list[dict], cover: float = NESTED_COVER) -> set[str]:
+    """Keys of the footprints with at least ``cover`` of their area under another footprint of
+    ``buildings`` that stands above them: a higher OSM height tag when both are tagged (inputs,
+    so the set does not move with the run's answers), else a larger area. An outline holding its
+    own podium part stays; the podium goes. Pass every published row (tag-only rows too)."""
+    from shapely.strtree import STRtree
+
+    polys = [_polygon(b["footprint_lonlat"]) for b in buildings]
+    tags = [b.get("height_tag_m") for b in buildings]
+    tree = STRtree(polys)
+    out = set()
+    for i, p in enumerate(polys):
+        if p.is_empty or p.area <= 0:
+            continue
+        for j in tree.query(p):
+            q = polys[j]
+            if j == i or not q.intersects(p) or q.intersection(p).area < cover * p.area:
+                continue
+            above = (tags[j] > tags[i] if tags[i] is not None and tags[j] is not None
+                     else q.area > p.area)
+            if above:
+                out.add(buildings[i]["key"])
+                break
+    return out
+
+
+def scoring_truth(truth: dict[str, dict], mode: str,
+                  nested: set[str] | frozenset = frozenset()) -> tuple[dict[str, dict], dict]:
     """``(truth records scored, exclusions)``. Two-source: ``confirmed`` only (the headline's
     rule). Single-source: ``survey_only``, less the records whose building may postdate the
     survey (``temporal`` ``may_postdate``, from OSM ``start_date``): the survey may show a
-    construction site."""
+    construction site. Both: less ``nested`` footprints (``nested_keys``)."""
     want = "confirmed" if mode == TWO_SOURCE else "survey_only"
-    out, excluded = {}, {"may_postdate": 0}
+    out, excluded = {}, {"may_postdate": 0, "nested": 0}
     for k, r in truth.items():
         if r.get("status") != want or r.get("truth_m") is None:
             continue
         if mode == SINGLE_SOURCE and r.get("temporal") == TEMPORAL_MAY_POSTDATE:
             excluded["may_postdate"] += 1
+            continue
+        if k in nested:
+            excluded["nested"] += 1
             continue
         out[k] = r
     return out, excluded
@@ -1354,13 +1393,17 @@ def pipeline_metrics(buildings: list[dict], truth: dict[str, dict],
 
 def bench_tables(buildings: list[dict], truth: dict[str, dict], *, elevated=(),
                  seeds: dict | None = None, survey_cache: dict | None = None,
-                 n_footprints: int | None = None) -> dict:
+                 n_footprints: int | None = None,
+                 nested: set[str] | frozenset = frozenset()) -> dict:
     """Every item-1 table for one report: the truth mode, band x tier (review and EUBUCCO
     bands), band x method x distance, the pipeline metrics and the truth age counts.
     ``truth``: ``footprint_truth``'s records for the report's footprints; ``survey_cache``:
-    ``survey_heights.load_cache(region)``, for the stored roof statistics."""
+    ``survey_heights.load_cache(region)``, for the stored roof statistics; ``nested``:
+    ``nested_keys`` of the report's published rows, left out (counted in ``excluded``)."""
     mode = truth_mode(buildings, truth)
-    scored, excluded = scoring_truth(truth, mode)
+    keys = {b["key"] for b in buildings}
+    scored, excluded = scoring_truth({k: r for k, r in truth.items() if k in keys}, mode,
+                                     nested)
     if survey_cache:
         scored = attach_roof_stats(scored, survey_cache)
     keys = {b["key"] for b in buildings}
