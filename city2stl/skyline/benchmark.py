@@ -12,8 +12,15 @@ make the headline. Disagreements are kept and counted: they are new construction
 demolition, trees over low roofs, or a bad ground estimate, and say which source to doubt.
 
 Why not OSM height tags: they are sparse (22 of 329 scored buildings on Cartagena) and are
-mostly ``building:levels × 3.4 m``. Why not one source: either alone hides its own errors
-(decision: ``docs/decisions/building-heights.md``, 2026-10-03).
+mostly ``building:levels`` × 3.2 m plus one level for the roof (``city2stl/heights.py``
+``METRES_PER_LEVEL``). Why not one source: either alone hides its own errors
+(decision: ``docs/decisions/building-heights.md``, 2026-10-03). Where no 3D Tiles can be read
+(the monthly cap: San Juan, Honolulu, Fort Lauderdale) the truth is the survey alone,
+``survey_only``: scored by the band tables as single-source and reported apart.
+
+Each survey record also stores p50 / p70 / p90 / p95 / max roof heights and a ground p5
+(``footprint_stats``, review 2026-10-09 item 1), so a reading can be scored against the statistic
+it measures (``METHOD_STAT``), and an age flag from OSM ``start_date`` (``temporal_flag``).
 
 Truth is measured on the footprints a run actually scored (``heights.json`` →
 ``footprint_lonlat``), keyed by a geometry hash, and cached per region under

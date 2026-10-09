@@ -30,7 +30,8 @@ of ``--areas``, tallest OSM tag (or published height) first within an area; tile
 nDSM are already on disk are free and always included, ``--max-tiles`` caps the others. One batch
 of ``--fetch-workers`` tiles at a time, checkpointed in the survey cache; new ``survey_only``
 records are merged into the truth cache after every batch (existing keys are never overwritten).
-A record superseded by its report key moves to ``<region>.k7.json``.
+A record superseded by its report key moves to ``<region>.k7.json``. ``--from-report heights.json``
+reads the footprints of that region report instead (all of them, wherever they are).
 
 **--temporal**. OSM ``start_date`` (one Overpass query per city, cached in
 ``<region>.start_dates.json``) -> ``built_year`` and ``temporal`` on every truth record:
@@ -332,21 +333,37 @@ def truth_record(s: dict, project: str | None, osm_id: str | None, start_dates: 
     return rec
 
 
+def report_meta(report: Path, fps: list[dict]) -> dict[str, dict]:
+    """``new_truth``'s footprint table for a region report's own rows (area ``"report"``): the
+    ring and key as the report wrote them, the OSM id from the pipeline footprint with that key."""
+    ids = {f["key6"]: f["osm_id"] for f in fps}
+    _, rows = bm.load_report(report)
+    return {b["key"]: {"ring6": b["footprint_lonlat"], "key6": b["key"], "key7": b["key"],
+                       "name": b.get("name") or "", "tag_m": b.get("height_tag_m"),
+                       "lat": float(b["centroid_lat"]), "lon": float(b["centroid_lon"]),
+                       "osm_id": ids.get(b["key"]), "area": "report"}
+            for b in rows if b.get("centroid_lat") is not None}
+
+
 def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int,
-              plan: bool) -> dict:
+              plan: bool, report: Path | None = None) -> dict:
     from city2stl.height.providers import lidar_3dep_ept_laspy as ept
     from city2stl.skyline import survey_heights as sh
 
     ept._WORKERS = min(ept._WORKERS, 2)    # 2 node reads per tile (the CPU cap)
     provider = bm.REGIONS[region]
-    boxes = TRUTH_AREAS[region]
-    order = list(areas or boxes)
     fps = pipeline_footprints(region)
     meta: dict[str, dict] = {}
-    for f in fps:
-        area = next((a for a in order if _in_box(f["lat"], f["lon"], boxes[a])), None)
-        if area is not None and f["key6"] not in meta:
-            meta[f["key6"]] = {**f, "area": area}
+    if report is not None:  # the report's own footprints, wherever they are
+        order = ["report"]
+        meta = report_meta(report, fps)
+    else:
+        boxes = TRUTH_AREAS[region]
+        order = list(areas or boxes)
+        for f in fps:
+            area = next((a for a in order if _in_box(f["lat"], f["lon"], boxes[a])), None)
+            if area is not None and f["key6"] not in meta:
+                meta[f["key6"]] = {**f, "area": area}
     polys = {k: bm._erode(bm._polygon(m["ring6"]), bm.ERODE_M) for k, m in meta.items()}
     parts = {k: (bm.survey_part(provider, p) if not p.is_empty else None) for k, p in polys.items()}
     tiles = bm.tiles_for({k: p for k, p in polys.items() if parts[k]},
@@ -427,6 +444,7 @@ def _retire_full_precision_keys(region: str, truth: dict, metas: list[dict]) -> 
             old[k7] = {**truth.pop(k7), "superseded_by": k6}
             n += 1
     if n:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(old, indent=1, sort_keys=True), encoding="utf-8")
     return n
 
@@ -491,6 +509,8 @@ def main() -> int:
     ap.add_argument("--max-tiles", type=int, default=10_000,
                     help="--new-truth: at most this many tiles not yet on disk")
     ap.add_argument("--plan", action="store_true", help="--new-truth: count tiles, read nothing")
+    ap.add_argument("--from-report", type=Path, default=None,
+                    help="--new-truth: the footprints of this heights.json instead of TRUTH_AREAS")
     ap.add_argument("--refresh", action="store_true",
                     help="stat refresh: re-read records already at the current stat version too")
     ap.add_argument("--fetch-workers", type=int, default=2,
@@ -500,7 +520,8 @@ def main() -> int:
         if args.roof_stats:
             summary = roof_stats(region, args.fetch_workers)
         elif args.new_truth:
-            summary = new_truth(region, args.areas, args.max_tiles, args.fetch_workers, args.plan)
+            summary = new_truth(region, args.areas, args.max_tiles, args.fetch_workers, args.plan,
+                                args.from_report)
         elif args.temporal:
             summary = temporal(region)
         else:
