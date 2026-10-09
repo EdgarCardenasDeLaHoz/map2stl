@@ -59,3 +59,18 @@ def test_truth_areas_are_in_the_review_order(script):
     assert list(script.TRUTH_AREAS["san_juan"])[:3] == ["old_san_juan", "condado", "isla_verde"]
     assert list(script.TRUTH_AREAS["fort_lauderdale"])[0] == "ftl_beach"
     assert set(script.TRUTH_AREAS) <= set(bm.REGIONS)
+
+
+def test_report_meta_reads_the_reports_own_rings_and_keys(script, tmp_path):
+    ring = [[-66.1, 18.46], [-66.1001, 18.46], [-66.1001, 18.4601], [-66.1, 18.46]]
+    rows = [{"feature_id": "b1", "name": "x", "footprint_lonlat": ring, "height_tag_m": 9.6,
+             "centroid_lat": 18.46005, "centroid_lon": -66.10005, "measured": False},
+            {"feature_id": "b2", "footprint_lonlat": None, "centroid_lat": 18.0}]
+    f = tmp_path / "heights.json"
+    f.write_text(json.dumps({"region": "san_juan", "buildings": rows}))
+    key = bm.footprint_key(ring)
+    meta = script.report_meta(f, [{"key6": key, "osm_id": "way/7"}])
+    assert list(meta) == [key]
+    m = meta[key]
+    assert m["ring6"] == ring and m["key6"] == key and m["osm_id"] == "way/7"
+    assert m["area"] == "report" and m["tag_m"] == 9.6

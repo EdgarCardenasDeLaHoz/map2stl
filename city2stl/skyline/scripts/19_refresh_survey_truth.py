@@ -337,7 +337,7 @@ def report_meta(report: Path, fps: list[dict]) -> dict[str, dict]:
     """``new_truth``'s footprint table for a region report's own rows (area ``"report"``): the
     ring and key as the report wrote them, the OSM id from the pipeline footprint with that key."""
     ids = {f["key6"]: f["osm_id"] for f in fps}
-    _, rows = bm.load_report(report)
+    _, rows = bm.load_report(report, include_unmeasured=True)   # tag-only rows too
     return {b["key"]: {"ring6": b["footprint_lonlat"], "key6": b["key"], "key7": b["key"],
                        "name": b.get("name") or "", "tag_m": b.get("height_tag_m"),
                        "lat": float(b["centroid_lat"]), "lon": float(b["centroid_lon"]),
