@@ -48,7 +48,9 @@ def _ram(min_gb: float | None) -> None:
 CAP_FACTOR = 1.6
 #: An untagged footprint a seed reads over this (its ``hint``) is searched up to at least
 #: :data:`HINT_TALL_CAP_M` (review 2026-10-09 item 2: without a tag the windows stopped at 60 m
-#: (shadow, lean) and 80 m (sweep), so an untagged tower could never be read tall).
+#: (shadow, lean) and 80 m (sweep), so an untagged tower could never be read tall). Refused for
+#: publishing the same day: the wide window finds spurious tall leans on low buildings (Honolulu
+#: LiDAR, untagged: 35.6 % of footprints under 30 m vs 11.1 % at 60 m); hints are opt-in only.
 HINT_TALL_M = 80.0
 HINT_TALL_CAP_M = 220.0
 
