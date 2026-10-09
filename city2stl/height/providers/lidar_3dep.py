@@ -14,7 +14,8 @@ COP30 was produced from TanDEM-X acquisitions (2011–2015) and captures
 building tops; SRTM (2000) underestimates tall buildings, making the
 difference a valid lower-bound nDSM.
 
-Coverage: US (contiguous, Alaska, Hawaii); falls back to the global NDSMProvider
+Coverage: US (contiguous, Alaska, Hawaii, Puerto Rico and the USVI, Guam and the
+Northern Marianas: ``US_EXTENTS``); falls back to the global NDSMProvider
 for non-US regions via the provider registry coverage check.
 Resolution: ~30 m.
 Confidence: 0.82 (US-specific, slight advantage over global SRTM-only nDSM).
@@ -48,12 +49,27 @@ _NAMESPACE = "lidar_3dep"
 _TIMEOUT = 180
 
 
+#: ``(north, south, east, west)`` boxes of the US and the territories USGS 3DEP has flown.
+#: A bbox meeting any of them counts as US; the EPT project lookup is the real test.
+#: Checked against every project in the USGS EPT boundary index (2026-10-09): Puerto Rico
+#: and the USVI (``USGS_LPC_PR_PRVI_*_2018``, ``USGS_LPC_PR_PuertoRico_*``), Guam
+#: (``Guam_2012``), the Northern Marianas (``PI_CNMI_*_2019``) and St. Lawrence Island
+#: (``AK_NativeAKVillages_7_D22``, west of -170) sat outside the old three boxes, so the
+#: EPT reader returned nothing for San Juan.
+US_EXTENTS: dict[str, tuple[float, float, float, float]] = {
+    "conus": (50.0, 24.0, -66.0, -125.0),
+    "alaska": (72.0, 51.0, -129.9, -180.0),
+    "aleutians_east_of_180": (53.5, 51.0, 180.0, 172.0),
+    "hawaii": (23.0, 18.0, -154.0, -160.6),
+    "puerto_rico_usvi": (18.6, 17.6, -64.5, -68.0),
+    "guam_cnmi": (20.6, 13.2, 146.1, 144.6),
+}
+
+
 def _is_in_us(bbox: BBox) -> bool:
     north, south, east, west = bbox
-    conus = south < 50 and north > 24 and west < -66 and east > -125
-    alaska = south < 72 and north > 51 and west < -130 and east > -170
-    hawaii = south < 23 and north > 18 and west < -154 and east > -160
-    return conus or alaska or hawaii
+    return any(south < en and north > es and west < ee and east > ew
+               for en, es, ee, ew in US_EXTENTS.values())
 
 
 def _get_api_key() -> str | None:

@@ -291,6 +291,168 @@ class TestEptLaspy:
         names = [p["name"] for p in ept.projects_for_bbox((42.5, 42.4, -71.0, -71.1))]
         assert names == ["MA_New_2021", "MA_Old_2013"]
 
+    def test_project_year_table_and_work_unit_suffix(self):
+        from city2stl.height.providers.lidar_3dep_ept_laspy import PROJECT_YEARS, _project_year
+        # measured flight years win over the name
+        assert _project_year("HI_NOAAMauiOahu_2_B20") == PROJECT_YEARS["HI_NOAAMauiOahu_2_B20"] == 2023
+        assert _project_year("USGS_LPC_HI_Oahu_2012_LAS_2015") == 2013
+        assert _project_year("USGS_LPC_PR_PuertoRico_2015_LAS_2018") == 2016
+        # no four-digit year: the work-unit suffix (_<letter><yy>)
+        assert _project_year("CA_LosAngeles_1_B23") == 2023
+        assert _project_year("AL_19Co_1_B24") == 2024
+        assert _project_year("HI_NOAAMauiOahu_1_B20") == 2020
+        assert _project_year("IA_FullState") == 0
+
+    def test_honolulu_reads_the_2023_noaa_survey(self, monkeypatch):
+        """Waikiki: the NOAA topobathy (flown 2023-03, no year in its name) used to rank last,
+        so the 2013 USGS survey was read and the 2017-2018 towers were missing."""
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+        oahu = {"type": "Polygon", "coordinates": [[[-158.3, 21.2], [-157.6, 21.2], [-157.6, 21.8],
+                                                    [-158.3, 21.8], [-158.3, 21.2]]]}
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": "USGS_LPC_HI_Oahu_2012_LAS_2015"}, "geometry": oahu},
+            {"properties": {"name": "HI_NOAAMauiOahu_2_B20"}, "geometry": oahu},
+        ]})
+        got = ept.projects_for_bbox((21.295, 21.264, -157.815, -157.848))
+        assert [(p["name"], p["year"]) for p in got] == [
+            ("HI_NOAAMauiOahu_2_B20", 2023), ("USGS_LPC_HI_Oahu_2012_LAS_2015", 2013)]
+
+    def test_san_juan_reads_the_2018_post_maria_survey(self, monkeypatch):
+        """The 2016 Puerto Rico flight ranked 2018 by its LAS year, level with the 2018 flight."""
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+        pr = {"type": "Polygon", "coordinates": [[[-67.3, 17.9], [-65.2, 17.9], [-65.2, 18.6],
+                                                  [-67.3, 18.6], [-67.3, 17.9]]]}
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": n}, "geometry": pr}
+            for n in ("USGS_LPC_PR_PuertoRico_2015_LAS_2018", "USGS_LPC_PR_PuertoRico_2016_LAS_2017",
+                      "USGS_LPC_PR_PRVI_E_2018")]})
+        got = ept.projects_for_bbox((18.472, 18.432, -65.996, -66.125))
+        assert got[0]["name"] == "USGS_LPC_PR_PRVI_E_2018"
+        assert {p["year"] for p in got[1:]} == {2016}
+
+    def test_suffix_year_beats_an_older_named_project(self, monkeypatch):
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+        sq = {"type": "Polygon", "coordinates": [[[-119, 33], [-117, 33], [-117, 35], [-119, 35], [-119, 33]]]}
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": "CA_LosAngeles_2016"}, "geometry": sq},
+            {"properties": {"name": "CA_LosAngeles_1_B23"}, "geometry": sq},
+        ]})
+        assert [p["name"] for p in ept.projects_for_bbox((34.1, 34.0, -118.2, -118.3))] == [
+            "CA_LosAngeles_1_B23", "CA_LosAngeles_2016"]
+
+    def test_index_is_built_once_and_answers_like_a_full_scan(self, monkeypatch):
+        """The boundary index is parsed once per process (it was re-read and every shape rebuilt
+        per call: 3.3 s per footprint), with the same answers as testing every feature."""
+        from shapely.geometry import box, shape
+
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        def sq(w, s, e, n):
+            return {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}
+
+        ring = {"type": "Polygon", "coordinates": [  # a square with a hole in the middle
+            [[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]], [[3, 3], [7, 3], [7, 7], [3, 7], [3, 3]]]}
+        multi = {"type": "MultiPolygon", "coordinates": [
+            [[[20, 0], [21, 0], [21, 1], [20, 1], [20, 0]]],
+            [[[25, 5], [26, 5], [26, 6], [25, 6], [25, 5]]]]}
+        feats = [
+            {"properties": {"name": "Ring_2019"}, "geometry": ring},
+            {"properties": {"name": "Multi_1_B22"}, "geometry": multi},
+            {"properties": {"name": "Big_2010"}, "geometry": sq(-1, -1, 30, 12)},
+            {"properties": {"name": "Small_2015"}, "geometry": sq(4, 4, 6, 6)},
+            {"properties": {"name": "Bad_2020"}, "geometry": {"type": "Polygon", "coordinates": "x"}},
+            {"properties": {}, "geometry": sq(0, 0, 1, 1)},
+        ]
+        calls = []
+        monkeypatch.setattr(ept, "_resources", lambda: calls.append(1) or {"features": feats})
+
+        def full_scan(n, s, e, w):
+            area, out = box(w, s, e, n), []
+            for f in feats:
+                name = (f.get("properties") or {}).get("name")
+                try:
+                    if name and shape(f["geometry"]).intersects(area):
+                        out.append({"name": name, "url": f"{ept._BUCKET}/{name}/ept.json",
+                                    "year": ept._project_year(name)})
+                except Exception:
+                    continue
+            return sorted(out, key=lambda p: (-p["year"], p["name"]))
+
+        boxes = [(5.5, 4.5, 5.5, 4.5), (2, 1, 2, 1), (0.5, 0.2, 20.5, 20.2), (5.6, 5.2, 25.6, 25.2),
+                 (50, 40, 50, 40), (8, 2, 8, 2), (11.5, 10.5, 11.5, 10.5)]
+        for bb in boxes * 2:
+            assert ept.projects_for_bbox(bb) == full_scan(*bb), bb
+        assert len(calls) == 1
+
+    def test_index_rebuilt_when_the_resources_change(self, monkeypatch):
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+        sq = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": "A_2020"}, "geometry": sq}]})
+        assert [p["name"] for p in ept.projects_for_bbox((0.6, 0.4, 0.6, 0.4))] == ["A_2020"]
+        monkeypatch.setattr(ept, "_resources", lambda: {"features": [
+            {"properties": {"name": "B_2021"}, "geometry": sq}]})
+        assert [p["name"] for p in ept.projects_for_bbox((0.6, 0.4, 0.6, 0.4))] == ["B_2021"]
+
+    def test_node_read_retries_a_dropped_connection(self, monkeypatch):
+        import requests
+
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        class Resp:
+            def __init__(self, code, body=b"laz"):
+                self.status_code, self.content = code, body
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise requests.HTTPError(str(self.status_code))
+
+        script = [requests.ConnectionError("Connection aborted: ConnectionResetError(10054)"),
+                  Resp(503), Resp(200, b"points")]
+        seen = []
+
+        def fake_get(url, timeout):
+            seen.append(url)
+            step = script.pop(0)
+            if isinstance(step, Exception):
+                raise step
+            return step
+
+        monkeypatch.setattr(ept.requests, "get", fake_get)
+        monkeypatch.setattr(ept, "_NODE_BACKOFF_S", 0.0)
+        assert ept._get_node_bytes("u/ept-data/1-0-0-0.laz") == b"points"
+        assert len(seen) == 3
+
+    def test_node_read_gives_up_after_the_last_attempt(self, monkeypatch):
+        import requests
+
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        def fake_get(url, timeout):
+            raise requests.ConnectionError("reset")
+
+        monkeypatch.setattr(ept.requests, "get", fake_get)
+        monkeypatch.setattr(ept, "_NODE_BACKOFF_S", 0.0)
+        with pytest.raises(requests.ConnectionError):
+            ept._get_node_bytes("u/ept-data/1-0-0-0.laz")
+
+    def test_node_read_does_not_retry_a_404(self, monkeypatch):
+        import requests
+
+        from city2stl.height.providers import lidar_3dep_ept_laspy as ept
+
+        class Resp:
+            status_code, content = 404, b""
+
+            def raise_for_status(self):
+                raise requests.HTTPError("404")
+
+        seen = []
+        monkeypatch.setattr(ept.requests, "get", lambda url, timeout: seen.append(url) or Resp())
+        with pytest.raises(requests.HTTPError):
+            ept._get_node_bytes("u/ept-data/1-0-0-0.laz")
+        assert len(seen) == 1
+
     def test_node_bounds_halves_per_level(self):
         from city2stl.height.providers.lidar_3dep_ept_laspy import node_bounds
         cube = [0.0, 0.0, 0.0, 100.0, 100.0, 100.0]

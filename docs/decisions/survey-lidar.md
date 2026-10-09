@@ -5,6 +5,32 @@ overrides: which endpoints work, how they are read, and what they can and cannot
 Endpoint catalogue: [../reference/survey-sources.md](../reference/survey-sources.md). Related:
 [building-heights.md](building-heights.md), [roofs-landmarks.md](roofs-landmarks.md).
 
+### 2026-10-09 — The EPT project read is the newest by flight year, from a measured table, the name, then the work-unit suffix
+- **Decision:** `city2stl/height/providers/lidar_3dep_ept_laspy.py::_project_year` ranks a project
+  by `PROJECT_YEARS` (flight year measured from one node's GpsTime), else the latest year in its
+  name, else the USGS work-unit suffix `_<letter><yy>` (`HI_NOAAMauiOahu_2_B20` -> 2020, the
+  funding year, so a lower bound on the flight), else 0. `projects_for_bbox` parses the boundary
+  index once per process into an STRtree (`_project_index`) and memoises the spatial answer per
+  bbox. `lidar_3dep.py::US_EXTENTS` adds Puerto Rico/USVI, Guam/CNMI, Niihau and St. Lawrence
+  Island to the US pre-check. A dropped node read is retried (`_get_node_bytes`, 3 tries).
+- **Why:**
+  - Honolulu: `HI_NOAAMauiOahu_2_B20` (flown 2023-03-09 at Waikiki) had no year in its name, ranked
+    last, and `USGS_LPC_HI_Oahu_2012_LAS_2015` (flown 2013-06-20) was read, missing the 2017-2018
+    towers. 226 of the 230 projects without a four-digit year carry the suffix.
+  - San Juan: `USGS_LPC_PR_PuertoRico_2015_LAS_2018` was flown 2016-03-19 but ranked 2018 by its
+    LAS year, level with the post-Maria `USGS_LPC_PR_PRVI_E_2018` (2018-05-14), which won on its
+    name only. And the old US boxes left out Puerto Rico, so the EPT reader read nothing there.
+  - The lookup re-read the 2279-feature JSON and rebuilt every shape per call: 1.1-1.2 s per call
+    on an idle PC, 3.3 s under load, and `benchmark.survey_part` makes one or two calls per
+    footprint. Indexed: 0.2-0.3 ms per call after a 1 s build, the same answers (San Juan and
+    Honolulu samples).
+  - One S3 `ConnectionResetError` failed a whole 207-footprint Honolulu tile.
+- **Rejected:** the year from `ept.json` (it carries no date) or the index properties (only
+  `name`, `id`, `count`, `url`); reading GpsTime at lookup time (a network read per project in a
+  per-footprint call).
+- **Supersedes / superseded by:** —
+- **Source:** t40-review, new benchmark cities README (Problems 2-4).
+
 ### 2026-09-27 — Survey providers share one nDSM contract; gated endpoints are documented, not scraped
 - **Decision:** every survey provider exposes
   `ndsm_for_bbox(bbox, resolution_m) -> (array row0=north, lon/lat Affine) | None`, dispatched by

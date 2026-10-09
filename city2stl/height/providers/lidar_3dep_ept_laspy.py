@@ -8,8 +8,10 @@ published project; ``lidar_3dep_ept`` reads it through PDAL, which is a conda-on
 install. This reads it with ``laspy[lazrs]``, already a dependency.
 
 How:
-  1. Project lookup in the USGS boundary index (``resources.geojson``, cached);
-     the newest project (latest year in its name) meeting the bbox wins.
+  1. Project lookup in the USGS boundary index (``resources.geojson``, cached on disk,
+     parsed once per process into an STRtree); the newest project meeting the bbox
+     wins (``_project_year``: a measured flight year, else the latest year in the name,
+     else the work-unit suffix year such as ``_B20``).
   2. Hierarchy walk from ``0-0-0-0``, loading sub-hierarchy files only where a
      node meets the bbox.
   3. Every node meeting the bbox is read, at every level: an octree level is a
@@ -31,6 +33,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -89,33 +92,116 @@ def _resources() -> dict:
     return resp.json()
 
 
+#: Flight year of projects whose name does not give it, measured from the GpsTime of one
+#: EPT node at the place named (2026-10-08/09). The name rule below ranked the 2023 NOAA
+#: topobathy over Waikiki last (no year in its name), so Honolulu read the 2013 survey,
+#: which predates the 2017-2018 towers; and the 2016 Puerto Rico flight ranked 2018 (its
+#: LAS year), level with the post-Maria 2018 flight, which won on its name only.
+PROJECT_YEARS: dict[str, int] = {
+    "HI_NOAAMauiOahu_2_B20": 2023,                 # 2023-03-09 at Waikiki
+    "USGS_LPC_HI_Oahu_2012_LAS_2015": 2013,        # 2013-06-20 at Waikiki
+    "USGS_LPC_PR_PuertoRico_2015_LAS_2018": 2016,  # 2016-03-19 at Condado
+    "USGS_LPC_PR_PuertoRico_2016_LAS_2017": 2016,  # 2016-03-19 at Condado
+}
+
+_NAME_YEAR = re.compile(r"(?<!\d)(19[89]\d|20[0-4]\d)(?!\d)")
+#: USGS work-unit suffix ``_<letter><yy>`` (``AL_19Co_1_B24``, ``HI_NOAAMauiOahu_2_B20``):
+#: the fiscal year the work unit was funded, so the flight is that year or later.
+_WORK_UNIT_YEAR = re.compile(r"_[A-Z](\d{2})$")
+
+
 def _project_year(name: str) -> int:
-    """Latest plausible year in a project name (``IL_4County_Cook_2017_LAS_2019`` -> 2019)."""
-    years = [int(y) for y in re.findall(r"(?<!\d)(19[89]\d|20[0-4]\d)(?!\d)", name)]
-    return max(years, default=0)
+    """Year a project ranks by: ``PROJECT_YEARS`` (measured), else the latest plausible year
+    in its name (``IL_4County_Cook_2017_LAS_2019`` -> 2019), else its work-unit suffix
+    (``CA_LosAngeles_1_B23`` -> 2023), else 0.
+
+    226 of the index's 230 projects without a four-digit year carry the suffix
+    (2026-10-09); the rest are ``*_FullState`` and ``NY_NewYorkCity``.
+    """
+    if name in PROJECT_YEARS:
+        return PROJECT_YEARS[name]
+    years = [int(y) for y in _NAME_YEAR.findall(name)]
+    if years:
+        return max(years)
+    m = _WORK_UNIT_YEAR.search(name)
+    return 2000 + int(m.group(1)) if m else 0
 
 
-def projects_for_bbox(bbox) -> list[dict]:
-    """``[{name, url, year}]`` of the EPT projects meeting ``bbox``, newest first."""
-    from shapely.geometry import box, shape
+#: How long the parsed boundary index is reused in one process before ``_resources`` is
+#: asked again (it refreshes the file after ``_RESOURCES_TTL_S``).
+_INDEX_TTL_S = 86400.0
+_INDEX: dict = {}
+_INDEX_LOCK = threading.Lock()
 
-    from ._survey import as_nsew
 
-    n, s, e, w = as_nsew(bbox)
-    area = box(w, s, e, n)
-    out = []
+def _project_index():
+    """``(names, urls, geoms, STRtree, memo)`` over the boundary index, built once per process.
+
+    Rebuilt when ``_resources`` is replaced (tests) or after ``_INDEX_TTL_S``. Parsing the
+    2279-feature JSON and rebuilding every shape cost 3.3 s per ``projects_for_bbox`` call,
+    and ``benchmark.survey_part`` makes one or two per footprint (1.5 h per 1000).
+    ``memo`` maps a bbox to the positions of the projects meeting it.
+    """
+    with _INDEX_LOCK:  # survey reads run in threads; build the index once, not per thread
+        hit = _INDEX.get("index")
+        if hit is not None and hit[0] is _resources and time.monotonic() - hit[1] < _INDEX_TTL_S:
+            return hit[2]
+        index = _build_project_index()
+        _INDEX["index"] = (_resources, time.monotonic(), index)
+        return index
+
+
+def _build_project_index():
+    import shapely
+    from shapely.geometry import shape
+    from shapely.strtree import STRtree
+
+    names, urls, geoms = [], [], []
     for feat in _resources().get("features", []):
         props = feat.get("properties") or {}
         name = props.get("name")
         if not name:
             continue
         try:
-            if not shape(feat["geometry"]).intersects(area):
-                continue
+            geom = shape(feat["geometry"])
         except Exception:
             continue
-        out.append({"name": name, "url": props.get("url") or f"{_BUCKET}/{name}/ept.json",
-                    "year": _project_year(name)})
+        names.append(name)
+        urls.append(props.get("url") or f"{_BUCKET}/{name}/ept.json")
+        geoms.append(geom)
+    shapely.prepare(geoms)
+    return names, urls, geoms, STRtree(geoms), {}
+
+
+#: Bboxes remembered per index (a region's footprints, each asked once or twice).
+_MEMO_MAX = 50000
+
+
+def projects_for_bbox(bbox) -> list[dict]:
+    """``[{name, url, year}]`` of the EPT projects meeting ``bbox``, newest first
+    (ties by name). The spatial part is memoised per bbox; the years are not, so
+    ``PROJECT_YEARS`` edits apply at once."""
+    from shapely.geometry import box
+
+    from ._survey import as_nsew
+
+    names, urls, geoms, tree, memo = _project_index()
+    key = as_nsew(bbox)
+    hits = memo.get(key)
+    if hits is None:
+        n, s, e, w = key
+        area = box(w, s, e, n)
+        found = []
+        for i in sorted(int(i) for i in tree.query(area)):
+            try:
+                if geoms[i].intersects(area):
+                    found.append(i)
+            except Exception:
+                continue
+        if len(memo) >= _MEMO_MAX:
+            memo.clear()
+        hits = memo[key] = tuple(found)
+    out = [{"name": names[i], "url": urls[i], "year": _project_year(names[i])} for i in hits]
     return sorted(out, key=lambda p: (-p["year"], p["name"]))
 
 
@@ -163,12 +249,33 @@ def nodes_for_bounds(base: str, ept: dict, bounds, max_depth: int,
     return keys
 
 
+#: Tries per node read on a dropped connection or a 5xx. One S3 reset used to fail the whole
+#: tile (Honolulu survey truth, 2026-10-08: 207 footprints in one tile lost to a single
+#: ``ConnectionResetError``).
+_NODE_ATTEMPTS = 3
+_NODE_BACKOFF_S = 2.0
+
+
+def _get_node_bytes(url: str) -> bytes:
+    for attempt in range(_NODE_ATTEMPTS):
+        try:
+            resp = requests.get(url, timeout=_TIMEOUT_S)
+            if resp.status_code < 500 or attempt + 1 == _NODE_ATTEMPTS:
+                resp.raise_for_status()
+                return resp.content
+        except (requests.ConnectionError, requests.Timeout,
+                requests.exceptions.ChunkedEncodingError):
+            if attempt + 1 == _NODE_ATTEMPTS:
+                raise
+        logger.info("3DEP EPT: retrying %s (attempt %d)", url, attempt + 2)
+        time.sleep(_NODE_BACKOFF_S * (2 ** attempt))
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def _read_node(base: str, key: str):
     import laspy
 
-    resp = requests.get(f"{base}/ept-data/{key}.laz", timeout=_TIMEOUT_S)
-    resp.raise_for_status()
-    las = laspy.read(io.BytesIO(resp.content))
+    las = laspy.read(io.BytesIO(_get_node_bytes(f"{base}/ept-data/{key}.laz")))
     cls = np.asarray(las.classification)
     keep = ~np.isin(cls, _NOISE_CLASSES)
     return (np.asarray(las.x)[keep], np.asarray(las.y)[keep], np.asarray(las.z)[keep],

@@ -375,6 +375,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Runner: `map2stl/city2stl/skyline/scripts/10_benchmark.py` (flags pinned by `PINNED_FLAGS`, `_region_env`; per-tier table `print_tiers`).
   - Page: `map2stl/city2stl/skyline/benchmark_report.py::write_benchmark_page` (per-tier table `_tiers_html`).
   - US lidar where Planetary Computer has none: `map2stl/city2stl/height/providers/lidar_3dep_ept_laspy.py::ndsm_for_bbox`.
+  - EPT project choice: `lidar_3dep_ept_laspy.py::projects_for_bbox` (STRtree index `_project_index`, memo per bbox), newest by `_project_year` (measured `PROJECT_YEARS`, name year, work-unit suffix `_B20`); node reads retried `_get_node_bytes`; US pre-check boxes (PR/USVI, Guam/CNMI) `map2stl/city2stl/height/providers/lidar_3dep.py::US_EXTENTS`.
 - Heights from Wikimedia Commons skyline photos (F-WEB2):
   - Finder: `map2stl/city2stl/skyline/commons_photos.py::find_skyline_photos` (`usable`, `is_dark`, `hfov_from_35mm`).
   - Camera from OSM towers: `map2stl/city2stl/skyline/skyline_match.py::locate_and_solve` (`refine`, `identify`).

@@ -95,7 +95,8 @@ def years_for_bbox(name: str, bbox) -> tuple[int, int] | None:
     """``(first, last)`` survey year of provider ``name`` over ``bbox``, or None if unknown.
 
     ``usgs_3dep_ept`` reads the newest EPT project meeting the bbox, so its year is that
-    project's (from its name; the boundary index is cached for 30 days). ``usgs_3dep`` may
+    project's (``lidar_3dep_ept_laspy._project_year``: a measured flight year, else the year
+    in its name or work-unit suffix; the boundary index is cached for 30 days). ``usgs_3dep`` may
     serve an older COPC copy first, so its year stays unknown.
     """
     if name not in PROVIDERS:
