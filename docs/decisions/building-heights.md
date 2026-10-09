@@ -5,6 +5,500 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
+### 2026-10-09 — Cartagena runs footprint ownership with the cadastre occluders
+- **Decision:**
+  - Site flags `use_ownership` and `use_cadastre_occluders`, both true in `sites/cartagena.json`.
+    `region_pdf` sets them through `ownership.set_site_flags`; the env vars `SKYLINE_OWNERSHIP` and
+    `SKYLINE_CADASTRE_OCCLUDERS` still override. The module defaults stay off.
+- **Why:** only with the cadastre occluders does Cartagena meet the low-rise gate of "A drone
+  reading's top belongs to the footprint line of sight gives it" (used drone readings on non-PH
+  1-3-floor plots, gate <= 10).
+- **Measured** (replay `Cartagena_v14` against `Cartagena_v13_sat`):
+  - the 7 towers unchanged; 10 of 10 tag-correct readings kept;
+  - used drone readings on non-PH 1-3-floor plots 53 -> 2; b0490 now 11 m;
+  - tiers verified_2 / tag / single / prior 38 / 136 / 127 / 715 -> 34 / 136 / 131 / 718 (v14).
+- **Supersedes / superseded by:** the **Default** bullet of the ownership entry, for Cartagena.
+- **Source:** commit `86dca7a`; gate script scratch `own2/gate14.py`; tier map
+  `runs/region_reports/Cartagena_v14_skyline_report/tiers_map.png`.
+
+### 2026-10-09 — The tower-behind veto counts a low lean with peak confidence >= 0.7 as satellite low
+- **Decision:**
+  - `_pano/elevated.py` (`_sat_max`, the veto): a low lean whose uncapped peak confidence
+    (`extra.conf_peak`) is >= 0.7 counts as "satellite low". Veto only: fusion and the tiers keep
+    the calibrated 0.3.
+  - Cartagena's `readings.json` re-measured with all 7 scenes' outlines (sha be8da4d5 -> 73515f8a,
+    2,922 footprints).
+- **Why:** closes the open question of "Stored satellite readings are calibrated on load".
+  Honolulu (untagged, 60 m window, `hon2` before / after): leans under 40 m with peak confidence
+  >= 0.7: 580 / 350; of those on truth under 40 m: 533 (91.9 %) / 318 (90.9 %); truth >= 40 m:
+  47 / 32; truth >= 100 m: 8 / 5 of the 126 towers.
+- **Measured** (`Cartagena_v13_sat`, `SKYLINE_OWNERSHIP=0`, against `v12_support`):
+  - tiers verified_2 / tag / single / prior 38 / 136 / 127 / 715 against 42 / 134 / 125 / 715;
+  - the 7 towers unchanged; 10 of 10 tag-correct readings kept;
+  - used drone readings on non-PH 1-3-floor plots 53 (gate <= 50 fails);
+  - b0490 100 m -> 10.9 m prior (verified_2 -> prior); b1285 55 -> 10 m (verified_2 -> prior).
+- **Supersedes / superseded by:** the **Open** bullet of "Stored satellite readings are calibrated
+  on load".
+- **Source:** commit `978eee1`; scratch `sat/`.
+
+### 2026-10-09 — Google Open Buildings 2.5D does not replace the T41 prior for low-rises (refused on the pre-registered test)
+- **Decision:**
+  - `city2stl/skyline/lowrise_prior.py` stays off (`STATUS = "refused"`, site flag
+    `use_google_2p5d_prior` unset everywhere).
+  - The reader `city2stl/height/providers/google_ob25d.py` is kept for later tests. It is not in
+    `_REGISTRY`.
+- **Why:** the test was pre-registered (scratch `ob25/notes.md`).
+  - Truth: survey p95 on untagged footprints of San Juan (2,221 rows), Mayagüez (2,285, from the 5
+    densest 500 m tiles) and Charlotte Amalie (1,471, from 6 tiles); USGS PR/VI 2018.
+  - Method: leave-one-city-out; p90 at presence >= 0.7 (chosen by every fold), plus a median
+    offset per band of the raw value.
+  - Under 15 m, the composite beats T41 in every held-out city and is nearly unbiased:
+
+    | City | Composite MAE | T41 MAE | Composite bias | T41 bias |
+    |---|---|---|---|---|
+    | San Juan | 2.03 | 3.16 | +0.62 | +2.13 |
+    | Mayagüez | 1.91 | 2.46 | +0.06 | +1.36 |
+    | Charlotte Amalie | 1.89 | 2.01 | +0.05 | +0.78 |
+
+    Within max(25 %, 2 m): 0.63 / 0.66 / 0.64 against 0.40 / 0.48 / 0.60.
+  - It fails four of the five marks (P1, P3, P4, P5):
+    - P1, the 1 m margin, in 2 of 3 cities (gain 0.55 in Mayagüez, 0.12 in Charlotte Amalie);
+    - P3, the band-2 offset span <= 1 m: 1.89 m (San Juan fold fitted on 27 rows; band 1 span 0.19 m);
+    - P4, the Cartagena gate: 38 of 286 prior rows within max(25 % of the cadastre, 2 m) of the
+      non-PH cadastre, against >= 143 required (16 today; MAE 7.73 -> 5.05 m; `tiers.agree`: 16 ->
+      29; with the 2 m floor 16 -> 36);
+    - P5, the 7 OSM tags on non-PH plots within tol: 6 of 7 (b2663: tag 3.0 m, Google corrected
+      5.15 m).
+  - P2 passes: 15-20 m no worse than T41 (San Juan 6.16 vs 7.01, n 83; Mayagüez 6.62 vs 6.84, n 30;
+    Charlotte Amalie n 11 not counted).
+  - Offsets (m) B1 / B2: all three cities +0.15 / +0.74; San Juan held out +0.27 / +1.84; Mayagüez
+    held out +0.09 / -0.05; Charlotte Amalie held out +0.08 / +0.78.
+  - Cartagena, post hoc: on "1-floor" cadastre plots (n 185, median footprint 463 m2) Google p90
+    reads 8.5 m against the cadastre's 4.0 m; on 2-floor plots 9.0 against 7.0. No Cartagena survey
+    can say which source is wrong.
+- **Rejected:**
+  - Lowering the margin after seeing the numbers.
+  - Fitting the correction on Cartagena's cadastre, which is not survey truth.
+  - Using Google above 20 m: its heights are capped at 100 m.
+- **Data:** 275,426,892 bytes in 248 logged range requests (5 headers of 64 KB, plus the city
+  windows of the 2023 layer), saved in `~/.cache/ob25d/2023/`. The tiles are tiled COGs: 512 px
+  blocks, DEFLATE with predictor 3, band-separate planes, 14 overviews.
+- **Next evidence that could reopen it:** Medellín LiDAR (review item 14), a Colombian survey; a
+  field check of 20-30 "1-floor" Cartagena plots over 300 m2.
+- **Supersedes / superseded by:** —. Review 2026-10-09 item 4.
+- **Source:** commit `a220104`; scratch `ob25/` (`notes.md`: the pre-registration and one deviation
+  made before scoring, smaller truth areas; `results.md`; `fetch_log.md`).
+
+### 2026-10-09 — A drone reading's top belongs to the footprint line of sight gives it; only tags and cadastre counts take a top away
+- **Decision:** `_pano/ownership.py` decides from geometry which footprint owns each trusted
+  drone reading's top; `_pano/elevated.py::seed_ownership` runs it after the cached measurement
+  (stage-cache keys unchanged) and `elevated_estimates` applies it (`not_owned`,
+  `_mark_not_owner`, `recredited`). Switch `ownership.OWNERSHIP` / env `SKYLINE_OWNERSHIP`
+  (default: see the end of this entry).
+  - Upper plausible height (`upper_heights`): as an occluder the OSM tag; else, with the cadastre
+    occluders on (`CADASTRE_OCCLUDERS` / `SKYLINE_CADASTRE_OCCLUDERS`), the non-PH cadastre
+    floors x 1.5 x 4.13 m; else the untagged prior's p90 (`prior_upper`: quantile GBM, the
+    `untagged_prior` features and training set, scored city left out). As the owner of its own
+    top, tag + 25 % (`TAG_MARGIN`). Never a measured top.
+  - Claims, near to far (`Scene.owners`): every footprint claims its silhouette at that height
+    (`claim_top`). Per core column the top pixel belongs to the first footprint whose claim holds
+    it: nearer (4 px of the spin pano, scaled, inside its claimed top and its left/right edges:
+    the isovist fails), own, farther (the ray clears the own claim) or none. The footprint keeps
+    the top with a third of its columns (`SELF_MIN`, as `measure_footprints`).
+  - Rule (`not_owned`): the walk counts, besides the footprint itself, only footprints with a
+    hard bound (tag, cadastre count). `owner_nearer`, `owner_farther` and `owner_above_tag` (above
+    its own tag + 25 % or cadastre bound, nothing tagged explains it) leave fusion. A prior p90
+    claim never takes a top away.
+  - Re-credit (`Scene.recredit`): a reading that left, whose top a farther *untagged* footprint's
+    claim holds (every claim counted), joins as that footprint's reading when `trusted` accepts it
+    with its base hidden (visible share above the nearer claims). Line of sight picks it, so the
+    2026-10-07 refusal (owner chosen by agreeing evidence) does not apply; never to a tagged
+    footprint (its tag publishes; agreeing re-credits would confirm it by construction).
+- **Why:** calibrated depth caught 0 of the 4 known tower-behind cases (depth study 2026-10-09);
+  CBHE and OpenFACADES decide ownership by geometry (review §2.6).
+- **Measured** (pre-registered marks, review §3 item 3; Miami drone states, LiDAR `confirmed`,
+  truth >= 20 m; wrong = more than 25 % off):
+
+  | set | trusted with truth | wrong caught (>= 50 %) | right flagged (<= 5 %) | within 25 %: before -> kept (>= 0.80) |
+  |---|---|---|---|---|
+  | current pipeline, re-measured | 64 | 20 of 28 (71 %) | 1 of 36 (2.8 %) | 0.56 -> 0.81 (n 43) |
+  | older reading set (F-SKY26:111, saved states) | 90 | 42 of 51 (82 %) | 1 of 39 (2.6 %) | 0.43 -> 0.81 (n 47) |
+
+  - The 4 known cases are caught: Kaseya Center (read 138 m, LiDAR 43; the tagged 900 Biscayne
+    Bay behind owns the top), The Loft 1 (177 / 82), The Guild (183 / 106), Brickell Key I
+    (157 / 68) (above their tags, nothing tagged explains them). All four are tagged; untagged,
+    with no tagged footprint behind, they would be kept.
+  - The false flag: Venetia (read 83 m, LiDAR 99; prior p90 30 m), whose top the tagged b21280
+    (115 m tag, 107 LiDAR) behind it claims.
+  - Miami has almost every tower tagged: the rule with or without the p90 claims scores the same.
+  - Miami fusion (`seed_experiment.py --region miami --remeasure --own`): 95 of 243 trusted
+    readings left out (55 farther, 29 above tag, 11 nearer); fused OSM-tag error within 25 %
+    0.76 (n 46) -> 0.85 (n 41); 9 re-credits to untagged footprints, none with LiDAR truth.
+  - Cost: 6-13 s a seed on CPU; 25-44 s with the cadastre occluders.
+- **Cartagena** (region replay from the stage cache; treatment and control on the same satellite
+  readings, `readings.json` sha 79252747, rebuilt by the satellite agent at 10:33):
+
+  | | v11 | control (ownership off) | ownership | ownership + cadastre occluders |
+  |---|---|---|---|---|
+  | verified_2 / tag / single / prior | 43 / 133 / 124 / 716 | 42 / 134 / 124 / 716 | 40 / 134 / 127 / 716 | 37 / 134 / 131 / 717 |
+  | the 7 towers (Estelar 202, Allure 190, Gran Bay 170, Portomarine 188, Nautica 161, Ravello 160, Palmetto 156) | v11 values | unchanged | unchanged | unchanged |
+  | tag-correct used readings kept (of 10) | 10 | 10 | 10 | 10 |
+  | tag-wrong used readings (b0303 90/6, b0619 131/10, b0639 154/10, ...) | 3 | 4 | 0 | 0 |
+  | used readings on non-PH 1-3-floor plots (gate: <= 10) | 50 | 54 | 52 | **2** |
+  | trusted readings left out by ownership / re-credits kept | - | - | 45 / 3 | 175 / 19 |
+  | verified_2 on non-PH 1-floor plots | b0788, b1761, b0806 | b0788, b1761 | b0788, b1761 | none |
+
+  - Without the cadastre the gate's low-rise mark fails: the 1-3-floor plots are untagged, and
+    their prior p90 does not take a top away.
+  - Lost corroborations (ownership vs control): b0411 (70 m, drone + stereo) and b0339 (66 m),
+    PH plots of 21 and 16 floors, whose tops a tagged tower behind claims: the Venetia case.
+  - Re-credits, cadastre off: 3 untagged footprints gain a reading (b0369 81 m, b0271 89-91 m,
+    b0458 99 m); none is corroborated; all three publish their prior (a single over 2x it).
+  - With the cadastre occluders: 12 footprints behind take a re-credited reading (11 new to that
+    seed), 2 corroborated: b0383 (19-floor non-PH plot) becomes verified_2 at 96 m from seeds 5
+    and 6 (it had no row in v11); b0896 stays verified_2 (126 -> 130 m). Lost corroborations
+    against the control: b0788 (55 m, 1 floor), b1761 (68/84 m, 1 floor), b0490 (91/110 m,
+    2 floors) — the review's suspect low-rise verified_2 rows — and b0411, b0339, b1505 (PH,
+    21/16/15 floors, 66-70 m: likely right).
+  - Tier map: `runs/region_reports/Cartagena_v12_own_cad_skyline_report/tiers_map*.png` (and
+    `Cartagena_v12_own_skyline_report/`): v11 and v12 look alike; a few green Bocagrande
+    footprints turn single or prior, the labelled towers do not move.
+- **Rejected** (measured; see Rejected hypotheses): the own-corner rule; the claims as the run's
+  start (`occ[]`); untagged (prior p90) claims as ownership evidence.
+- **Limits:** one truth city (the Chicago states have no `confirmed` truth on their 8 trusted
+  readings; Honolulu / Fort Lauderdale spheres not captured), so review §4.5's second city is
+  open. The rule was set while looking at the Miami readings (iterations in scratch `own/notes.md`);
+  the older reading set and Cartagena are the checks. Untagged towers with a low p90 in front of a
+  tagged one lose their reading (Venetia, b0411, b0339).
+- **Default:** module off (`OWNERSHIP = False`, `CADASTRE_OCCLUDERS = False`): it passes the Miami
+  marks, but review §4.5 asks for two truth cities, and Cartagena meets the low-rise gate only
+  with the cadastre occluders. Env `SKYLINE_OWNERSHIP=1` (and `SKYLINE_CADASTRE_OCCLUDERS=1`) turn
+  it on for a run. **Cartagena has both on through its site flags since `86dca7a`** (entry
+  "Cartagena runs footprint ownership with the cadastre occluders", v14).
+- **Source:** commit `b2fb7d6`; harness `Code/claude/scripts/seed_experiment.py --own [--own-cad]`;
+  review `Code/claude/research/panorama-pipeline-review-2026-10-09.md` §3 item 3.
+
+### 2026-10-09 — A tall satellite reading supports a single within 1.5x, not the strict `agree`
+- **Decision:** `_core/tiers.py::SUPPORT_RATIO = 1.5`. `single_support` keeps a single over 2x the
+  prior when a validated satellite reading (`validated_satellite`: lean >= 0.7, multiview >= 0.3,
+  `ls`; >= 40 m) is within 1.5x of it (`|ln a/b| <= ln 1.5`). Corroboration (`verified_pair`,
+  `tag_witness`, the tag check, `disputed_by`) keeps `agree` (ratio 1.25).
+- **Why:** the agreement change (next entry but one) made `agree` stricter, and `single_support`
+  used it: b0691 (drone 55.9 + lean 72.5, conf 1.0, ratio 1.30) lost support and published an
+  18.9 m prior. The user chose a looser ratio for support only.
+- **Evidence:** labelled stereo singles (no drone building has a validated satellite reading in
+  `buildings.json`) supported by a validated reading: ratio 1.25 n 126, 84.9 % right; 1.33 n 135,
+  84.4 %; 1.5 n 147, 83.7 % (the 21 added by 1.5: 16 right).
+- **Not changed:** the validation bar. b0806's real lean is 48.4 m at conf 0.37, so it is not
+  validated and still publishes the 15.6 m prior.
+- **Measured:** Cartagena `v12_support` (GPU, `SKYLINE_OWNERSHIP=0`) against `v12_tiers`: one row
+  changes, b0691 prior 18.9 -> single 55.9 m (lean 72.5); tiers verified_2 42 / tag 134 / single
+  125 / prior 715; the 7 towers unchanged.
+- **Supersedes / superseded by:** settles the "To decide" item of the agreement entry (b0691, b0806).
+- **Source:** commits `45f5c41`, `8e26925`; scratch `support/`.
+
+### 2026-10-09 — The benchmark scores by height band and tier, survey-only cities score, and roof percentiles are stored
+- **Decision:**
+  - Beside the unchanged headline (`10_benchmark` table, confirmed truth, survey-blind height),
+    every scored report carries `bench` (`benchmark.py::bench_tables`), twice: `measured` (the
+    rows the run measured, the headline's set) and `published` (every published row, tag-only
+    rows too: a region report lists every OSM-tagged building as a `measured: False` row).
+  - Bands: the review's <15 / 15-40 / 40-100 / >100 m (`REVIEW_BANDS`) and EUBUCCO's 0-5 / 5-10 /
+    10-20 / 20+ (`EUBUCCO_BANDS`). Per band x tier and per band x method x camera-distance band
+    (<500 / 500-1,000 / >1,000 m, drone and street seeds; `DISTANCE_BANDS`): n, MAE, median AE,
+    signed bias, P90 AE, tol (within max(25 %, 2 m) of truth: `TOL_REL`, `TOL_ABS_M`), shares off
+    by > 5 m and > 10 m (`band_errors`).
+  - Pipeline metrics (`pipeline_metrics`): coverage (non-prior published rows, of rows and of all
+    footprints), false-corroborated rate (`verified_2` / `corroborated` rows off by more than
+    tol), withhold precision (withheld readings that were wrong) and recall (wrong readings that
+    were withheld).
+  - Single-source truth: a region whose footprints have no 3D Tiles reading (San Juan, Honolulu,
+    Fort Lauderdale: monthly cap) scores its `survey_only` records (`truth_mode`,
+    `scoring_truth`), printed in a table of its own; its headline row stays n = 0 as before.
+  - Truth statistics: each survey record stores p50 / p70 / p90 / p95 / p99 / max roof heights and a
+    ground p5 (`footprint_stats`, `ROOF_STATS`, `ROOF_STATS_VERSION` 2). p95 stays the headline;
+    the stat version (`STAT_VERSION` 2) is unchanged, old caches stay readable. Readings are also
+    scored against their method's statistic (`METHOD_STAT`): silhouettes (drone, street, lean,
+    multiview, stereo, shadow) against p99, floor counts against p70.
+  - Truth age: `temporal` = `may_postdate` (OSM `start_date` in or after the survey's last year),
+    `predates` or `unknown` (`temporal_flag`); single-source scoring leaves `may_postdate` out.
+  - Survey-only truth is keyed on the ring as a report writes it (6 decimals, `report_key`).
+  - Nested footprints (an OSM `building:part` with half its area under a footprint whose height
+    tag is higher, or under a larger one when untagged) are left out of the band tables
+    (`nested_keys`, `NESTED_COVER` 0.5): the survey sees only the top of the stack.
+- **Why:**
+  - Review 2026-10-09 §3 item 1 and §4.4: one aggregate (Miami MAE 5.62 m) hides which band fails,
+    and no drone change could be proven outside the Miami harness. The acceptance rule (§4.5)
+    needs n, MAE and tol per band and the false-corroborated rate.
+  - Tag-only rows are most of a report (San Juan 17,902 of 17,916 rows, Miami 27,612 of 27,987);
+    a change to the tag rule or the prior moves them, so the tables must see them. The headline
+    keeps its rows so it does not move.
+  - The raw max is noise-bound on some surveys: Miami's 2019 topobathy has max > p95 + 20 m on
+    24 % of 914 records (up to 294 m; Honolulu 1.7 %); p99 2.8 % (Honolulu 1.0 %). The max is
+    stored as the review asked; silhouettes are matched on p99.
+  - The 2026-10-09 scratch truth keyed full-precision OSM rings, which no report row has (San
+    Juan 0 of 1,121 keys matched): that, not only the confirmed-only rule, made those cities n = 0.
+  - Nested parts: Honolulu 241 of 1,138 published rows with truth; with them the tag tier's MAE at
+    40-100 m was 23.1 m (bias -20.5), without them 15.1 m.
+- **Measured (pre-registered in scratch `bench/notes.md` before the runs):**
+  - Miami `--score-only --no-tiles`: headline n 168, MAE 5.62 m, every 2026-10-07 summary key
+    identical. Passed.
+  - Stored p95 = cached stat-2 `survey_m` on 914 / 914 Miami, 2582 / 2582 Honolulu, 1121 / 1121 San
+    Juan, 442 / 442 Fort Lauderdale records (pass mark >= 99 %), for roof-stat versions 1 and 2.
+    Passed.
+  - Survey-only cities score in every band with truth (published rows): San Juan 10,726 scored,
+    Fort Lauderdale 700, Honolulu 897. Passed. On measured rows only, the San Juan EUBUCCO 10-20 m
+    band has one truth record, nested and left out, so n = 0 there (a fail of the pre-registered
+    wording; the nested rule came after it).
+  - Published rows, review bands, all tiers (n / MAE / bias / tol), nested parts left out:
+
+    | city (truth) | <15 | 15-40 | 40-100 | >100 | all |
+    |---|---|---|---|---|---|
+    | Miami (two-source) | 155 / 3.3 / +2.3 / 48 % | 47 / 7.1 / -1.4 / 53 % | 26 / 6.2 / +3.4 / 88 % | 16 / 11.8 / -4.4 / 94 % | 244 / 4.9 / +1.2 / 57 % |
+    | San Juan (survey only) | 9,839 / 1.7 / -1.2 / 74 % | 737 / 4.9 / -4.4 / 69 % | 150 / 11.0 / -8.7 / 79 % | no truth (max 85.9 m) | 10,726 / 2.0 / -1.5 / 74 % |
+    | Fort Lauderdale (survey only) | 508 / 4.2 / +3.1 / 39 % | 98 / 5.2 / -1.0 / 72 % | 72 / 9.6 / -0.8 / 81 % | 22 / 29.6 / -23.5 / 73 % | 700 / 5.7 / +1.3 / 49 % |
+    | Honolulu (survey only) | 361 / 3.5 / +2.1 / 42 % | 180 / 5.5 / -2.9 / 70 % | 279 / 15.3 / -12.1 / 76 % | 77 / 27.3 / -18.4 / 75 % | 897 / 9.6 / -5.1 / 61 % |
+
+  - Measured rows (the headline's set), all tiers: Miami 136 scored (+32 nested = the headline's
+    168), MAE 5.7 m, tol 54 %; San Juan 11, MAE 12.8 m; Fort Lauderdale 254, MAE 4.6 m, tol 32 %
+    (242 prior rows: +4.5 m bias under 15 m); Honolulu 142, MAE 9.1 m, tol 58 %.
+  - Pipeline metrics, published rows: coverage (non-prior rows / all footprints) Miami 85.4 %, San
+    Juan 79.5 %, Fort Lauderdale 6.0 %, Honolulu 35.9 %; withhold precision 94.7 % / 100 % / 93.0 %
+    / 98.3 %, recall 100 % everywhere (every wrong Street View reading was withheld; no image
+    reading is published in these reports); false-corroborated: n = 0 everywhere.
+  - Final run `runs/benchmark/2026-10-09_1333` (Miami, San Juan, Fort Lauderdale, Honolulu,
+    `--score-only --no-tiles`); tables in scratch `bench/final_tables.txt`.
+- **Rejected:**
+  - Bumping `STAT_VERSION`: the p95 does not change; `roof_stats` versions the new fields.
+  - Ground p5 as an absolute elevation (3DBAG): the providers return only the nDSM (the DTM is
+    dropped in `lidar_3dep_copc.py::grid_points_ndsm`), so ground p5 is the p5 of the nDSM in a 4 m
+    ring outside the footprint (~0 where the survey's ground model fits; median 0.02-0.03 m in all
+    four cities; > 2 m on 13 % of Miami, 7 % Honolulu, 2 % San Juan, 5 % Fort Lauderdale records).
+  - Scoring tag-only rows in the headline: it would move Miami's headline (n 168 -> 292).
+- **Supersedes / superseded by:** refines the survey-only handling of "Low-rises: survey LiDAR
+  where free, tiers everywhere, survey-blind benchmark" (Rejected hypotheses).
+- **Source:** review `claude/research/panorama-pipeline-review-2026-10-09.md` §3 item 1, §4.4;
+  commits `0a3fa6d`, `7f4cb9a`, `36ae357`, `5d94ade`, `d25201d`, `9c76611`, `348a513`, `57ca936`,
+  `7334a93`, `de058ff`; scratch `bench/`.
+
+### 2026-10-09 — Readings agree within 25 % of the smaller, per band; a measurement that disagrees with a published tag is shown beside it
+- **Decision:**
+  - `_core/tiers.py::agree`: two readings agree when the larger is at most `1 + tol` times the
+    smaller (`|ln a/b| <= ln(1 + tol)`), `tol` from `AGREE_TOL` by the smaller value's band
+    (`AGREE_BANDS`: <15 / 15-40 / 40-100 / >100 m). Fitted table: 25 % in every band. It was 25 %
+    of the larger (a ratio up to 1.33; now 1.25). `tag_witness`, `verified_pair` (closest pair
+    by ratio), the tag check, `disputed_by`, `single_support` and `cadastre_heights` use it
+    (`single_support` later moved to its own 1.5x ratio: previous entry).
+  - The 2 m floor below 15 m is implemented (`agree(..., floor_m=)`, `AGREE_FLOOR_M`,
+    `REVIEW_FLOOR_M = 2.0`) but **off** (`AGREE_FLOOR_M = 0`).
+  - `tiers.py::tag_measurement`: a tagged row whose independent agreeing pair (`verified_pair`)
+    has a mean more than 10 % (`TAG_DISAGREE_REL`, on the smaller) from the published tag keeps the
+    tag and carries `measured_m`, `measured_methods`, `tag_disagrees`; shown by
+    `tier_display.py::tag_note` (in `tier_hover`), listed by `tag_disagreements` and in
+    `heights.json` `tag_disagreements`. The user decides any switch.
+  - `tiers.py::selection_reason`: every published row says why its value was chosen
+    (`selection_reason`, `SELECTION_REASONS`), as 3DBAG's selection reason; shown in `tier_hover`.
+- **Why:**
+  - Labelled pairs (scratch `tiers/pairs.py`, 1,946 buildings with confirmed LiDAR / 3D Tiles truth;
+    528 pairs of a kind the independence rules can corroborate: tag + witness, drone + drone,
+    lean + shadow over 100 m): the 2026-10-07 satellite validation (7 cities, readings rebuilt
+    with `readings.footprint_readings`) and the Miami drone harness (6 review states, trusted
+    readings, median per camera). "Right" = within max(25 %, 2 m) of truth. Floor off:
+
+    | band (smaller) | n pairs | old rule: agree / P(both right) | 25 % of smaller: agree / P | held out by city |
+    |---|---|---|---|---|
+    | < 15 m | 59 | 1 / 1.00 | 1 / 1.00 | 0 agreeing |
+    | 15-40 m | 53 | 7 / 0.57 | 7 / 0.57 (no tol 5-25 % reaches 0.85) | 3 / 0.33 |
+    | 40-100 m | 138 | 65 / 0.82 | 54 / 0.89 | 40 / 0.93 |
+    | > 100 m | 278 | 234 / 0.97 | 216 / 0.99 | 215 / 0.99 |
+
+  - False-corroborated rate (corroborated buildings whose published value is off truth by more
+    than max(25 %, 2 m)): 6 of 218 (2.8 %) before, 5 of 207 (2.4 %) after. 40-100 m 3/38 -> 2/34;
+    > 100 m 1/173 -> 1/166 (the same building; bootstrap 90 % interval of the change +0.00 to
+    +0.08 points); 15-40 m 2/6 both. The 11 buildings that lose corroboration are a tag + one
+    reading 1.25-1.33x apart (10 of them with a right tag, so coverage falls more than errors).
+  - Measured vs tag: Palmetto's lean 136.4 m and shadow 135.3 m agree; the tag says 156 m.
+    The review asked to publish what was measured; the user keeps the tag until they decide.
+- **Cartagena replay** (`Cartagena_v12_tiers`, GPU, `SKYLINE_OWNERSHIP=0`, about 10 min, 0 Street
+  View cache misses; HEAD 57ca936 with other agents' uncommitted edits in the tree):
+  - The 7 towers are unchanged (same footprint, same value, all `verified_2`: Estelar 202, Allure
+    190, Gran Bay 170, Portomarine 188, Nautica 161, Ravello 160, Palmetto 156).
+  - Tiers verified_2 43 -> 42, tag 133 -> 134, single 124 -> 124, prior 716 -> 716; 1,016 rows in
+    both runs.
+  - Caused by the rule (4 rows; the same 4 come out of v11's own readings):
+    - b0348, tag 51 vs lean 39.7 (1.28x): verified_2 -> tag; the value stays 51;
+    - b0605, 117 m2, drone seed_5 135 + seed_4 101 (1.33x), satellite all low (stereo 11.8):
+      verified_2 -> single -> withheld (satellite-low veto): 118 -> 10.1 m (prior);
+    - b0691, drone seed_6 55.9 + lean 72.5 at conf 1.0 (1.30x): verified_2 -> single, the lean no
+      longer supports it under the 2x rule -> withheld: 55.9 -> 18.9 m (prior) (later restored
+      by `SUPPORT_RATIO`);
+    - b0806, drone seed_4 62.8 + lean 48.4 at conf 0.37 (1.30x): verified_2 -> single -> withheld:
+      62.8 -> 15.6 m (still, the lean is not validated).
+  - Caused by `d2f2d5e` (satellite readings calibrated on load; not this rule): a low lean now has
+    conf 0.3, so the tower-behind test no longer drops a drone reading: b0490 prior -> verified_2
+    100.3 (drone 90.8 + 109.8), b0561 prior -> verified_2 111.3 (drone 104.6 + 118.0), b1505 prior
+    -> verified_2 67.2 (drone 67.2 + lean 72.5), b0259 prior -> single 66.6 (supported by
+    high_rise_floors); b0486 single 3.7 (satellite) -> prior 9.6 (a new drone reading of 115 m,
+    over 2x the prior and unsupported); stereo under a confident tall lean dropped: b0777 single
+    43.8 -> 41.1, b1591 single 47.3 -> 51.8.
+  - Prior drift: 60 rows prior -> prior, mostly within 1-15 % (the T41 prior's neighbour set
+    changed with those rows). Not this rule.
+  - `tag_disagrees`, whole run: 1 row, Palmetto Eliptic b0598: measured 135.8 m (lean 136.4 +
+    shadow 135.3) against the tag 156 m (-12.9 %); `verified_2`, tag published. Ravello is not
+    flagged: drone 145.5 + stereo 161, mean 153 against the tag 160 (4 %).
+  - `selection_reason` on all 1,016 rows: 231 prior with no usable reading, 221 prior after a
+    withheld reading, 98 satellite-only, 46 osm_tag, 45 drone median, 8 high-rise; the rest are
+    osm_levels / street.
+  - 2 m floor what-if (not on): 1 row changes, b2663 (tag 3 m + multiview 1.5 m, a ground match):
+    tag -> verified_2.
+  - Review §4.5 sanity: the 7 towers move 0 m; no tagged row changes value; used readings removed
+    by this rule are 3 drone medians (b0605, b0691, b0806), all untagged (b0605 is a tower-behind
+    pattern; b0691 and b0806 were doubtful, see the support entry). The tier map
+    `tiers_map.png` / `tiers_map_bocagrande.png` (v11 left, v12 right) was rendered and looked at:
+    alike at map scale.
+- **Rejected / not accepted:**
+  - The 2 m floor (the review's max(25 %, 2 m)): on the labelled pairs its only new
+    corroboration is wrong (Seattle: tag 3 m + lean 4.2 m, truth 12.5 m), the overall rate rises
+    2.75 % -> 2.88 % with it on, and the < 15 m band has 2 corroborated buildings, short of the
+    30 the acceptance rule (review §4.5) needs. `AGREE_FLOOR_M = REVIEW_FLOOR_M` turns it on once
+    low-rise labels exist (Honolulu, San Juan, Fort Lauderdale drone runs).
+  - Bands looser than 25 %: 40-100 m stays >= 0.85 only up to 30 %, and the review set 25 % as
+    the rule; looser values were scored for information only.
+  - The claim "corroborated >= 0.85 within tol" (F-SKY26 criterion) holds only from 40 m up;
+    under 40 m too few readings agree to tell (8 agreeing pairs in 112).
+- **Open:** the other "25 %" call sites still use their own formulas (fusion `fuse_heights`,
+  satellite `readings._agree`, elevated `CREDIT_TOL` and `FLOORS_SAME_SEED_AGREE`); each is
+  tighter on one side under `tiers.agree` (ratio 1.33 -> 1.25) and needs its owner's check with
+  `seed_experiment.py` (fusion, elevated) and `test_satellite_heights.py` plus the 7-city tables
+  (readings). The PDF / HTML-table display lines for `tag_disagrees` are also not wired.
+- **Supersedes / superseded by:** the "within 25 %" of the 2026-10-07 tier entry (25 % of the
+  larger). The `verified_2` rename is a later entry.
+- **Source:** commit `b04b22f`; scratch `tiers/` (scripts and logs); Cartagena replay
+  `runs/region_reports/Cartagena_v12_tiers_skyline_report/`.
+
+### 2026-10-09 — An untagged footprint's search window does not follow its drone or floors reading (refused)
+- **Tried:** `measure.search_cap`: untagged, the shadow / lean / sweep windows (60 / 60 / 80 m)
+  grow to 1.6x the highest drone or floors reading, and to at least 220 m when a seed reads over
+  80 m (review 2026-10-09 item 2). `20_satellite_heights.py --hints <heights.json>` re-measures
+  only the footprints whose window changes (Cartagena: 256 hinted, 241 windows changed, 2,554 s).
+- **Pre-registered** (scratch `sat/notes.md`, before any run): Honolulu survey p95 (stat 2), tags
+  stripped for measuring (scene geometry fitted with the tags), the "after" run with a 100 m hint
+  on every footprint (a 220 m window: the regime the lift applies to; for low plots the worst
+  case). Tol = max(25 %, 2 m) of the survey.
+  - H1: lean or multiview within tol on >= 80 % of the 126 footprints >= 100 m.
+  - H2: leans >= 40 m on <= 2 % of the 1,982 footprints under 30 m.
+- **Result (Honolulu; reference scenes 2025-02-01 WV02 and 2025-05-11 WV03, 4 older scenes; all
+  126 and 1,974 of 1,982 measured):**
+
+  | | tagged (reference) | untagged, 60 / 80 m | untagged, 220 m |
+  |---|---|---|---|
+  | H1 lean or multiview within tol, of 126 | 37 (29.4 %) | 2 (1.6 %) | **47 (37.3 %)** |
+  | lean within tol / with a lean | 32 / 55 | 0 / 59 | 36 / 79 |
+  | lean within tol at conf >= 0.7 | 22 | 0 | 19 |
+  | lean > 1.25x survey | 6 | 0 | 21 |
+  | own-outline towers (tag within 25 %), of 78 | 35 | 2 | 39 |
+  | H2 lean >= 40 m on < 30 m, of 1,982 | - | 219 (11.1 %) | **706 (35.6 %)** |
+  | ... at conf >= 0.5 / >= 0.7 | - | 113 / 64 (3.2 %) | 412 / 209 (10.5 %) |
+  | multiview / stereo >= 40 m on < 30 m | - | 16 / 177 | 62 / 314 |
+
+  - H1 fails (37.3 % against 80 %), H2 fails (35.6 % against 2 %; the 60 m window already
+    fails it at 11.1 %). Even tagged, lean and multiview reach 29.4 %: Waikiki's lean is missing on
+    71 of 126 towers, and 48 of the 126 have no OSM tag within 25 % of the survey, mostly podium
+    slices or building:parts inside a tower outline that read the tower's p95.
+  - Why (single-scene diagnostic, 64 towers in the WV02 outline, scratch `sat/hon_reasons.py`):
+    tagged, 24 leans; missing because "roof outline hidden by neighbours" 14 (the tagged
+    neighbours' occlusion labels), conf < 0.15 13, "facade bottom hidden" 11. Untagged with 220 m:
+    44 leans (hidden 1) but only 18 within tol: without labels the neighbours' roof edges are read
+    as the footprint's own. The same mechanism gives H2.
+- **Chicago** (second city, pre-registered H3; lean only, 2025-04-24 WV03 core, repo
+  `measure_single`, truth = LiDAR and 3D Tiles agreeing (cached), scratch `sat/chi_lean.py`):
+
+  | | tagged (reference) | untagged, 60 m | untagged, 220 m |
+  |---|---|---|---|
+  | lean within tol, 100-200 m (of 244) | 140 (57.4 %) | 0 | **124 (50.8 %)** |
+  | ... at conf >= 0.7 | 87 | 0 | 66 |
+  | lean >= 40 m on < 30 m (of 223) | 45 (20.2 %) | 45 (20.2 %) | **112 (50.2 %)** |
+  | ... at conf >= 0.7 | 10 | 12 | 28 |
+
+  H3a fails (50.8 % against 80 %), H3b fails (50.2 % against 2 %; 20.2 % even tagged).
+- **Cartagena replay** (`Cartagena_v12_sat`, hinted + recalibrated readings): the 7 towers and the
+  10 tag-correct readings unchanged, but 6 rows published above 205 m (the city's tallest is
+  Estelar, 202 m): b0655 256 single (lean 255.6 at conf 1.0 + floors flag), b0549 233 verified_2,
+  b0586 231 single, b0646 223 verified_2 (lean 241.8), b0282 219 single, b1152 206 verified_2
+  (stereo 249.5); b0060 203 verified_2 rests on a lean of 195 m at conf 0.21. 26 hinted rows
+  gained a lean >= 40 m at conf >= 0.7. The window a drone reading opens lets the lean find a
+  peak that then corroborates that reading (tiers ignore confidence).
+- **Decision:** refused for publishing (two truth cities fail both marks; review 4.5). `search_cap`
+  and `--hints` stay as a measuring tool (hints only widen windows when passed); Cartagena's
+  `readings.json` stays unhinted (the hinted file is scratch `sat/cart_readings_hinted.json`).
+- **Would need, before trying again:** occlusion labels for untagged neighbours (their drone,
+  floors or prior height instead of 10 m), and a hinted reading counting only when it does not
+  depend on the reading it supports (or at conf >= 0.7 and under the site's
+  `max_plausible_height_m`). Pre-register H2 at conf >= 0.7 for that.
+- **Supersedes / superseded by:** none.
+- **Source:** commits `d2f2d5e`, `78f06b9`; scratch `sat/`.
+
+### 2026-10-09 — Stored satellite readings are calibrated on load; Cartagena's file recalibrated
+- **Decision:**
+  - `readings.load(calibrate=True)` applies `readings.calibrate` to every footprint and reports
+    `meta["n_recalibrated"]`; `satellite_fusion.load_region` logs a warning when it is not 0.
+    `--recalibrate` reads the file raw. `--add` / `--hints` no longer restore old readings for a
+    re-measured footprint that now has none.
+  - `20_satellite_heights.py --recalibrate` run on Cartagena's region file: 218 of 2,911
+    footprints changed (178 leans under 40 m capped at 0.3; 40 stereo and 14 multiview readings
+    dropped under a confident tall lean).
+- **Why:** the file mixed calibrated and uncalibrated footprints (an earlier `--add` kept old
+  readings as stored): 178 leans under 40 m kept conf > 0.3, and on 32 rows the "satellite low"
+  verdict (`_core/height.py::_satellite_low`, `elevated.tower_behind`) rested only on such a lean
+  (review 2026-10-09 item 2, 2026-10-08 decision).
+- **Replay** (`Cartagena_v12_recal` against the control `Cartagena_v12_ctrl`: same tree, the
+  pre-change file loaded raw; tree hash in scratch `sat/cart_v12_*.log`):
+  - 7 towers unchanged; 10 of 10 tag-correct used drone readings kept;
+  - satellite-low rows 537 -> 505: exactly the 32, none newly low; tower-behind 94 readings on
+    84 footprints -> 86 on 76;
+  - tiers verified_2 39 -> 42, prior 719 -> 716 (single 124, tag 134); new verified_2: b0561
+    111 m (two drones, no cadastre match), b0490 100 m (two drones; non-PH cadastre 2 floors,
+    7 m), b1505 67 m (drone + lean; PH cadastre 65 m);
+  - **used drone readings on non-PH 1-3-floor plots 50 -> 54** (b0246 133 m 2 fl, b0484 106 m
+    1 fl, b0486 115 m 1 fl, b0490 91 m 2 fl): review 4.5 "do not rise" fails by 4.
+  - Against v11 (other agents' changes included): verified_2 43 -> 42, tag 133 -> 134, single
+    124, prior 716.
+- **Open:** on Honolulu (untagged, 60 m window) a lean under 40 m with peak confidence >= 0.5 is on
+  a building under 40 m 90 % of the time (719 of 798; base rate 79.7 %), on one >= 100 m 2.3 %
+  (base 4.9 %). Chicago's 52 % (2026-10-08) came from a downtown. As a tower-behind veto the
+  uncalibrated low lean carried some signal in a beach city; whether the veto should read
+  `extra.conf_peak` was left to the owner of `elevated.py` (it would bring back b0490):
+  **done 2026-10-09, see "The tower-behind veto counts a low lean with peak confidence >= 0.7 as
+  satellite low".**
+- **Supersedes / superseded by:** applies the 2026-10-08 calibration entry to stored files.
+- **Source:** commit `d2f2d5e`; scratch `sat/`.
+
+### 2026-10-09 — A scene's outline is every polygon of it in the region
+- **Decision:** `scene.scene_outlines(cfg, release, bbox)` queries the release's source layer
+  with the region bbox and merges each scene's polygons; `scene_polygon(..., bbox=)` uses it,
+  identify at points only as a fallback; `20_satellite_heights.py --outlines` re-queries the
+  cached `polygons.json`.
+- **Why:** a scene is often several polygons in one release, and identify at one point returned
+  one of them. Honolulu: 2025-05-11 WV03 218 -> 515 of 3,114 footprints, 2025-02-01 WV02
+  1,559 -> 2,571, 2022-10-03 WV02 1,856 -> 3,086, 2024-01-14 WV03 1,819 -> 3,113. Cartagena:
+  2023-02-19 WV02 1,274 -> 3,018 (the other six unchanged). Cartagena has 3,017 footprints after
+  the water filter.
+- **Done later:** Cartagena's stored readings were re-measured with all 7 scenes' outlines
+  (`readings.json` sha be8da4d5 -> 73515f8a, 2,922 footprints). Earlier
+  they used the old 2023-02-19 outline.
+- **Source:** commit `f52145d`.
+
+### 2026-10-09 — Seed pages show a reading's reason when its footprint has no measured row
+- `html_report.py::_reading_status`: the segment's `untrusted_reason` (or tower behind / top
+  edge) is shown when the footprint's row is missing from the report rows; "no published row"
+  only when there is no reason. Cartagena v11: 308 trusted drone readings, and 39 readings showed
+  only "no published row" on the seed pages; 0 in v12_ctrl / v12_recal.
+- The row itself is still missing from `published_by_id`: the report gets `building_heights`
+  without the unmeasured-tag rows, so "published m" and the tier stay empty for them. The fix is in
+  `region_pdf.py` (write `heights.json` first and pass its rows to `write_region_report`); not
+  applied.
+- **Source:** commit `d2f2d5e`.
+
 ### 2026-10-09 — A single reading over 2x the prior publishes the prior unless supported
 - **Decision:** an untagged `single` row (one drone median or a satellite-only height, no
   independent agreeing pair) more than 2x its prior publishes the prior (`_core/tiers.py::single_withheld`,
@@ -483,10 +977,18 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Why:** in Old San Juan, buildings with a height or storey tag claim 3.48 m less than the lidar
   survey at the median (MAE 4.99 m), with a consistent sign. Part is the per-storey constant, part
   roof structure the survey sees.
-- **Note:** the survey was measured when levels × 3.0 m was the rule; F-ARCH made it 3.2 m per level
-  plus one roof level (`city2stl/heights.py::height_from_tags`,
-  [F-ARCH](../plans/active/F-ARCH-consolidation.md)), which closes part of the gap. The number was
-  not re-measured.
+- **Note (re-measured 2026-10-09):** with today's rule (levels x 3.2 m plus a roof level) and
+  survey-only truth from `USGS_LPC_PR_PRVI_E_2018` (all 25 Old San Juan tiles read; truth keyed on
+  the report ring), the 822 tagged Old San Juan footprints sit 2.04 m under the survey p95 at the
+  median (MAE 3.25 m, tol 0.65), down from 3.48 m / 4.99 m under 3.0 m per level:
+  - `osm_levels` (527): -2.91 m median vs p95 (MAE 3.84 m, tol 0.56); against the p70 (the
+    floor-matched statistic) -1.11 m (MAE 2.52 m, tol 0.72);
+  - `osm_tag` height tags (295): -0.75 m vs p95 (MAE 2.21 m, tol 0.81).
+  - Condado / Miramar for comparison (877 tagged): -1.17 m vs p95 (MAE 2.91 m), -0.18 m vs p70.
+  - Still a floor: the sign holds, but against the floor-matched p70 the gap is ~1 m for levels
+    and ~0 for height tags. (F-ARCH made the rule 3.2 m per level plus one roof level:
+    `city2stl/heights.py::height_from_tags`, [F-ARCH](../plans/active/F-ARCH-consolidation.md).)
+    Script scratch `bench/osj_tag_gap.py`.
 - **Supersedes / superseded by:** —
 - **Source:** decisions.md 2026-09-04 "OSM building heights in Old San Juan run about three and a half metres short".
 
@@ -680,6 +1182,38 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 - **Source:** decisions.md 2026-08-05 entry.
 
 ## Rejected hypotheses
+
+### 2026-10-09 — The own-corner rule: a trusted top shows a vertical edge at its footprint's projected corners
+- **Hypothesis:** a right top shows a sky gap, a non-building label, a MobileSAM instance boundary
+  or a depth step at the footprint's projected left or right corner column, at the row its roof
+  has there (CBHE).
+- **Measured** (Miami states, LiDAR; `ownership.Scene.corner_edges`: column +-3 px, row +-3 px,
+  6 rows below, 60 % of rows differing, depth step 1.15):
+  - current readings: no edge at 10 of 36 right readings (28 %); an edge at 18 of 28 wrong ones;
+  - older reading set: 8 of 39 right flagged, 16 of 51 wrong caught;
+  - all 4 known tower-behind cases show an edge (b6428's left corner shares Four Seasons' edge);
+  - why: at 1-3 km OSM footprints include low wings (Villa Regina's corner 35 px right of its
+    tower), MobileSAM merges a block into one instance, the spin panos give a building a few px.
+- **Verdict:** refused as a requirement; kept as a diagnostic (`Scene(..., diagnose=True)`).
+
+### 2026-10-09 — Claims as the run's start (occ[] from footprint geometry)
+- **Hypothesis:** `measure_footprints` starts each run above the nearer footprints' claims at their
+  upper plausible heights instead of above the nearer measured tops (review §3 item 3).
+- **Measured** (Miami, scratch monkeypatch of `measure_footprints`, ownership rule after): trusted
+  readings with truth 64 -> 67, within 25 % 0.56 -> 0.45; after the rule 0.74 kept (fails 0.80).
+- **Verdict:** refused. The claims act in the ownership walk after the measurement;
+  `footprint_detect.py` is unchanged.
+
+### 2026-10-09 — A footprint's prior p90 as evidence that a top is not its own
+- **Hypothesis:** an untagged footprint whose reading clears its prior p90 claim, with a farther
+  footprint's p90 claim holding the top, read that farther footprint (and likewise a nearer
+  untagged footprint's p90 claim hides a top).
+- **Measured:** Miami scores the same with or without it (towers tagged). Cartagena, same
+  satellite readings: it left out 150 of 400 trusted readings (45 with tags and cadastre only) and
+  verified_2 fell 42 -> 34; the lost rows were mostly PH plots of 15-21 floors read 55-81 m with a
+  stereo or lean reading agreeing (b0191, b0339, b0411, b0447, b1434, b1505, b0637).
+- **Verdict:** refused: the p90 holds 0-22 % of untagged buildings over 60 m; only a tag or a
+  cadastre count takes a top away. The p90 still names the re-credit target.
 
 ### 2026-10-08 — A render-fit height optimiser over the drone images
 - **Hypothesis:** render every footprint as a prism from the saved drone cameras and move the

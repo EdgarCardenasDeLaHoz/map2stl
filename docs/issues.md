@@ -86,9 +86,14 @@ the rest below.
   (Miami, Rio, Buenos Aires, Santiago, Medellín), 1–4 m where they do not (Cartagena, Lima,
   Panama City, Barranquilla).
 - `_looks_built` now returns an empty result with a warning instead of a flat raster.
-- **Still open:** in data-poor cities the best source is missing. Cartagena falls back to Open
-  Buildings 2.5D (~91 %, capped at 99.5 m) and Overture (~9 %). Nothing measured so far
-  reaches the Bocagrande towers that Open Buildings clips.
+- **Still open:** in data-poor cities the best source is missing.
+  - In the export merge, Cartagena falls back to GlobalBuildingAtlas (`gba.py`, complete, 3 m,
+    flattens towers) and Overture (`open_buildings.py`, ~9 % of footprints).
+  - No registered provider reads Google Open Buildings 2.5D. The "~91 %, capped at 99.5 m"
+    figure came from a read no code performs today.
+  - `google_ob25d.py` (2026-10-09) reads it as a skyline low-rise prior only, and its heights
+    are capped at 100 m.
+  - Nothing measured so far reaches the Bocagrande towers.
 - Full measurements: [history/issues-resolved.md](history/issues-resolved.md) (§0d) and §0c
   below.
 
@@ -133,6 +138,32 @@ Gitignored (not in history) but a OneDrive-sync burden. As of 2026-07-26 it is
 **`make clean-runs`** to drop the cache dirs + stale `*.log` (~4.6 GB); it keeps
 `region_reports/` and `height_traces/`. See [history/audits/AUDIT-2026-06-07.md](history/audits/AUDIT-2026-06-07.md).
 
+### 0f. Height benchmark and survey truth (found 2026-10-09)
+Survey-only regions score single-source since 2026-10-09 (`benchmark.py::truth_mode`; the old n = 0
+also came from truth keyed on full-precision rings, now `report_key`). Open:
+
+- **Raw roof max is noise on the Miami topobathy survey.** 24 % of 914 Miami records have a max
+  more than 20 m over the p95 (up to 294 m; Honolulu 1.7 %). Silhouettes are scored against p99
+  (`METHOD_STAT`); the max is stored but should not be used as truth without a spike filter.
+- **Nested OSM parts have no survey truth.** A `building:part` under a taller footprint reads the
+  top of the stack (Honolulu: 241 of 1,138 published rows with truth; Miami 48 of 292, 32 of the
+  headline's 168). The band tables leave them out (`nested_keys`); the headline (`score_buildings`)
+  still scores them, so it did not move.
+- **San Juan report rows outside the truth strips have no truth** (44 survey tiles, Santurce):
+  `19_refresh_survey_truth --new-truth --regions san_juan --from-report
+  runs/benchmark/2026-10-09_regions/san_juan_skyline_report/heights.json` (two `--shard` readers,
+  about 75 min).
+- **Single-source truth can show demolished or new buildings.** San Juan b21404 is tagged 34 m and
+  reads 0.06 m in the 2018 survey (flown after Hurricane Maria); OSM `start_date` cannot flag it.
+- **Ground p5 is relative.** `ground_p5_m` is the nDSM p5 in a 4 m ring, not an elevation: the
+  providers drop the DTM (`lidar_3dep_copc.py::grid_points_ndsm` returns DSM - DTM only). Needs a
+  provider change to store the DTM.
+- **OSM `start_date` is nearly absent** in the truth cities (San Juan 3, Honolulu 7, Fort
+  Lauderdale 1 buildings), so the truth-age flag is `unknown` for almost every record; buildings
+  finished after the 2018 PR/FL flights are only caught where tagged.
+- **Region runs write `city2stl/skyline/_pano/runs/seed_resolution_cache.json`** (tracked in git):
+  the three truth-city runs added 17 seed entries. Commit it or git-ignore it.
+
 ### 1. `<script>` vs module boundary
 `app.js` is still a plain script and modules still coordinate through `window.*`. Inline
 handlers are gone (except the dev-only debug overlay). The fix is F-FE1 steps 1, 2 and 6
@@ -167,12 +198,17 @@ whether OSM tags a height, it scores MAE 24.03 on the 35 tagged footprints and
 MAE 16.81 on the 26 untagged ones, and it matches zero OSM tags to within
 0.5 m. Accuracy is *better* where OSM says nothing.
 
-For data-poor cities the two satellite sources are complementary rather than
-alternative. Over Cartagena, Google Open Buildings 2.5D answers 298 of 329
-registered footprints (91%) but its heights are capped at 99.5 m; Overture
-answers 31 (9%) and reaches 190 m uncapped. The cap, not the coverage, is what
-leaves Cartagena's Bocagrande towers unrepresented — and those towers are
-exactly the buildings the panorama pipeline gets most wrong.
+For data-poor cities the sources complement each other. Over Cartagena, Overture answers 31
+of 329 registered footprints (9 %) and reaches 190 m uncapped. GBA is complete but loses tall
+buildings (decision "GlobalBuildingAtlas admitted at confidence 0.55").
+
+The "Google Open Buildings 2.5D answers 298 of 329 (91 %), capped at 99.5 m" claim that stood
+here has no provider behind it: `open_buildings.py` is Overture. Google 2.5D is read today
+only by `google_ob25d.py`, as a low-rise prior. Its rasters do stop at 99.5 m over Cartagena:
+that is the maximum in the 2023 window, so the cap is real.
+
+The Bocagrande towers stay unrepresented by any raster source, and they are exactly the
+buildings the panorama pipeline gets most wrong.
 
 ### 3. Raster height enhancement made buildings shorter than the 10 m fallback — fixed 2026-08-30
 - Kept here because code cites it: a provider's ranking was tuned on an argument, not a
