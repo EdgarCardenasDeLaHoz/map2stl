@@ -172,7 +172,7 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     cache = bm.load_truth_cache(region)
     truth_pub = {**{b["key"]: cache[b["key"]] for b in published if b["key"] in cache}, **truth}
     n_fp = json.loads(Path(heights).read_text(encoding="utf-8")).get("n_building_records")
-    kw = {"elevated": elevated, "seeds": bm.seed_positions(region),
+    kw = {"elevated": elevated, "seeds": bm.seed_positions(region, Path(heights).parent),
           "survey_cache": sh.load_cache(region)}
     result["bench"] = {"measured": bm.bench_tables(buildings, truth, **kw),
                        "published": bm.bench_tables(published, truth_pub, n_footprints=n_fp, **kw)}

@@ -1146,10 +1146,28 @@ def matched_truth(rec: dict, stat: str) -> float | None:
     return float(rec["truth_m"]) + float(roof[stat]) - float(roof["p95"])
 
 
-def seed_positions(region: str) -> dict[str, tuple[float, float]]:
-    """``seed name -> (lat, lon)`` for the region's seeds as a run names them: ``seed_<i>``
-    from the site's ``seed_urls`` (1-based, as ``region_pdf`` numbers them) and the persisted
-    auto-proposals (``runs/auto_proposals/<region>.json``). Web / Commons seeds have none."""
+def report_seed_positions(report_dir) -> dict[str, tuple[float, float]]:
+    """``seed name -> (lat, lon)`` where the run placed each seed, from the report's seed pages
+    (``seed_<slug>.html``, row "Lat / Lon"; ``html_report`` drops a leading ``seed_`` from the
+    name, so slug ``4`` is seed ``seed_4``). An auto seed that failed screening is moved by the
+    run (San Juan 2026-10-09: ``auto_180_2000m`` by 3 km), so this beats the proposal file."""
+    import re
+
+    out: dict[str, tuple[float, float]] = {}
+    for f in Path(report_dir).glob("seed_*.html"):
+        m = re.search(r"Lat / Lon</th><td>(-?[\d.]+),\s*(-?[\d.]+)</td>",
+                      f.read_text(encoding="utf-8", errors="replace"))
+        if m:
+            slug = f.stem[len("seed_"):]
+            out[f"seed_{slug}" if slug.isdigit() else slug] = (float(m[1]), float(m[2]))
+    return out
+
+
+def seed_positions(region: str, report_dir=None) -> dict[str, tuple[float, float]]:
+    """``seed name -> (lat, lon)`` for the region's seeds as a run names them: where the run
+    placed them (``report_seed_positions``, given ``report_dir``), else ``seed_<i>`` from the
+    site's ``seed_urls`` (1-based, as ``region_pdf`` numbers them) and the persisted
+    auto-proposals (``runs/auto_proposals/<region>.json``)."""
     from .streetview_io import _parse_streetview_url
 
     out: dict[str, tuple[float, float]] = {}
@@ -1166,6 +1184,8 @@ def seed_positions(region: str) -> dict[str, tuple[float, float]]:
         for p in (d.get("points") if isinstance(d, dict) else d) or []:
             if p.get("name") and p.get("lat") is not None:
                 out.setdefault(p["name"], (float(p["lat"]), float(p["lon"])))
+    if report_dir is not None:
+        out.update(report_seed_positions(report_dir))
     return out
 
 

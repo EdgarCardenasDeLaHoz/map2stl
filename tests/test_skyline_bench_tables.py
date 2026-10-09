@@ -192,3 +192,17 @@ def test_published_scope_keeps_tag_only_rows_and_coverage_counts_footprints(tmp_
     assert [b["feature_id"] for b in pub] == ["b1", "b2"]
     cov = bm.pipeline_metrics(pub, {}, n_footprints=10)["coverage"]
     assert cov["non_prior"] == 2 and cov["share_of_footprints"] == 0.2
+
+
+def test_seed_positions_from_the_report_pages_win(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    rep = tmp_path / "rep"
+    rep.mkdir()
+    (rep / "seed_4.html").write_text("<tr><th>Lat / Lon</th><td>25.75242, -80.19027</td></tr>")
+    (rep / "seed_auto_180_2000m.html").write_text(
+        "<tr><th>Lat / Lon</th><td>18.46130, -66.08030</td></tr>")
+    (rep / "seed_commons_1.html").write_text("no position here")
+    got = bm.report_seed_positions(rep)
+    assert got == {"seed_4": (25.75242, -80.19027), "auto_180_2000m": (18.4613, -66.0803)}
+    pos = bm.seed_positions("miami", rep)
+    assert pos["seed_4"] == (25.75242, -80.19027)                     # beats the site URL
