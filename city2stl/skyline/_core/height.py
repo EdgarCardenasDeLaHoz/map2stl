@@ -727,13 +727,24 @@ def _high_rise_height(prior_m, info) -> float | None:
     return high_rise_height(prior_m, info)
 
 
+def _satellite_low(sat_rs) -> bool:
+    """Whether a plot's confident satellite readings are all under 40 m (``elevated._sat_max``,
+    the tower-behind test's and the high-rise flag's rule)."""
+    if not sat_rs:
+        return False
+    from .._pano.elevated import SAT_LOW_M, _sat_max  # noqa: PLC0415
+    m = _sat_max(sat_rs)
+    return m is not None and m < SAT_LOW_M
+
+
 def _withhold_single_enabled() -> bool:
     """Whether an untagged ``single`` reading more than 2x the prior publishes the prior.
 
     On by default (the user's rule, 2026-10-07/08; ``tiers.single_withheld``): on Cartagena v9,
     164 single rows read over 2x their prior at a median of ~99 m, and the tower-behind check
     (``elevated.tower_behind``) showed such a reading is often a farther tower's top.
-    ``SKYLINE_WITHHOLD_SINGLE=0`` publishes the single reading again.
+    Refined by the user on 2026-10-09 (``tiers.single_support``): only an unsupported single is
+    withheld. ``SKYLINE_WITHHOLD_SINGLE=0`` publishes the single reading again.
     """
     return os.environ.get("SKYLINE_WITHHOLD_SINGLE", "1").strip().lower() not in (
         "0", "false", "no", "off")
@@ -777,19 +788,26 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     2026-10-08): tier ``prior``, ``prior_disagrees`` True, and the reading kept as unverified
     evidence in ``single_reading_m`` / ``single_source`` / ``single_methods`` with
     ``withheld_reason`` ``"single over 2x prior"``. Singles within 2x publish as before.
+    Refinement (the user, 2026-10-09; ``tiers.single_support``): a single over 2x the prior that a
+    validated satellite reading >= 40 m agrees with (lean conf >= 0.7, ``ls``, multiview conf >=
+    0.3; or the single is that reading), or whose plot floors flagged a high-rise, stays
+    ``single`` with ``single_support`` (``["lean", ...]`` / ``["high_rise_floors"]``), unless the
+    plot's confident satellite readings are all under 40 m (a tower-behind case).
 
     ``floors``: ``{feature_id: info}`` (``elevated_estimates(...).floors``, kept by the
     orchestrator in ``elevated_state["floors"]``; F-SKY26 step 4). An untagged row with no drone
     reading and no publishable satellite height that floors flagged a high-rise publishes
     ``floor_bands.high_rise_height`` (max of the prior and floors x storey + 3 m; source
-    ``"withheld:high_rise"``, tier ``single``, ``high_rise`` holds the count) and is exempt from
-    the 2x rule (the user, 2026-10-08; the flag never fires on a satellite-low plot).
+    ``"withheld:high_rise"``, tier ``single``, ``high_rise`` holds the count); the flag supports
+    it under the 2x rule (the user, 2026-10-08; the flag never fires on a satellite-low plot).
+    Every row floors counted carries ``high_rise_seen``, ``floors`` and ``storey_m``.
     A tagged row whose ``osm_tag`` height one drone or satellite reading agrees with is
     ``verified_2`` (``tiers.tag_witness``; the user, 2026-10-08).
     """
     from .tiers import (  # noqa: PLC0415
         SINGLE_WITHHELD_REASON,
         reading,
+        single_support,
         single_withheld,
         tier_fields,
     )
@@ -811,6 +829,12 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
         if sat_rs:
             row["satellite"] = {r.method: [round(r.height_m, 1), round(r.conf, 2)] for r in sat_rs}
         tagged = rec.height_source in TAGGED_SOURCES
+        fi = (floors or {}).get(row.get("feature_id"))
+        if fi:
+            # visible on every row floors counted (the refined 2x rule reads the flag)
+            row["high_rise_seen"] = bool(fi.get("high_rise_seen"))
+            row["floors"] = fi.get("floors")
+            row["storey_m"] = fi.get("storey_m")
         h = src = prior = None
         sat_pub = None
         if enabled and tagged:
@@ -824,9 +848,8 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
                 h, src = sat_pub["height_m"], "withheld:satellite"
                 row["satellite_methods"] = sat_pub["methods"]
                 row["satellite_lower_bound"] = sat_pub["lower_bound"]
-            elif (hr := _high_rise_height(prior[0], (floors or {}).get(row.get("feature_id"))))                     is not None:
+            elif (hr := _high_rise_height(prior[0], fi)) is not None:
                 h, src = hr, "withheld:high_rise"
-                fi = floors[row["feature_id"]]
                 row["high_rise"] = {k: fi.get(k) for k in ("floors", "lower_bound", "storey_m",
                                                            "floors_m", "seeds")}
             elif prior[0] is not None:
@@ -848,11 +871,20 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             tag_m=h if (h is not None and tagged) else None,
             tag_source=rec.height_source if tagged else None,
             prior_m=prior[0] if prior else None, prior_source=prior[1] if prior else None))
-        # high-rise heights are exempt from the 2x rule (the user, 2026-10-08): the flag
-        # already carries the satellite veto
-        if (prior is not None and _withhold_single_enabled() and src != "withheld:high_rise"
+        support = None
+        if (prior is not None and _withhold_single_enabled()
                 and single_withheld(row["tier"], h, prior[0])):
-            # the user's rule (2026-10-08): one unconfirmed reading over 2x the prior is kept
+            # refined by the user (2026-10-09): a validated satellite reading >= 40 m that agrees,
+            # or the floors high-rise flag (which carries the satellite veto; it covers the
+            # withheld:high_rise rows, exempt since 2026-10-08), keeps the single
+            support = single_support(
+                h, [(r.method, r.height_m, r.conf) for r in sat_rs],
+                high_rise=bool(fi and fi.get("high_rise_seen")),
+                satellite_low=_satellite_low(sat_rs))
+            if support:
+                row["single_support"] = support
+        if support == []:
+            # the user's rule (2026-10-08): one unsupported reading over 2x the prior is kept
             # as evidence only; the prior is published
             row["single_reading_m"] = h
             row["single_source"] = src

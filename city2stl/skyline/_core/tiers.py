@@ -38,6 +38,20 @@ Publish rule (the user's choice, 2026-10-08, ``single_withheld``): a ``single`` 
 stays in the row as unverified evidence (``single_reading_m``, ``single_source``,
 ``withheld_reason``). On Cartagena v9 the tower-behind check showed such readings are often a
 farther tower's top, and the 164 singles over 2x the prior had a median of ~99 m.
+
+Refinement (the user's choice, 2026-10-09, ``single_support``): only an *unsupported* single is
+withheld. It stays ``single`` (``single_support`` names why) when
+
+- a validated satellite reading of ``SUPPORT_MIN_M`` or more agrees with it within ``AGREE_REL``
+  (or is the single itself): lean at conf >= 0.7, lean + shadow (``ls``), multiview at conf
+  >= 0.3 (``SUPPORT_MIN_CONF``; Chicago LiDAR: lean over 100 m within 25 % 94 %, multiview over
+  40 m 84 %; plain stereo at 40-100 m only ~59 %, so stereo alone never supports), or
+- floor counts flagged the plot a high-rise (``floor_bands.high_rise_plots``; the flag already
+  carries the satellite veto): ``HIGH_RISE_SUPPORT``.
+
+Neither counts when the satellite says the plot is low (its largest confident reading is under
+40 m, the tower-behind test's rule): such a reading is withheld. Cartagena v10 withheld 302
+singles (median 70 m), most of Bocagrande's towers among them.
 """
 
 from __future__ import annotations
@@ -225,6 +239,42 @@ def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
     published height more than ``factor`` x the prior (a prior of None or 0 withholds nothing)."""
     return bool(tier == "single" and prior_m and published_m
                 and float(published_m) > factor * float(prior_m))
+
+
+#: A satellite reading supports a single over 2x the prior only at or above this height.
+SUPPORT_MIN_M = 40.0
+#: Validated satellite methods (``single_support``) and the confidence each needs: lean at 0.7
+#: (Chicago LiDAR: lean over 100 m within 25 % 94 %), lean + shadow agreeing (``ls``) at any,
+#: multiview at 0.3 (over 40 m within 25 % 84 %). Stereo is not listed (40-100 m: ~59 %).
+SUPPORT_MIN_CONF = {"lean": 0.7, "ls": 0.0, "multiview": 0.3}
+#: ``single_support`` entry of a single kept because floor counts flagged its plot a high-rise.
+HIGH_RISE_SUPPORT = "high_rise_floors"
+
+
+def validated_satellite(method: str, height_m: float | None, conf: float | None) -> bool:
+    """Whether one satellite reading is validated enough to support a single on its own:
+    a ``SUPPORT_MIN_CONF`` method at its confidence, ``SUPPORT_MIN_M`` or more."""
+    need = SUPPORT_MIN_CONF.get(method)
+    return (need is not None and height_m is not None and float(height_m) >= SUPPORT_MIN_M
+            and float(conf or 0.0) >= need)
+
+
+def single_support(value_m: float | None, satellite: Sequence[tuple] = (),
+                   high_rise: bool = False, satellite_low: bool = False) -> list[str]:
+    """Why a ``single`` reading over 2x the prior is kept (the user's refinement, 2026-10-09):
+    the validated satellite methods (``validated_satellite``) that agree with ``value_m`` within
+    ``AGREE_REL``, sorted, plus ``HIGH_RISE_SUPPORT`` when floor counts flagged the plot. Empty
+    (withhold it) when nothing supports it, or when ``satellite_low`` (the plot's confident
+    satellite readings are all under 40 m: a tower-behind case). ``satellite``: ``(method,
+    height_m, conf)`` per reading. A satellite single whose value is such a reading agrees with
+    itself, so it supports itself."""
+    if value_m is None or satellite_low:
+        return []
+    out = sorted({str(m) for m, h, c in satellite
+                  if validated_satellite(m, h, c) and agree(float(h), float(value_m))})
+    if high_rise:
+        out.append(HIGH_RISE_SUPPORT)
+    return out
 
 
 def tier_counts(rows: Sequence[dict]) -> dict[str, int]:

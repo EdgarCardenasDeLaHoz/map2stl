@@ -10,6 +10,7 @@ from city2stl.skyline._core.tiers import (
     agree,
     independent,
     reading,
+    single_support,
     single_withheld,
     tag_witness,
     tier_counts,
@@ -198,9 +199,14 @@ def test_high_rise_publishes_floors_and_is_exempt_from_the_2x_rule(monkeypatch):
     assert hr["tier"] == "single" and hr["tier_methods"] == ["floors"]   # 108 > 2x 14: kept
     assert "withheld_reason" not in hr and hr["high_rise"]["floors"] == 30
     assert hr["no_survey_height_m"] == 108.0
+    assert hr["single_support"] == ["high_rise_floors"]
+    assert (hr["high_rise_seen"], hr["floors"], hr["storey_m"]) == (True, 30, 3.5)
     assert (nf["effective_height_m"], nf["tier"]) == (14.0, "prior")    # not flagged: prior
-    # a drone reading comes first, and stays under the 2x rule
-    assert dr["tier"] == "prior" and dr["single_source"] == "withheld:elevated"
+    assert nf["high_rise_seen"] is False                              # the flag is visible
+    # a drone reading comes first; on a flagged plot the flag supports it (refined rule,
+    # the user 2026-10-09: Cartagena v10 withheld flagged plots' drone readings)
+    assert (dr["effective_height_m"], dr["tier"]) == (99.0, "single")
+    assert dr["single_support"] == ["high_rise_floors"] and "withheld_reason" not in dr
     # never lowers the prior
     rows = [{"feature_id": "hr", "effective_height_m": 40.0, "effective_height_source": "g",
              "per_seed_median_m": {}}]
@@ -316,6 +322,82 @@ def test_single_over_2x_publishes_prior_and_keeps_the_reading(monkeypatch):
     withhold_untagged_street_view(rows, recs, fallback=lambda r: (14.0, "prior_gbm"),
                                   measured_seeds={"seed_1"})
     assert (rows[0]["effective_height_m"], rows[0]["tier"]) == (99.0, "single")
+
+
+def test_single_support_rule():
+    """The refined 2x rule (the user, 2026-10-09): validated satellite >= 40 m within 25 %, or
+    the high-rise flag; never stereo alone, never on a satellite-low plot."""
+    assert single_support(62.0, [("lean", 60.4, 1.0), ("stereo", 64.2, 1.0)]) == ["lean"]
+    assert single_support(62.0, [("lean", 60.4, 0.7)]) == ["lean"]
+    assert single_support(54.0, [("lean", 53.5, 0.64), ("stereo", 54.0, 0.83)]) == []
+    assert single_support(80.0, [("stereo", 80.0, 1.0)]) == []          # stereo alone: ~59 %
+    assert single_support(80.0, [("multiview", 75.0, 0.3)]) == ["multiview"]
+    assert single_support(80.0, [("multiview", 75.0, 0.29)]) == []
+    assert single_support(120.0, [("ls", 110.0, 0.3)]) == ["ls"]
+    assert single_support(39.0, [("lean", 39.0, 1.0)]) == []            # under 40 m
+    assert single_support(100.0, [("lean", 70.0, 1.0)]) == []           # 30 % off: disagrees
+    assert single_support(100.0, [("shadow", 100.0, 1.0)]) == []        # a lower bound
+    assert single_support(100.0, [("lean", 95.0, 0.9), ("multiview", 98.0, 0.5)],
+                          high_rise=True) == ["lean", "multiview", "high_rise_floors"]
+    assert single_support(100.0, [], high_rise=True) == ["high_rise_floors"]
+    assert single_support(100.0, [("lean", 95.0, 0.9)], high_rise=True, satellite_low=True) == []
+    assert single_support(None, [("lean", 95.0, 0.9)]) == []
+
+
+def _sat_single(fid, readings, per_seed=None):
+    from types import SimpleNamespace as NS
+    row = {"feature_id": fid, "effective_height_m": 150.0, "effective_height_source": "geometric",
+           "per_seed_median_m": per_seed or {"auto_090_1400m": 150.0}}
+    return row, [NS(method=m, height_m=h, conf=c) for m, h, c in readings]
+
+
+def test_single_over_2x_kept_when_supported(monkeypatch):
+    """Cartagena v10: b1429 (lean 60.4 / 1.0 + stereo 64.2) and b0112 published the ~10-20 m
+    prior; a validated lean that agrees keeps them. b1211's lean (conf 0.64) is not validated
+    and stereo alone never supports, so it stays withheld."""
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    cases = {"b1429": [("lean", 60.4, 1.0), ("stereo", 64.2, 1.0)],
+             "b1211": [("lean", 53.5, 0.64), ("stereo", 54.0, 0.83)],
+             "mv": [("multiview", 70.0, 0.4)]}
+    rows, sat = [], {}
+    for fid, rs in cases.items():
+        row, sat[fid] = _sat_single(fid, rs)
+        rows.append(row)
+    recs = [_rec(f, "default") for f in cases]
+    withhold_untagged_street_view(rows, recs, fallback=lambda r: (10.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"}, satellite=sat)
+    a, b, mv = rows
+    assert a["effective_height_source"] == "withheld:satellite" and a["tier"] == "single"
+    assert a["single_support"] == ["lean"] and "withheld_reason" not in a
+    assert a["prior_disagrees"] is True and a["no_survey_tier"] == "single"
+    assert 60.0 < a["effective_height_m"] < 65.0
+    assert b["tier"] == "prior" and b["withheld_reason"] == "single over 2x prior"
+    assert b["effective_height_m"] == 10.0 and "single_support" not in b
+    assert mv["tier"] == "single" and mv["single_support"] == ["multiview"]
+    json.dumps(rows)
+
+
+def test_supported_drone_single_and_the_tower_behind_veto(monkeypatch):
+    """A drone single on a flagged plot is kept; with the plot's confident satellite readings all
+    under 40 m (a tower-behind case) neither the flag nor anything else keeps it."""
+    for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
+        monkeypatch.delenv(k, raising=False)
+    kept, _ = _sat_single("kept", [], {"seed_1": 99.0})
+    low, low_sat = _sat_single("low", [("stereo", 12.0, 1.0)], {"seed_1": 99.0})
+    plain, _ = _sat_single("plain", [], {"seed_1": 99.0})
+    floors = {f: _floors_info() for f in ("kept", "low")}
+    rows = [kept, low, plain]
+    withhold_untagged_street_view(rows, [_rec(f, "default") for f in ("kept", "low", "plain")],
+                                  fallback=lambda r: (12.0, "prior_gbm"),
+                                  measured_seeds={"seed_1"}, satellite={"low": low_sat},
+                                  floors=floors)
+    assert (kept["tier"], kept["effective_height_m"]) == ("single", 99.0)
+    assert kept["single_support"] == ["high_rise_floors"]
+    assert (low["tier"], low["effective_height_m"]) == ("prior", 12.0)       # satellite says low
+    assert low["single_source"] == "withheld:elevated" and "single_support" not in low
+    assert (plain["tier"], plain["effective_height_m"]) == ("prior", 12.0)   # unsupported
+    assert "high_rise_seen" not in plain
 
 
 def test_flag_off_labels_street_view_as_single(monkeypatch):
