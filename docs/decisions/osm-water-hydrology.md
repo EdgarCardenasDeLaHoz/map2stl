@@ -4,6 +4,26 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-10-09 — osmnx pins an Overpass host to an address that connects, IPv6 or IPv4, not to its IPv4 address
+- **Decision:** `geo2stl/osm.py::install_dns_pin` replaces osmnx's `_http._config_dns` with
+  `pin_overpass_host`: the host is pinned to the first of its addresses, in the resolver's order
+  (IPv6 first on this PC), that accepts a TCP connection within `PIN_CONNECT_TIMEOUT_S`; when none
+  does, the host is left unpinned. The choice is kept `PIN_MEMORY_S` and dropped by
+  `mark_overpass_failure`. Installed by `use_overpass_endpoint` (city layers, trails) and
+  `city2stl/osm_raster.py::_ox`.
+- **Why:** osmnx 2.1 resolves the host with `socket.gethostbyname` (IPv4 only) and patches
+  `socket.getaddrinfo` process-wide, to keep its /status slot check and the query on one server.
+  On 2026-10-08 IPv4 to overpass-api.de timed out from this PC while IPv6 answered in 0.3 s, so
+  every osmnx fetch ended in ConnectTimeout (about 30 min lost on the new benchmark cities; the
+  scratch workaround switched the pin off). The pin also caught the raw-QL client and the /status
+  probe once osmnx had run in the process. Keeping a pin, on an address that works, keeps osmnx's
+  one-server reason. (2026-10-09: overpass-api.de refused all four addresses, IPv4 and IPv6; the
+  mirrors carry such hours.)
+- **Rejected:** switching the pin off (osmnx's slot check and query could then hit different
+  servers of the round-robin); `doh_url_template` (only used when the local resolver fails).
+- **Supersedes / superseded by:** —
+- **Source:** t40-review, new benchmark cities README (Problem 1).
+
 ### 2026-10-02 — Rivers and lakes are carved in print millimetres, at least 0.5 mm wide, and coloured in 3D
 - **Decision:**
   - With `river_depth_mm` (Edit → Rivers & lakes → *River depth*, `#compositeRiverDepthMm`,

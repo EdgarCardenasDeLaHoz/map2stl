@@ -208,6 +208,9 @@ HAS_OSMNX = importlib.util.find_spec("osmnx") is not None
 
 def _ox():
     import osmnx
+
+    from geo2stl.osm import install_dns_pin
+    install_dns_pin(osmnx)  # osmnx's own host pin is IPv4-only (geo2stl.osm)
     return osmnx
 
 

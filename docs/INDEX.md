@@ -171,6 +171,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - Coarse-tier building area floor: `map2stl/app/server/config.py::COARSE_MIN_BUILDING_AREA_M2`
 - City fetch as a background job: `map2stl/app/server/core/city_fetch_tasks.py::start_city_fetch` (`cancel_task`); routes `map2stl/app/server/routers/cities.py` (`start_city_fetch`, `city_fetch_status`, `city_fetch_result`, `cancel_city_fetch`); client `map2stl/app/client/static/js/modules/layers/city-overlay.js::loadCityData` (`cancelCityFetch`), progress `map2stl/app/client/static/js/vue/components/dem/CityFetchProgress.vue`
 - Overpass health probe (osmnx user agent; overpass-api.de 406s python-requests), pacing, raw QL: `map2stl/geo2stl/osm.py::healthy_overpass_endpoints` (`overpass_wait`, `overpass_backoff`, `overpass_query`)
+- osmnx host pin on an address that connects (IPv6 or IPv4; osmnx pins IPv4 only): `map2stl/geo2stl/osm.py::install_dns_pin` (`pin_overpass_host`, `reachable_address`, `_pinned_getaddrinfo`), installed by `use_overpass_endpoint` and `map2stl/city2stl/osm_raster.py::_ox`
 - City raster for the composite (buildings max + holes, roads, waterways, walls): `map2stl/app/server/routers/composite.py::_rasterize_city` (`_rasterize_buildings`); library version `map2stl/city2stl/rasterize.py::rasterize_city_data`
 
 ### city2stl — building heights

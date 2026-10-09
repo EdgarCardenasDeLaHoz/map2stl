@@ -328,3 +328,122 @@ class TestFetchHooks:
         with pytest.raises(osm_fetch.FetchCancelled):
             osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings"],
                                      should_cancel=lambda: True)
+
+
+class TestHostPin:
+    """osmnx pins the Overpass host to its IPv4 address (``_http._config_dns``); from a network
+    where IPv4 to overpass-api.de is down and IPv6 works (2026-10-08) every query timed out.
+    ``geo2stl.osm.pin_overpass_host`` pins the first address that connects instead."""
+
+    V4 = "192.0.2.10"
+    V6 = "2001:db8::10"
+
+    @pytest.fixture
+    def resolver(self, monkeypatch):
+        """A mocked resolver: overpass-api.de has one IPv4 and one IPv6 address, IPv4 first."""
+        import socket
+
+        from geo2stl import osm
+
+        calls = []
+
+        def fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            calls.append((host, family))
+            if host == "overpass-api.de":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (self.V4, port)),
+                        (socket.AF_INET6, socket.SOCK_STREAM, 6, "", (self.V6, port, 0, 0))]
+            if host == self.V4:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (self.V4, port))]
+            if host == self.V6:
+                if family == socket.AF_INET:
+                    raise socket.gaierror("address family mismatch")
+                return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", (self.V6, port, 0, 0))]
+            raise socket.gaierror(host)
+
+        monkeypatch.setattr(osm, "_original_getaddrinfo", fake_getaddrinfo)
+        monkeypatch.setattr(osm, "_PINS", {})
+        return calls
+
+    def test_ipv4_timeout_pins_the_ipv6_address(self, resolver, monkeypatch):
+        import socket
+
+        from geo2stl import osm
+
+        tried = []
+
+        def connects(sockaddr, family, timeout_s):
+            tried.append(sockaddr[0])
+            return family == socket.AF_INET6   # IPv4 times out, IPv6 answers
+
+        monkeypatch.setattr(osm, "_tcp_connects", connects)
+        osm.pin_overpass_host("https://overpass-api.de/api")
+        assert tried == [self.V4, self.V6]
+        assert osm._PINS["overpass-api.de"][1] == self.V6
+        got = osm._pinned_getaddrinfo("overpass-api.de", 443, 0, socket.SOCK_STREAM)
+        assert [info[4][0] for info in got] == [self.V6]
+        # an AF_INET-only caller cannot use the IPv6 pin: it gets the name resolved as usual
+        got4 = osm._pinned_getaddrinfo("overpass-api.de", 443, socket.AF_INET)
+        assert got4[0][4][0] == self.V4
+        # other hosts pass straight through
+        with pytest.raises(socket.gaierror):
+            osm._pinned_getaddrinfo("elsewhere.example", 443)
+
+    def test_working_ipv4_is_kept_and_remembered(self, resolver, monkeypatch):
+        from geo2stl import osm
+
+        tried = []
+        monkeypatch.setattr(osm, "_tcp_connects", lambda sa, fam, t: tried.append(sa[0]) or True)
+        osm.pin_overpass_host("https://overpass-api.de/api")
+        osm.pin_overpass_host("https://overpass-api.de/api")   # remembered: no second probe
+        assert tried == [self.V4]
+        assert osm._PINS["overpass-api.de"][1] == self.V4
+
+    def test_nothing_connects_leaves_the_host_unpinned(self, resolver, monkeypatch):
+        from geo2stl import osm
+
+        monkeypatch.setattr(osm, "_tcp_connects", lambda sa, fam, t: False)
+        osm.pin_overpass_host("https://overpass-api.de/api")
+        assert osm._PINS["overpass-api.de"][1] is None
+        resolver.clear()
+        osm._pinned_getaddrinfo("overpass-api.de", 443)
+        assert resolver == [("overpass-api.de", 0)]
+
+    def test_a_failed_query_drops_the_pin(self, resolver, monkeypatch):
+        from geo2stl import osm
+
+        monkeypatch.setattr(osm, "_tcp_connects", lambda sa, fam, t: True)
+        monkeypatch.setattr(osm, "_FAILED_AT", {})
+        osm.pin_overpass_host("https://overpass-api.de/api")
+        osm.mark_overpass_failure("https://overpass-api.de/api")
+        assert "overpass-api.de" not in osm._PINS
+
+    def test_install_replaces_the_osmnx_ipv4_pin(self, monkeypatch):
+        import socket
+        import types
+
+        from geo2stl import osm
+
+        def osmnx_original(*a, **k):
+            return []
+
+        def _config_dns(url):  # osmnx's own pin
+            pass
+
+        http = types.SimpleNamespace(_config_dns=_config_dns,
+                                     _original_getaddrinfo=osmnx_original)
+        fake_ox = types.SimpleNamespace(_http=http, settings=_FakeSettings())
+        monkeypatch.setattr(socket, "getaddrinfo", socket.getaddrinfo)   # restored afterwards
+        monkeypatch.setattr(osm, "_original_getaddrinfo", osm._original_getaddrinfo)
+        osm.use_overpass_endpoint(fake_ox, "https://overpass-api.de/api", 300)
+        assert http._config_dns is osm.pin_overpass_host
+        assert socket.getaddrinfo is osm._pinned_getaddrinfo
+        assert osm._original_getaddrinfo is osmnx_original
+        osm.install_dns_pin(fake_ox)   # idempotent: never wraps itself
+        assert osm._original_getaddrinfo is osmnx_original
+
+    def test_stand_in_osmnx_without_http_is_left_alone(self):
+        from geo2stl import osm
+
+        ox = _FakeOx()
+        osm.install_dns_pin(ox)   # no _http: nothing to patch, no error
+        assert not hasattr(ox, "_http")
