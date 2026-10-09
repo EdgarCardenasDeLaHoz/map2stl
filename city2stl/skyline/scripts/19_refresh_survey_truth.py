@@ -346,7 +346,7 @@ def report_meta(report: Path, fps: list[dict]) -> dict[str, dict]:
 
 
 def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int,
-              plan: bool, report: Path | None = None) -> dict:
+              plan: bool, report: Path | None = None, shard: tuple[int, int] = (0, 1)) -> dict:
     from city2stl.height.providers import lidar_3dep_ept_laspy as ept
     from city2stl.skyline import survey_heights as sh
 
@@ -388,12 +388,13 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
     free, paid = [], []
     for t in tiles:
         (free if set(t.keys) <= done or _nsew_on_disk(provider, t) else paid).append(t)
-    sel = free + paid[:max_tiles]
+    i_sh, n_sh = shard   # shard i of n: every n-th tile to read; shard 0 also takes the free ones
+    sel = (free if i_sh == 0 else []) + paid[:max_tiles][i_sh::n_sh]
     plan_out = {"region": region, "areas": order, "footprints": len(meta),
                 "with_project": sum(1 for v in parts.values() if v),
                 "projects": dict(Counter(v for v in parts.values())),
                 "tiles": len(tiles), "tiles_on_disk": len(free), "tiles_to_read": len(paid),
-                "selected_new": min(max_tiles, len(paid)),
+                "selected_new": len(paid[:max_tiles][i_sh::n_sh]), "shard": f"{i_sh}/{n_sh}",
                 "per_area_to_read": dict(Counter(meta[t.keys[0]]["area"] for t in paid))}
     print(json.dumps(plan_out), flush=True)
     if plan:
@@ -411,21 +412,23 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
         rings = {k: meta[k]["ring6"] for t in batch for k in t.keys}
         got = sh.survey_footprint_heights(region, rings, provider, workers=workers,
                                           roof_stats=True)
-        # merged into the cache as it is on disk now: another writer's records survive
-        truth = bm.load_truth_cache(region)
-        for k in rings:
-            s = got.get(k)
-            if s is None or s.get("error"):
-                st["no_record" if s is None else "error"] += 1
-                continue
-            rec = truth_record(s, parts.get(k), meta[k]["osm_id"], start_dates)
-            st[rec["status"]] += 1
-            if rec["status"] != "survey_only" or k in truth:
-                continue
-            truth[k] = rec
-            added += 1
-        moved = _retire_full_precision_keys(region, truth, [meta[k] for k in rings])
-        bm.save_truth_cache(region, truth)
+        # merged into the cache as it is on disk now, under its lock: another reader of the
+        # same region (another --shard) keeps its records
+        with bm.file_lock(bm._truth_cache_path(region)):
+            truth = bm.load_truth_cache(region)
+            for k in rings:
+                s = got.get(k)
+                if s is None or s.get("error"):
+                    st["no_record" if s is None else "error"] += 1
+                    continue
+                rec = truth_record(s, parts.get(k), meta[k]["osm_id"], start_dates)
+                st[rec["status"]] += 1
+                if rec["status"] != "survey_only" or k in truth:
+                    continue
+                truth[k] = rec
+                added += 1
+            moved = _retire_full_precision_keys(region, truth, [meta[k] for k in rings])
+            bm.save_truth_cache(region, truth)
         logging.info("[truth] %s: %d/%d tiles (%s), %d new records, %d k7 retired, %.0f s",
                      region, min(i + len(batch), len(sel)), len(sel),
                      ",".join(sorted({meta[t.keys[0]]["area"] for t in batch})), added, moved,
@@ -473,20 +476,21 @@ def load_start_dates(region: str, refresh: bool = False) -> dict[str, str]:
 def temporal(region: str) -> dict:
     """``osm_start_date`` / ``built_year`` / ``temporal`` on every truth record of ``region``."""
     dates = load_start_dates(region)
-    truth = bm.load_truth_cache(region)
     ids: dict[str, str | None] = {}
     for f in pipeline_footprints(region):
         for k in (f["key6"], f["key7"]):
             ids.setdefault(k, f["osm_id"])
     flags = Counter()
-    for k, r in truth.items():
-        oid = r.get("osm_id") or ids.get(k)
-        sd = dates.get(oid or "")
-        years = r.get("survey_years")
-        r.update(osm_id=oid, osm_start_date=sd, built_year=bm.built_year(sd),
-                 temporal=bm.temporal_flag(sd, years))
-        flags[r["temporal"]] += 1
-    bm.save_truth_cache(region, truth)
+    with bm.file_lock(bm._truth_cache_path(region)):
+        truth = bm.load_truth_cache(region)
+        for k, r in truth.items():
+            oid = r.get("osm_id") or ids.get(k)
+            sd = dates.get(oid or "")
+            years = r.get("survey_years")
+            r.update(osm_id=oid, osm_start_date=sd, built_year=bm.built_year(sd),
+                     temporal=bm.temporal_flag(sd, years))
+            flags[r["temporal"]] += 1
+        bm.save_truth_cache(region, truth)
     return {"region": region, "start_dates": len(dates), "records": len(truth),
             "matched_osm_id": sum(1 for r in truth.values() if r.get("osm_id")),
             "temporal": dict(flags),
@@ -511,6 +515,9 @@ def main() -> int:
     ap.add_argument("--max-tiles", type=int, default=10_000,
                     help="--new-truth: at most this many tiles not yet on disk")
     ap.add_argument("--plan", action="store_true", help="--new-truth: count tiles, read nothing")
+    ap.add_argument("--shard", default="0/1",
+                    help="--new-truth: I/N, read every N-th tile from the I-th (two readers of one "
+                         "city; the caches are merged under a lock)")
     ap.add_argument("--from-report", type=Path, default=None,
                     help="--new-truth: the footprints of this heights.json instead of TRUTH_AREAS")
     ap.add_argument("--refresh", action="store_true",
@@ -523,7 +530,7 @@ def main() -> int:
             summary = roof_stats(region, args.fetch_workers)
         elif args.new_truth:
             summary = new_truth(region, args.areas, args.max_tiles, args.fetch_workers, args.plan,
-                                args.from_report)
+                                args.from_report, tuple(int(x) for x in args.shard.split("/")))
         elif args.temporal:
             summary = temporal(region)
         else:

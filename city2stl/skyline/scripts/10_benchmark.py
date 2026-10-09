@@ -15,7 +15,9 @@ separately (``tiers``). Writes ``summary.json`` beside the reports, a ``benchmar
 (``benchmark_report.write_benchmark_page``, linked from its index), and prints one table.
 
 Beside that headline (unchanged), each result carries ``bench`` (review 2026-10-09 item 1,
-``benchmark.bench_tables``): the truth mode, band x tier in the review's bands (<15 / 15-40 /
+``benchmark.bench_tables``) twice: ``measured`` (the rows the run measured, the headline's set)
+and ``published`` (every published row, tag-only rows too, truth from the cache only), each with
+the truth mode, band x tier in the review's bands (<15 / 15-40 /
 40-100 / >100 m) and EUBUCCO's (0-5 / 5-10 / 10-20 / 20+), band x method x camera-distance band,
 and the pipeline metrics (coverage, false-corroborated rate, withhold precision / recall), each
 cell with n, MAE, median AE, bias, P90 AE, tol (within max(25 %, 2 m)) and the shares off by > 5 m
@@ -162,11 +164,19 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
             bm.withheld_buildings(buildings, "model", region), truth)
         result["withheld_simulated_constant"] = bm.score_buildings(
             bm.withheld_buildings(buildings, "constant"), truth)
-    # item 1 (review 2026-10-09): band x tier, band x method x distance, pipeline metrics
-    result["bench"] = bm.bench_tables(buildings, truth, elevated=elevated,
-                                      seeds=bm.seed_positions(region),
-                                      survey_cache=sh.load_cache(region))
-    if result["bench"]["truth_mode"] == bm.SINGLE_SOURCE:
+    # item 1 (review 2026-10-09): band x tier, band x method x distance, pipeline metrics, over
+    # the rows the run measured (the headline's set) and over every published row (tag-only
+    # rows too: the data product; their truth from the cache only, no reads)
+    _, published = bm.load_report(heights, include_unmeasured=True)
+    published = bm.label_tiers(published, elevated)
+    cache = bm.load_truth_cache(region)
+    truth_pub = {**{b["key"]: cache[b["key"]] for b in published if b["key"] in cache}, **truth}
+    n_fp = json.loads(Path(heights).read_text(encoding="utf-8")).get("n_building_records")
+    kw = {"elevated": elevated, "seeds": bm.seed_positions(region),
+          "survey_cache": sh.load_cache(region)}
+    result["bench"] = {"measured": bm.bench_tables(buildings, truth, **kw),
+                       "published": bm.bench_tables(published, truth_pub, n_footprints=n_fp, **kw)}
+    if result["bench"]["measured"]["truth_mode"] == bm.SINGLE_SOURCE:
         # survey-only truth (no 3D Tiles cross-check): scored, but reported apart
         scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE)
         result["single_source"] = bm.score_buildings(
@@ -244,28 +254,28 @@ _TIER_ORDER = ("survey", "verified_2", "corroborated", "tag", "single", "prior",
 
 
 def print_band_tier(results: list[dict], key: str = "band_tier",
-                    title: str = "review bands") -> None:
+                    title: str = "review bands", scope: str = "published") -> None:
     """Band x tier, one block per region: n, MAE, bias and tol per cell."""
     for r in results:
-        bench = r.get("bench") or {}
+        bench = (r.get("bench") or {}).get(scope) or {}
         table = bench.get(key) or {}
         seen = {t for row in table.values() for t in row}
         tiers = [t for t in _TIER_ORDER if t in seen]
         tiers += [*sorted(seen - {*tiers, "all"}), "all"]
         print()
-        print(f"{r['region']}: band x tier, {title} ({bench.get('truth_mode')}, truth "
+        print(f"{r['region']}: band x tier, {title}, {scope} rows ({bench.get('truth_mode')}, truth "
               f"{bench.get('truth_status')} {bench.get('truth_stat')}; cell: n MAE bias tol)")
         print(f"{'band':8s} " + " ".join(f"{t:>23s}" for t in tiers))
         for band, row in table.items():
             print(f"{band:8s} " + " ".join(f"{_cell(row.get(t)):>23s}" for t in tiers))
 
 
-def print_band_detail(results: list[dict]) -> None:
+def print_band_detail(results: list[dict], scope: str = "published") -> None:
     """Every metric per review band (all tiers together), and the pipeline metrics."""
     for r in results:
-        bench = r.get("bench") or {}
+        bench = (r.get("bench") or {}).get(scope) or {}
         print()
-        print(f"{r['region']}: review bands, all tiers ({bench.get('truth_mode')}; "
+        print(f"{r['region']}: review bands, all tiers, {scope} rows ({bench.get('truth_mode')}; "
               f"{bench.get('n_scored_truth')} scored, {bench.get('with_roof_stats')} with roof "
               f"stats; excluded {bench.get('excluded')}; truth age {bench.get('truth_age')})")
         print(f"{'band':8s} {'n':>5s} {'MAE':>6s} {'medAE':>6s} {'bias':>6s} {'P90AE':>6s} "
@@ -279,8 +289,9 @@ def print_band_detail(results: list[dict]) -> None:
         p = bench.get("pipeline") or {}
         cov, fc = p.get("coverage") or {}, p.get("false_corroborated") or {}
         wh = (p.get("withhold") or {}).get("all") or {}
-        print(f"  coverage {cov.get('non_prior')}/{cov.get('rows')} = "
-              f"{_fmt(cov.get('share'), '.1%')} (rows with truth "
+        print(f"  coverage {cov.get('non_prior')}/{cov.get('rows')} rows = "
+              f"{_fmt(cov.get('share'), '.1%')} (of {cov.get('footprints') or '-'} footprints "
+              f"{_fmt(cov.get('share_of_footprints'), '.1%')}; rows with truth "
               f"{_fmt(cov.get('share_with_truth'), '.1%')}); false-corroborated "
               f"{fc.get('wrong')}/{fc.get('n')} = {_fmt(fc.get('rate'), '.1%')}; withhold "
               f"precision {_fmt(wh.get('precision'), '.1%')} ({wh.get('withheld_wrong')}/"
@@ -288,15 +299,15 @@ def print_band_detail(results: list[dict]) -> None:
               f"{wh.get('wrong')} wrong readings)")
 
 
-def print_band_method(results: list[dict]) -> None:
+def print_band_method(results: list[dict], scope: str = "published") -> None:
     """Band x method x camera-distance band (review bands): n, MAE, bias, tol, and the
     method-matched truth's MAE / tol (max for silhouettes, p70 for floors) where stored."""
     for r in results:
-        table = (r.get("bench") or {}).get("band_method") or {}
+        table = ((r.get("bench") or {}).get(scope) or {}).get("band_method") or {}
         if not table:
             continue
         print()
-        print(f"{r['region']}: band x method x distance "
+        print(f"{r['region']}: band x method x distance, {scope} rows "
               f"(cell: n MAE bias tol | matched stat MAE tol)")
         for band in (*bm.REVIEW_LABELS, "all"):
             for m, dists in sorted((table.get(band) or {}).items()):
@@ -383,9 +394,10 @@ def main() -> int:
             if r.get("known"):
                 print_known(r["region"], r["known"])
         print_single_source(ok)
-        print_band_detail(ok)
-        print_band_tier(ok)
-        print_band_tier(ok, "band_tier_eubucco", "EUBUCCO bands")
+        for scope in ("measured", "published"):
+            print_band_detail(ok, scope)
+            print_band_tier(ok, scope=scope)
+            print_band_tier(ok, "band_tier_eubucco", "EUBUCCO bands", scope)
         print_band_method(ok)
         for r in results:
             if "error" in r:

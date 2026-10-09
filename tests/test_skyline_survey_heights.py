@@ -354,3 +354,13 @@ def test_a_concurrent_writers_records_survive_the_checkpoint(monkeypatch):
     sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert set(sh.load_cache("benidorm")) == {"low", "tall", "other"}
     assert not list(sh.cache_path("benidorm").parent.glob("*.tmp"))   # atomic write cleaned up
+
+
+def test_file_lock_excludes_a_second_holder(tmp_path):
+    target = tmp_path / "cache.json"
+    with bm.file_lock(target):
+        with pytest.raises(TimeoutError):
+            with bm.file_lock(target, timeout_s=0.3):
+                pass
+    with bm.file_lock(target, timeout_s=0.3):           # released: free again
+        pass

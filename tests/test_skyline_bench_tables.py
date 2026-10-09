@@ -145,7 +145,8 @@ def test_pipeline_metrics():
     truth = _truth(ok2=50.0, bad2=60.0, single=20.0, held=10.0, tag=31.0)
     p = bm.pipeline_metrics(rows, truth)
     assert p["coverage"] == {"rows": 6, "non_prior": 4, "share": 0.667, "rows_with_truth": 5,
-                             "non_prior_with_truth": 4, "share_with_truth": 0.8}
+                             "non_prior_with_truth": 4, "share_with_truth": 0.8,
+                             "footprints": None, "share_of_footprints": None}
     assert p["false_corroborated"] == {"n": 2, "wrong": 1, "rate": 0.5}
     w = p["withhold"]["all"]
     # readings: 3 published (ok2, bad2 wrong, single) + 2 withheld (single wrong, street right)
@@ -171,3 +172,20 @@ def test_seed_positions_from_site_and_auto_proposals(tmp_path, monkeypatch):
     pos = bm.seed_positions("miami")                     # the real site file: seed_urls
     assert pos["auto_180_0900m"] == (25.76, -80.18)
     assert pos["seed_1"] == pytest.approx((25.7753, -80.1868))
+
+
+def test_published_scope_keeps_tag_only_rows_and_coverage_counts_footprints(tmp_path):
+    import json
+
+    ring = [[-80.0, 25.0], [-80.0001, 25.0], [-80.0001, 25.0001], [-80.0, 25.0]]
+    rows = [{"feature_id": "b1", "footprint_lonlat": ring, "effective_height_m": 30.0,
+             "effective_height_source": "osm_tag", "tier": "tag"},
+            {"feature_id": "b2", "measured": False, "footprint_lonlat": [[x + 0.01, y] for x, y in ring],
+             "effective_height_m": 12.0, "effective_height_source": "osm_levels", "tier": "tag"}]
+    f = tmp_path / "heights.json"
+    f.write_text(json.dumps({"region": "miami", "n_building_records": 10, "buildings": rows}))
+    assert len(bm.load_report(f)[1]) == 1
+    _, pub = bm.load_report(f, include_unmeasured=True)
+    assert [b["feature_id"] for b in pub] == ["b1", "b2"]
+    cov = bm.pipeline_metrics(pub, {}, n_footprints=10)["coverage"]
+    assert cov["non_prior"] == 2 and cov["share_of_footprints"] == 0.2

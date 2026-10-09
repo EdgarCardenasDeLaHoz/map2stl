@@ -193,8 +193,9 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
             fresh[k] = rec
         # checkpoint into the cache as it is on disk now (another process reading the same
         # region keeps its records), then drop the tile's raster before the next
-        cache = {**load_cache(region), **{k: fresh[k] for k in tile.keys}}
-        save_cache(region, cache)
+        with bm.file_lock(cache_path(region)):
+            cache = {**load_cache(region), **{k: fresh[k] for k in tile.keys}}
+            save_cache(region, cache)
         del grid
         gc.collect()
     return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}

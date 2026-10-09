@@ -462,6 +462,52 @@ def load_truth_cache(region: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
+class file_lock:  # noqa: N801 - used as a context manager, like open()
+    """An exclusive lock on ``<path>.lock`` across processes, for a read-merge-write of a cache
+    file (two survey readers of one region). Blocks, polling every 0.1 s, up to ``timeout_s``."""
+
+    def __init__(self, path: Path, timeout_s: float = 120.0):
+        self.path = Path(f"{path}.lock")
+        self.timeout_s = timeout_s
+        self.fd = None
+
+    def __enter__(self):
+        import os
+        import time
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT)
+        t0 = time.monotonic()
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except OSError as exc:
+                if time.monotonic() - t0 > self.timeout_s:
+                    os.close(self.fd)
+                    raise TimeoutError(f"{self.path} still locked after "
+                                       f"{self.timeout_s:.0f} s") from exc
+                time.sleep(0.1)
+
+    def __exit__(self, *exc):
+        import os
+
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        os.close(self.fd)
+        return False
+
+
 def write_json_atomic(path: Path, obj, attempts: int = 10) -> None:
     """Write ``obj`` as JSON to ``path`` through a temporary file and a rename, so a reader in
     another process never sees half a file (retried while Windows holds the target open)."""
@@ -717,14 +763,15 @@ def refresh_survey_truth(region: str, footprints: dict[str, list],
 # --------------------------------------------------------------------------- scoring
 
 
-def load_report(heights_json: Path) -> tuple[str, list[dict]]:
+def load_report(heights_json: Path, include_unmeasured: bool = False) -> tuple[str, list[dict]]:
     """``(region, buildings)`` from a skyline ``heights.json``; each building gains
     ``key`` (``footprint_key``). Buildings without a footprint are dropped, and so are rows
-    the run did not measure (``measured: False``: tagged buildings listed with their tag)."""
+    the run did not measure (``measured: False``: tagged buildings listed with their tag)
+    unless ``include_unmeasured`` (the band tables' "published" scope)."""
     data = json.loads(Path(heights_json).read_text(encoding="utf-8"))
     out = []
     for b in data.get("buildings", []):
-        if b.get("measured") is False:
+        if b.get("measured") is False and not include_unmeasured:
             continue
         ring = b.get("footprint_lonlat")
         if ring and len(ring) >= 3:
@@ -1222,11 +1269,13 @@ def band_method_table(buildings: list[dict], truth: dict[str, dict], elevated=()
     return out
 
 
-def pipeline_metrics(buildings: list[dict], truth: dict[str, dict]) -> dict:
+def pipeline_metrics(buildings: list[dict], truth: dict[str, dict],
+                     n_footprints: int | None = None) -> dict:
     """The review's pipeline metrics (§4.4).
 
     - ``coverage``: share of the report's rows publishing a non-prior value (survey-blind tier
-      neither ``prior`` nor unlabelled), over all rows and over the rows with truth;
+      neither ``prior`` nor unlabelled), over all rows, over the rows with truth and, given
+      ``n_footprints`` (``heights.json`` ``n_building_records``), over every footprint;
     - ``false_corroborated``: corroborated rows (``CORROBORATED_TIERS``) off by more than tol;
     - ``withhold``: readings the pipeline held back (a withheld single, ``single_reading_m``;
       a Street View value on a row publishing ``withheld:*``) among all image readings
@@ -1243,7 +1292,10 @@ def pipeline_metrics(buildings: list[dict], truth: dict[str, dict]) -> dict:
                         "share": round(n_cov / len(buildings), 3) if buildings else None,
                         "rows_with_truth": len(with_truth), "non_prior_with_truth": n_cov_t,
                         "share_with_truth": (round(n_cov_t / len(with_truth), 3)
-                                             if with_truth else None)}}
+                                             if with_truth else None),
+                        "footprints": n_footprints,
+                        "share_of_footprints": (round(n_cov / n_footprints, 3)
+                                                if n_footprints else None)}}
     corr, readings = [], []
     for b in with_truth:
         tm = float(truth[b["key"]]["truth_m"])
@@ -1276,7 +1328,8 @@ def pipeline_metrics(buildings: list[dict], truth: dict[str, dict]) -> dict:
 
 
 def bench_tables(buildings: list[dict], truth: dict[str, dict], *, elevated=(),
-                 seeds: dict | None = None, survey_cache: dict | None = None) -> dict:
+                 seeds: dict | None = None, survey_cache: dict | None = None,
+                 n_footprints: int | None = None) -> dict:
     """Every item-1 table for one report: the truth mode, band x tier (review and EUBUCCO
     bands), band x method x distance, the pipeline metrics and the truth age counts.
     ``truth``: ``footprint_truth``'s records for the report's footprints; ``survey_cache``:
@@ -1305,7 +1358,7 @@ def bench_tables(buildings: list[dict], truth: dict[str, dict], *, elevated=(),
         "band_tier": band_tier_table(buildings, scored),
         "band_tier_eubucco": band_tier_table(buildings, scored, EUBUCCO_BANDS, EUBUCCO_LABELS),
         "band_method": band_method_table(buildings, scored, elevated, seeds),
-        "pipeline": pipeline_metrics(buildings, scored),
+        "pipeline": pipeline_metrics(buildings, scored, n_footprints),
     }
 
 
