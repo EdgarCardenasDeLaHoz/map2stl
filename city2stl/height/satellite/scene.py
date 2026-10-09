@@ -248,11 +248,59 @@ def scene_name(attrs: dict) -> str:
     return f"{d[:4]}-{d[4:6]}-{d[6:8]}_{str(attrs.get('SRC_DESC') or '').replace(' ', '')}"
 
 
-def scene_polygon(cfg: dict, rel: str, name: str,
-                  points: Iterable[tuple[float, float]]) -> list | None:
-    """The outline (lon/lat rings) of scene ``name`` in release ``rel``: identify at each
-    ``(lat, lon)`` of ``points`` until one shows that scene. A release mosaics several captures,
-    so outside the polygon its tiles show another image, whose lean and sun differ."""
+def scene_outlines(cfg: dict, rel: str, bbox: Sequence[float]) -> dict:
+    """``{scene name: rings}`` of every scene release ``rel`` shows inside ``bbox`` (lon/lat
+    west, south, east, north): the source layer's polygons (layer 5, else 4) intersecting it, all
+    polygons of one scene merged (2026-10-09: a scene is often several polygons in one release;
+    Honolulu 2025 WV02 and WV03 two each, 2024 WV03 four, and the first one found held 218 of the
+    region's 3,114 footprints). {} when the service does not answer."""
+    from shapely.geometry import Polygon  # noqa: PLC0415
+    from shapely.ops import unary_union  # noqa: PLC0415
+
+    url = cfg[rel]["metadataLayerUrl"]
+    p = dict(geometry=",".join(str(float(v)) for v in bbox), geometryType="esriGeometryEnvelope",
+             inSR="4326", outSR="4326", spatialRel="esriSpatialRelIntersects",
+             outFields="SRC_DATE,SRC_DESC,SRC_RES,SRC_ACC,NICE_NAME,NICE_DESC",
+             returnGeometry="true", maxAllowableOffset="0.0003", f="json")
+    for lay in (5, 4):
+        try:
+            r = _get_json(f"{url}/{lay}/query?" + urllib.parse.urlencode(p), 60)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[satellite] outlines %s layer %s failed: %s", rel, lay, exc)
+            continue
+        fs = r.get("features") or []
+        if not fs:
+            continue
+        parts: dict = {}
+        for f in fs:
+            g = None
+            for ring in (f.get("geometry") or {}).get("rings") or []:
+                if len(ring) >= 4:                      # even-odd: holes and parts
+                    q = Polygon(np.asarray(ring, float)[:, :2]).buffer(0)
+                    g = q if g is None else g.symmetric_difference(q)
+            if g is not None and not g.is_empty:
+                parts.setdefault(scene_name(f["attributes"]), []).append(g)
+        out = {}
+        for name, gs in parts.items():
+            u = unary_union(gs)
+            polys = [u] if u.geom_type == "Polygon" else [q for q in getattr(u, "geoms", []) if q.geom_type == "Polygon"]
+            out[name] = [[list(c) for c in q.exterior.coords] for q in polys] + \
+                        [[list(c) for c in h.coords] for q in polys for h in q.interiors]
+        return out
+    return {}
+
+
+def scene_polygon(cfg: dict, rel: str, name: str, points: Iterable[tuple[float, float]],
+                  bbox: Sequence[float] | None = None) -> list | None:
+    """The outline (lon/lat rings) of scene ``name`` in release ``rel``. With ``bbox`` (lon/lat
+    west, south, east, north): all its polygons there (:func:`scene_outlines`); else, or when
+    that finds none, the polygon identify gives at the first of ``points`` ``(lat, lon)`` that
+    shows the scene (one polygon only). A release mosaics several captures, so outside the
+    outline its tiles show another image, whose lean and sun differ."""
+    if bbox is not None:
+        rings = scene_outlines(cfg, rel, bbox).get(name)
+        if rings:
+            return rings
     for lat, lon in points:
         got = identify(cfg, rel, lat, lon, geometry=True)
         if got and scene_name(got["attrs"]) == name and got.get("rings"):
@@ -512,5 +560,6 @@ def solve_sun(src: TileSource, footprints_by_fid: dict, tower_fids: Sequence, re
 
 
 __all__ = ["Scene", "TileSource", "sunpos", "mpp", "uv", "outline", "area_m2", "wayback_config",
-           "release_date", "identify", "scene_name", "scene_polygon", "in_rings", "fetch_tiles",
+           "release_date", "identify", "scene_name", "scene_outlines", "scene_polygon", "in_rings",
+           "fetch_tiles",
            "fit_lean", "solve_sun", "Z", "MAX_CONCURRENT"]

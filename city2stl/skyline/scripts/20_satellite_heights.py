@@ -13,7 +13,8 @@ Per region (F-SKY26 step 7; methods in ``city2stl.height.satellite``):
    tiles are fetched only with ``--fetch`` (free Esri imagery, 4 concurrent);
 3. geometry per scene: lean and registration (``scene.fit_lean``), sun (``scene.solve_sun``);
    cached in ``scenes.json`` (``--refit`` redoes it); each scene's outline in its release
-   (``scene.scene_polygon``, cached in ``polygons.json``): a release mosaics several captures, so
+   (``scene.scene_polygon``: all the scene's polygons in the region bbox, cached in
+   ``polygons.json``; ``--outlines`` re-queries them): a release mosaics several captures, so
    outside the outline its tiles are another image with another lean and sun. Tiles are fetched,
    the reference scene measures and the other scenes add shadows and stereo only inside it;
 4. measurements: shadow + lean on ``--ref`` (``measure.measure_single``), per-scene shadows and
@@ -32,7 +33,10 @@ Per region (F-SKY26 step 7; methods in ``city2stl.height.satellite``):
    run's ``heights.json`` (or ``{fid: metres}``): an untagged footprint's highest drone or floors
    reading widens its windows (``measure.search_cap``: 1.6x the reading, at least 220 m over
    80 m). Same scenes: only the footprints whose windows change are re-measured, the rest are
-   kept. The hints are stored in ``_meta.hints`` and reused by later runs.
+   kept. The hints are stored in ``_meta.hints`` and reused by later runs. NOT for publishing
+   (refused 2026-10-09, decisions/building-heights.md): untagged on Honolulu LiDAR the 220 m
+   window gave leans >= 40 m on 35.6 % of footprints under 30 m (60 m window: 11.1 %), and the
+   Cartagena replay published 6 rows over 205 m (the city's tallest is 202 m). A measuring tool.
 
 The region run never measures; it reads ``readings.json`` when the site has
 ``use_satellite_heights`` (``city2stl/skyline/satellite_fusion.py``).
@@ -126,6 +130,8 @@ def main(argv=None) -> int:
     ap.add_argument("--seed-tiles", default=None, help="copy DIR/<scene>/18_*.jpg into the cache")
     ap.add_argument("--fetch", action="store_true", help="fetch missing tiles (free Esri)")
     ap.add_argument("--refit", action="store_true")
+    ap.add_argument("--outlines", action="store_true",
+                    help="re-query the scene outlines (polygons.json; network, needs --fetch)")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--wayback-config", default=None, help="cached waybackconfig.json to use")
     ap.add_argument("--sun", action="append", default=[], metavar="SCENE=BEARING,EL",
@@ -137,7 +143,8 @@ def main(argv=None) -> int:
     ap.add_argument("--hints", default=None,
                     help="region run heights.json (or {fid: m} JSON): untagged footprints' highest "
                          "drone or floors reading widens their search; same scenes: re-measure "
-                         "only the footprints whose search window changes")
+                         "only the footprints whose search window changes. Not for publishing "
+                         "(refused 2026-10-09: spurious tall leans)")
     ap.add_argument("--fids", default=None, help="file of footprint ids: measure only these")
     ap.add_argument("--out", default=None,
                     help="write here instead (the region's readings.json is still read for --add)")
@@ -180,7 +187,8 @@ def main(argv=None) -> int:
     M = ss.mpp(lat0)
     log.info("before: %d of %d footprints on cached %s tiles", len(on_tiles(fps, ref_src)), len(fps), ref)
     polys = scene_polygons(rd / "polygons.json", names, scenes_rel, fps, (lat_c, lon_c),
-                           (lambda: ss.wayback_config(cfg_path)) if a.fetch else None)
+                           (lambda: ss.wayback_config(cfg_path)) if a.fetch else None,
+                           refresh=a.outlines)
     inside = {n: covered_fids(polys.get(n), fps) for n in names}
     for n in names:
         log.info("scene %s outline: %s of %d footprints inside", n,
@@ -421,18 +429,22 @@ def on_tiles(fps, src: ss.TileSource) -> list:
     return [f for f in fps if (int(np.mean(f["bb"][0::2]) // 256), int(np.mean(f["bb"][1::2]) // 256)) in src.tiles]
 
 
-def scene_polygons(path: Path, names, scenes_rel: dict, fps, centre, cfg_fn=None) -> dict:
-    """``{scene: rings or None}``, cached in ``path``; missing ones are looked up only with
-    ``cfg_fn`` (the Wayback config loader; network), at the region centre and then at the tallest
-    tagged footprints (where the scene geometry was fitted)."""
+def scene_polygons(path: Path, names, scenes_rel: dict, fps, centre, cfg_fn=None,
+                   refresh: bool = False) -> dict:
+    """``{scene: rings or None}``, cached in ``path``; missing ones (all of ``names`` with
+    ``refresh``) are looked up only with ``cfg_fn`` (the Wayback config loader; network): every
+    polygon of the scene inside the footprints' bbox (``scene.scene_outlines``), else identify at
+    the region centre and then at the tallest tagged footprints (one polygon)."""
     polys = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    missing = [n for n in names if n not in polys]
+    missing = [n for n in names if refresh or n not in polys]
     if missing and cfg_fn is not None:
         cfg = cfg_fn()
         pts = [centre] + [(f["lat"], f["lon"]) for f in
                           sorted((f for f in fps if f["tag"]), key=lambda f: -f["tag"])[:6]]
+        bbox = (min(f["lon"] for f in fps) - 0.001, min(f["lat"] for f in fps) - 0.001,
+                max(f["lon"] for f in fps) + 0.001, max(f["lat"] for f in fps) + 0.001) if fps else None
         for n in missing:
-            polys[n] = ss.scene_polygon(cfg, scenes_rel[n], n, pts)
+            polys[n] = ss.scene_polygon(cfg, scenes_rel[n], n, pts, bbox=bbox)
             if polys[n] is None:
                 log.warning("scene %s: outline not found in release %s", n, scenes_rel[n])
         path.write_text(json.dumps(polys), encoding="utf-8")

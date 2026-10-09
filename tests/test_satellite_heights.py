@@ -396,3 +396,25 @@ def test_load_calibrates_a_stored_file_and_load_region_never_uses_it_raw(tmp_pat
     # --recalibrate rewrites the file; it then loads unchanged
     assert _script().recalibrate(p) == 0
     assert sr.load(p)[0]["n_recalibrated"] == 0
+
+
+def test_scene_outline_takes_every_polygon_of_the_scene_in_the_bbox(monkeypatch):
+    """2026-10-09: a scene is often several polygons in one release (Honolulu 2025 WV02 / WV03:
+    two each); identify at one point gave one of them (WV03: 218 of 3,114 footprints)."""
+    sq = lambda x0, y0, x1, y1: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]   # noqa: E731
+    feats = [{"attributes": {"SRC_DATE": 20250511, "SRC_DESC": "WV03"}, "geometry": {"rings": [sq(0, 0, 1, 1)]}},
+             {"attributes": {"SRC_DATE": 20250201, "SRC_DESC": "WV02"}, "geometry": {"rings": [sq(1, 0, 2, 1)]}},
+             {"attributes": {"SRC_DATE": 20250511, "SRC_DESC": "WV03"},
+              "geometry": {"rings": [sq(2, 0, 3, 1), sq(2.4, 0.4, 2.6, 0.6)]}}]        # with a hole
+    calls = []
+
+    def fake(url, timeout=40):
+        calls.append(url)
+        return {"features": feats}
+    monkeypatch.setattr(ss, "_get_json", fake)
+    cfg = {"r": {"metadataLayerUrl": "https://example.invalid/MapServer"}}
+    o = ss.scene_outlines(cfg, "r", (0, 0, 3, 1))
+    assert set(o) == {"2025-05-11_WV03", "2025-02-01_WV02"} and "esriGeometryEnvelope" in calls[0]
+    got = ss.in_rings(o["2025-05-11_WV03"], [0.5, 1.5, 2.2, 2.5], [0.5, 0.5, 0.5, 0.5])
+    assert got.tolist() == [True, False, True, False]
+    assert ss.scene_polygon(cfg, "r", "2025-05-11_WV03", [], bbox=(0, 0, 3, 1)) == o["2025-05-11_WV03"]
