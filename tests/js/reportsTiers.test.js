@@ -33,7 +33,7 @@ describe('reports tierSummary', () => {
             tier_counts: { survey: 0, corroborated: 32, tag: 143, single: 223, prior: 248 },
             survey: { providers: {}, attributions: [] },
         });
-        expect(html).toContain('32 of 646 verified');
+        expect(html).toContain('0 survey, 32 corroborated of 646');
         expect(html).toContain('Single reading <b>223</b>');
         expect(html).toContain('No survey heights in this run.');
         expect(html).not.toContain('withheld');
@@ -46,6 +46,7 @@ describe('reports tierSummary', () => {
             survey: { providers: { usgs_3dep: 5 },
                       attributions: ['Survey heights: USGS 3DEP lidar. Public domain.'] },
         });
+        expect(html).toContain('5 survey, 0 corroborated of 10');
         expect(html).toContain('Public domain.');
         expect(html).toContain('1 single reading withheld for the prior');
     });

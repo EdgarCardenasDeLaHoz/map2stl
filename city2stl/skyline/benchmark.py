@@ -993,19 +993,40 @@ def label_tiers(buildings: list[dict], measured_seeds=()) -> list[dict]:
     return out
 
 
+def survey_blind(buildings: list[dict]) -> list[dict]:
+    """``buildings`` as the survey-blind run saw them (F-SKY26 2d): a row published from the survey
+    (tier ``survey``) goes back to its pre-survey height, source and tier (``no_survey_*``). A
+    survey row is half of its own truth, so scoring it on the survey would be circular; one
+    without ``no_survey_height_m`` cannot be put back and is left out. Other rows pass through
+    (the same list items). ``score_report`` scores everything on these except ``score_survey_rows``."""
+    out = []
+    for b in buildings:
+        if b.get("tier") != "survey":
+            out.append(b)
+        elif b.get("no_survey_height_m") is not None:
+            out.append({**b, "effective_height_m": b["no_survey_height_m"],
+                        "effective_height_source": b.get("no_survey_source"),
+                        "tier": b.get("no_survey_tier") or "unlabelled"})
+    return out
+
+
 def score_survey_rows(buildings: list[dict], truth: dict[str, dict]) -> dict:
     """Rows that publish a survey height (tier ``survey``, F-SKY26 2d), scored against the
     3D Tiles reading only (``tiles_m``, flat meshes excluded): the survey half of the truth
-    is the same measurement. Success criterion: within 25 % of ``tiles_m`` 90 % of the time."""
+    is the same measurement. Success criterion: within 25 % of ``tiles_m`` 90 % of the time.
+    Rows flagged stale (``survey_stale``) are counted apart (``n_stale``) and left out of
+    ``vs_tiles``: the flag says the survey may not show the building as it stands."""
     rows = [(float(b["effective_height_m"]), float(t["tiles_m"])) for b in buildings
             if b.get("tier") == "survey" and b.get("effective_height_m") is not None
+            and not b.get("survey_stale")
             and (t := truth.get(b["key"])) and t.get("tiles_m") is not None
             and not t.get("tiles_flat")]
     n_survey = sum(1 for b in buildings if b.get("tier") == "survey")
+    n_stale = sum(1 for b in buildings if b.get("tier") == "survey" and b.get("survey_stale"))
     if not rows:
-        return {"n_survey_rows": n_survey, "vs_tiles": {"n": 0}}
+        return {"n_survey_rows": n_survey, "n_stale": n_stale, "vs_tiles": {"n": 0}}
     pred, tiles = (np.array(c) for c in zip(*rows, strict=True))
-    return {"n_survey_rows": n_survey, "vs_tiles": _errors(pred, tiles)}
+    return {"n_survey_rows": n_survey, "n_stale": n_stale, "vs_tiles": _errors(pred, tiles)}
 
 
 def score_by_tier(buildings: list[dict], truth: dict[str, dict],

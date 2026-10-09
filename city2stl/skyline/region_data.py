@@ -670,6 +670,13 @@ def _load_site_use_satellite_heights(region_name: str) -> bool:
     Default False."""
     return bool(_read_site_config(region_name).get("use_satellite_heights", False))
 
+def _load_site_use_survey_heights(region_name: str) -> bool:
+    """Per-region opt-in for publishing survey LiDAR heights as tier ``survey`` (F-SKY26 step 2d,
+    ``survey_publish``): the run reads the cached survey (``runs/survey/<region>.json``) and
+    publishes its p95 where the footprint has one. Default False; the env var
+    ``SKYLINE_SURVEY_HEIGHTS`` overrides."""
+    return bool(_read_site_config(region_name).get("use_survey_heights", False))
+
 def _load_site_ownership_flags(region_name: str) -> tuple[bool | None, bool | None]:
     """Site flags ``use_ownership`` / ``use_cadastre_occluders`` (None = absent; the env vars
     ``SKYLINE_OWNERSHIP`` / ``SKYLINE_CADASTRE_OCCLUDERS`` still override)."""

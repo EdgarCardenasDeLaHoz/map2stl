@@ -951,6 +951,7 @@ def _tier_summary_html(rows: list[dict], stored: dict | None = None) -> str:
     total = sum(counts.values())
     if not total:
         return ""
+    n_surv, n_corr = counts.get("survey", 0), counts.get("corroborated", 0)
     n_ver = sum(counts.get(t, 0) for t in VERIFIED_TIERS)
     pct = 100.0 * n_ver / total
     bar = "".join(
@@ -965,8 +966,8 @@ def _tier_summary_html(rows: list[dict], stored: dict | None = None) -> str:
         for t, n in counts.items())
     attributions = height_attributions(rows)
     attr_html = "".join(f'<p class="small attr">{html.escape(a)}</p>' for a in attributions)
-    return (f'<p><b>{n_ver} of {total}</b> published heights are verified ({pct:.0f} %); '
-            f'{total - n_ver} are unverified.</p>\n'
+    return (f'<p><b>{n_surv} survey, {n_corr} corroborated of {total}</b> published heights '
+            f'({pct:.0f} %); {total - n_ver} are unverified.</p>\n'
             f'<div class="tierbar">{bar}</div>\n<div class="tchips">{chips}</div>\n{attr_html}')
 
 
@@ -991,6 +992,10 @@ def _heights_table_html(rows: list[dict]) -> str:
             notes.append(w)
         elif r.get("prior_disagrees") and t == "single":
             notes.append("more than 2x the prior")
+        if t == "survey" and r.get("survey_stale"):
+            notes.append("survey may be stale: " + str(r.get("survey_stale_reason") or ""))
+        if r.get("survey_withheld_reason"):
+            notes.append("survey not published: " + str(r["survey_withheld_reason"]))
         if r.get("measured") is False:
             notes.append("not seen by a seed")
         name = str(r.get("name") or r.get("feature_id") or "")

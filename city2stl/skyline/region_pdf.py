@@ -54,6 +54,7 @@ import json
 import logging
 import os
 import time
+from collections import Counter
 from pathlib import Path
 
 from ._core.height import TAGGED_SOURCES, untagged_fallback, withhold_untagged_street_view
@@ -82,6 +83,7 @@ from .region_data import (
     _load_site_use_pano_coastline_recovery,
     _load_site_use_satellite_footprints,
     _load_site_use_satellite_heights,
+    _load_site_use_survey_heights,
     _osm_to_building_records,
 )
 from .region_types import SkylinePoint
@@ -92,6 +94,7 @@ from .seed_selection import (
     _screen_locations,
 )
 from .streetview_io import _parse_streetview_url, _resolve_api_key
+from .survey_publish import summarize as summarize_survey
 from .tier_display import tag_disagreements
 
 logger = logging.getLogger(__name__)
@@ -190,6 +193,7 @@ def _write_heights_json(
     building_records: list[BuildingRecord],
     known_heights: list[dict] | None,
     satellite: dict | None = None,
+    survey=None,
 ) -> None:
     """Dump the aggregated per-building heights next to the HTML report.
 
@@ -198,6 +202,9 @@ def _write_heights_json(
     (``tiers.tag_witness``) and an agreeing pair can disagree with it (``tag_disagrees``).
     Unmeasured rows get their ``selection_reason`` here; ``tag_disagreements`` lists every
     tagged row whose measurement disagrees with its published tag (logged too).
+
+    ``survey``: the run's ``survey_publish.SurveyOverlay`` (F-SKY26 2d), applied to the tag-only
+    rows too (survey truth outranks the tag); the file's ``survey`` block counts the survey rows.
 
     The aggregation is the pipeline's actual answer, and it used to live only
     inside a rendered figure. Anything that wants to score the run — a vendor
@@ -264,6 +271,8 @@ def _write_heights_json(
                "no_survey_height_m": float(rec.height_tag_m),
                "no_survey_source": rec.height_source, "no_survey_tier": tf["tier"]}
         row["selection_reason"] = selection_reason(row)
+        if survey is not None:
+            survey.apply(row)
         rows.append(row)
     # tagged rows whose measurement disagrees with the published tag (review item 6): the tag
     # stays published, both values are listed here and on the row (tier_display.tag_note)
@@ -280,6 +289,7 @@ def _write_heights_json(
         "n_building_records": len(building_records),
         "known_heights": known_heights or [],
         "tier_counts": tier_counts(rows),
+        **({"survey": summarize_survey(rows)} if survey is not None else {}),
         "tag_disagreements": disagreements,
         "buildings": rows,
     }
@@ -654,6 +664,21 @@ def run_region_pdf_report(
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "
                     f"height withheld, fallback used")
+    # F-SKY26 2d (site flag use_survey_heights): survey truth from the cached survey outranks the
+    # tag and the image readings; the survey-blind answer stays in no_survey_* for the benchmark
+    survey = None
+    from . import survey_publish  # noqa: PLC0415
+    survey_publish.set_active(None)
+    if survey_publish.enabled(_load_site_use_survey_heights(region_name)):
+        survey = survey_publish.build_overlay(
+            region_name, building_heights, building_records, osm_data,
+            drone_seeds=set(elevated_seeds or ()))
+        if survey is not None:
+            done = Counter(survey.apply(row) for row in building_heights)
+            survey_publish.set_active(survey)
+            logger.info(f"[survey_publish] measured rows: {done.get('survey', 0)} survey, "
+                        f"{done.get('stale', 0)} survey (stale-flagged), "
+                        f"{done.get('nested', 0)} nested (survey withheld)")
 
     # Load surveyed ground-truth heights from sites/<region>.json if present.
     known_heights = _load_known_heights(region_name, building_records)
@@ -717,6 +742,7 @@ def run_region_pdf_report(
         building_records=building_records,
         known_heights=known_heights,
         satellite=satellite,
+        survey=survey,
     )
 
     good = len([r for r in screened if r["coverage"] == "good"])

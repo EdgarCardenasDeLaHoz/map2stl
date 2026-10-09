@@ -283,6 +283,8 @@ window.reportsPage = (() => {
       + `<span class="tsw" style="background:${esc(color(t))}"></span>${esc(label(t))} `
       + `<b>${n}</b> <span class="muted">(${pct(n)} %)</span></span>`).join('');
     const nVer = h.n_verified || 0;
+    const nSurvey = counts.survey || 0;
+    const nCorr = counts.corroborated || 0;
     const survey = (h.survey && h.survey.attributions) || [];
     const attr = survey.length
       ? survey.map((a) => `<div class="attr">${esc(a)}</div>`).join('')
@@ -293,7 +295,7 @@ window.reportsPage = (() => {
     const legacy = (h.schema_version || 1) < 2
       ? '<div class="attr">Written before verification tiers existed.</div>' : '';
     return '<h3>Verification</h3>'
-      + `<div class="meta"><b class="ink">${nVer} of ${total} verified</b> (${pct(nVer)} %)`
+      + `<div class="meta"><b class="ink">${nSurvey} survey, ${nCorr} corroborated of ${total}</b> (${pct(nVer)} %)`
       + ` · ${total - nVer} unverified${withheld}</div>`
       + `<div class="tierbar">${bar}</div><div class="tchips">${chips}</div>${attr}${legacy}`;
   }

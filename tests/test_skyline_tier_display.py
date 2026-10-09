@@ -111,7 +111,7 @@ class TestRegionIndex:
         assert "Hotel Estelar" in page and "seed_1 195, seed_6 199" in page
         assert "shadow 179" in page and "no published row" in page
         assert 'src="assets/tiers_map.png"' in page
-        assert "1 of 4</b> published heights are verified" in page
+        assert "0 survey, 1 corroborated of 4</b> published heights (25 %)" in page
 
     def test_table_has_tier_hover_unverified_and_withheld_note(self, rows):
         page = render_region_index("cartagena", [], rows)
@@ -203,7 +203,7 @@ class TestPdfHeightsPage:
         joined = "\n".join(texts)
         assert "Corroborated (1)" in joined and "Survey lidar (1)" in joined
         assert "ČÚZK" in joined
-        assert "verified: 2 (40 %)" in joined
+        assert "survey: 1, corroborated: 1 (40 % of all)" in joined
         assert (tmp_path / "h.pdf").stat().st_size > 0
         assert render_tier_map_png(tmp_path / "m.png", rows)
         assert not render_tier_map_png(tmp_path / "none.png", [{"tier": "tag"}])

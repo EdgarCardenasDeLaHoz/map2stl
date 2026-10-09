@@ -615,7 +615,8 @@ def _render_heights_page(pdf, building_heights: list[dict],
     total = sum(counts.values()) or 1
     n_ver = sum(counts.get(t, 0) for t in VERIFIED_TIERS)
     lines = [f"Published heights: {sum(counts.values())}",
-             f"  verified: {n_ver} ({100.0 * n_ver / total:.0f} %)",
+             f"  survey: {counts.get('survey', 0)}, corroborated: {counts.get('corroborated', 0)}"
+             f" ({100.0 * n_ver / total:.0f} % of all)",
              f"  unverified: {total - n_ver}", ""]
     lines += [f"  {TIER_LABELS[t]:<22}{n:5d}  {100.0 * n / total:4.0f} %"
               for t, n in counts.items()]

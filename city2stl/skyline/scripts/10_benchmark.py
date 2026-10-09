@@ -152,10 +152,14 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     buildings = bm.label_tiers(buildings, elevated)
     # the headline is the survey-blind answer (F-SKY26 2c): survey rows would be scored
     # against a truth they are half of; they are scored against 3D Tiles alone instead
+    # (``survey_rows``). Everything else, the tier tables and the pages included, sees the rows
+    # of tier ``survey`` as the run published them before the survey (``survey_blind``, 2d).
+    with_survey = buildings
+    buildings = bm.survey_blind(buildings)
     result = {"region": region, "report": str(heights), "survey": provider,
               **bm.score_buildings(buildings, truth, pred_field="no_survey_height_m"),
               "tiers": bm.score_by_tier(buildings, truth),
-              "survey_rows": bm.score_survey_rows(buildings, truth)}
+              "survey_rows": bm.score_survey_rows(with_survey, truth)}
     sv = bm.street_view_buildings(buildings)
     if sv is not None:  # T28 withheld untagged Street View heights: score them too
         result["street_view_unwithheld"] = bm.score_buildings(sv, truth)
@@ -168,7 +172,7 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
     # the rows the run measured (the headline's set) and over every published row (tag-only
     # rows too: the data product; their truth from the cache only, no reads)
     _, published = bm.load_report(heights, include_unmeasured=True)
-    published = bm.label_tiers(published, elevated)
+    published = bm.survey_blind(bm.label_tiers(published, elevated))
     cache = bm.load_truth_cache(region)
     truth_pub = {**{b["key"]: cache[b["key"]] for b in published if b["key"] in cache}, **truth}
     n_fp = json.loads(Path(heights).read_text(encoding="utf-8")).get("n_building_records")

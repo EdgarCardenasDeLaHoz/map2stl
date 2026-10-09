@@ -2,7 +2,8 @@
 
 Every published row says how far its height can be trusted, as one tier, best first:
 
-- ``survey``: the per-footprint survey nDSM height (published only with 2d, ``use_survey_heights``);
+- ``survey``: the per-footprint survey nDSM height (published only with 2d, ``use_survey_heights``;
+  ``survey_publish``: a stale-flagged one keeps the tier with ``survey_stale``);
 - ``corroborated``: two *independent* readings agree (``independent`` + ``agree``);
 - ``tag``: the OSM height tag;
 - ``single``: image readings, but no independent agreeing pair: published, labelled unverified;
@@ -428,7 +429,17 @@ def selection_reason(row: dict) -> str:
     src = str(row.get("effective_height_source") or "")
     base = src.split(":", 1)[1] if src.startswith("withheld:") else src
     if row.get("tier") == "survey" or base.startswith("survey"):
-        return SELECTION_REASONS["survey"]
+        out = SELECTION_REASONS["survey"]
+        if row.get("survey_stat"):  # 2d: say which statistic, project and flight
+            out += f" ({row['survey_stat']}"
+            if row.get("survey_provider"):
+                out += f", {row['survey_provider']}"
+            if row.get("survey_year"):
+                out += f", flown {row['survey_year']}"
+            out += ")"
+        if row.get("survey_stale") and row.get("survey_stale_reason"):
+            out += "; flagged stale: " + str(row["survey_stale_reason"])
+        return out
     if base in ("osm_tag", "osm_levels"):
         out = SELECTION_REASONS[base]
         if row.get("tag_disagrees") and row.get("measured_m") is not None:

@@ -108,7 +108,11 @@ def with_unmeasured_tags(rows: Sequence[dict], records: Iterable) -> list[dict]:
     """``rows`` plus a ``tag`` row for every OSM-tagged record no row covers, as
     ``region_pdf._write_heights_json`` adds them, so the reports count the same tiers as
     ``heights.json``. ``records``: ``BuildingRecord``-like (``feature_id``, ``name``,
-    ``height_source``, ``height_tag_m``, ``geometry``)."""
+    ``height_source``, ``height_tag_m``, ``geometry``). When the run publishes survey heights
+    (``survey_publish.active()``) a tag row whose footprint has one becomes a ``survey`` row."""
+    from .survey_publish import active  # noqa: PLC0415
+
+    survey = active()
     out = list(rows)
     seen = {r.get("feature_id") for r in rows}
     for rec in records or ():
@@ -122,6 +126,8 @@ def with_unmeasured_tags(rows: Sequence[dict], records: Iterable) -> list[dict]:
                "effective_height_source": rec.height_source, "n_seeds": 0,
                "tier": "tag", "tier_methods": ["osm_tag"], "verified": False}
         row["selection_reason"] = selection_reason(row)
+        if survey is not None:
+            survey.apply(row)
         out.append(row)
     return out
 
@@ -169,6 +175,11 @@ def tier_hover(row: dict) -> str:
         text += ". Disputed by: " + ", ".join(str(m) for m in disputed)
     if row.get("prior_disagrees") and t == "single":
         text += ". More than 2x away from the prior"
+    if t == "survey" and row.get("survey_stale"):
+        text += ". Survey flagged stale: " + str(row.get("survey_stale_reason") or "see the row")
+    if row.get("survey_withheld_reason"):
+        text += (f". Survey {float(row.get('survey_withheld_m') or 0):.0f} m not published: "
+                 + str(row["survey_withheld_reason"]))
     note = tag_note(row)
     if note:
         text += ". " + note
@@ -322,7 +333,9 @@ def survey_attributions(providers: Iterable[str]) -> list[str]:
     """The licence lines for these providers, de-duplicated, in a stable order."""
     lines: list[str] = []
     for p in sorted(set(providers)):
-        line = SURVEY_ATTRIBUTIONS.get(p, f"Survey heights: {p} (licence not recorded).")
+        # a lidar project name (``survey_provider`` of a 2d row): USGS_LPC_* is a 3DEP project
+        key = "usgs_3dep" if str(p).upper().startswith("USGS_") else p
+        line = SURVEY_ATTRIBUTIONS.get(key, f"Survey heights: {p} (licence not recorded).")
         if line not in lines:
             lines.append(line)
     return lines

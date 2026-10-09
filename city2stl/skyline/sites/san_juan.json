@@ -15,6 +15,7 @@
     }
   },
   "seed_urls": [],
+  "use_survey_heights": true,
   "elevated_seeds": [],
   "pending_seed_urls": [
     "https://www.google.com/maps/@18.4569300,-66.0761100,3a,75y,115h,90t/data=!3m6!1e1!3m4!1sCAoSHENJQUJJaERIMW9lQW53SVNzRzNGVVN6TENrZHo.!2e10!7i8192!8i4096",

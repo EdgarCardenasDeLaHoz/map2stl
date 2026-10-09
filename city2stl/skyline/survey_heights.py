@@ -11,7 +11,8 @@ source would spend the monthly free cap, decision 2026-10-07).
     survey_footprint_heights(region, footprints, provider=None) -> {key: record}
 
 A record is ``{survey_m, survey_cells, provider, years, stat}`` (``years``: ``(first, last)`` survey
-year from ``providers/survey.py::years_for_bbox``, or None), plus the stored roof statistics
+year from ``providers/survey.py::years_for_bbox``, or None; ``project``: the EPT project read, when
+there is one, e.g. ``USGS_LPC_PR_PRVI_E_2018``), plus the stored roof statistics
 (``benchmark.footprint_stats``, review 2026-10-09 item 1): ``roof_m`` ``{p50, p70, p90, p95, max}``
 (``roof_m["p95"] == survey_m``, the headline), ``ground_p5_m`` / ``ground_cells`` (p5 of the nDSM in a
 4 m ring outside the footprint) and ``roof_stats`` (``benchmark.ROOF_STATS_VERSION``). Records
@@ -21,7 +22,8 @@ cached before the roof statistics existed have only ``survey_m``; ``roof_stats=T
 returned with ``error`` and not cached, so a down endpoint never pins "no survey here". A tile
 the survey does not cover is a complete answer (``survey_m`` None) and is cached.
 
-Publishing these heights is step 2d (``use_survey_heights``), not done here.
+Publishing these heights is step 2d (``survey_publish``, site flag ``use_survey_heights``): it reads
+this cache and never measures.
 """
 
 from __future__ import annotations
@@ -190,6 +192,8 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
         for k in tile.keys:
             rec = measure(grid, todo[k], footprints[k])
             rec.update(provider=provider, years=years, stat=bm.STAT_VERSION)
+            if tile.part:  # the EPT project read (``survey_publish`` names it on the row)
+                rec["project"] = tile.part
             fresh[k] = rec
         # checkpoint into the cache as it is on disk now (another process reading the same
         # region keeps its records), then drop the tile's raster before the next
