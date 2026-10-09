@@ -18,7 +18,7 @@ function loadPage() {
 
 const TIERS = {
     survey: { label: 'Survey lidar', color: '#0072B2', hint: 'lidar' },
-    verified_2: { label: 'Verified (2 sources)', color: '#009E73', hint: 'two' },
+    corroborated: { label: 'Corroborated', color: '#009E73', hint: 'two' },
     tag: { label: 'OSM tag', color: '#56B4E9', hint: 'tag' },
     single: { label: 'Single reading', color: '#D55E00', hint: 'one' },
     prior: { label: 'Prior estimate', color: '#999999', hint: 'prior' },
@@ -29,8 +29,8 @@ describe('reports tierSummary', () => {
 
     it('shows counts, the verified share and the no-survey line', () => {
         const html = tierSummary({
-            schema_version: 2, tiers: TIERS, n_verified: 32, n_withheld: 0,
-            tier_counts: { survey: 0, verified_2: 32, tag: 143, single: 223, prior: 248 },
+            schema_version: 3, tiers: TIERS, n_verified: 32, n_withheld: 0,
+            tier_counts: { survey: 0, corroborated: 32, tag: 143, single: 223, prior: 248 },
             survey: { providers: {}, attributions: [] },
         });
         expect(html).toContain('32 of 646 verified');
@@ -41,8 +41,8 @@ describe('reports tierSummary', () => {
 
     it('prints every survey attribution and the withheld count', () => {
         const html = tierSummary({
-            schema_version: 2, tiers: TIERS, n_verified: 5, n_withheld: 1,
-            tier_counts: { survey: 5, verified_2: 0, tag: 0, single: 1, prior: 4 },
+            schema_version: 3, tiers: TIERS, n_verified: 5, n_withheld: 1,
+            tier_counts: { survey: 5, corroborated: 0, tag: 0, single: 1, prior: 4 },
             survey: { providers: { usgs_3dep: 5 },
                       attributions: ['Survey heights: USGS 3DEP lidar. Public domain.'] },
         });

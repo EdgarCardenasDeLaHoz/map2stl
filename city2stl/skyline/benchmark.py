@@ -773,7 +773,9 @@ def load_report(heights_json: Path, include_unmeasured: bool = False) -> tuple[s
     ``key`` (``footprint_key``). Buildings without a footprint are dropped, and so are rows
     the run did not measure (``measured: False``: tagged buildings listed with their tag)
     unless ``include_unmeasured`` (the band tables' "published" scope)."""
-    data = json.loads(Path(heights_json).read_text(encoding="utf-8"))
+    from ._core.tiers import upgrade_tiers
+
+    data = upgrade_tiers(json.loads(Path(heights_json).read_text(encoding="utf-8")))
     out = []
     for b in data.get("buildings", []):
         if b.get("measured") is False and not include_unmeasured:
@@ -1009,14 +1011,14 @@ def score_survey_rows(buildings: list[dict], truth: dict[str, dict]) -> dict:
 def score_by_tier(buildings: list[dict], truth: dict[str, dict],
                   pred_field: str = "effective_height_m", tier_field: str = "tier") -> dict:
     """Errors per verification tier: do the tiers mean what they say? Within 25 % should
-    fall in tier order (``verified_2`` at least 0.85). Non-survey tiers are scored on
+    fall in tier order (``corroborated`` at least 0.85). Non-survey tiers are scored on
     confirmed truth; ``survey`` rows against ``tiles_m`` only (``score_survey_rows``).
     Rows without a tier (run ``label_tiers`` first) count as ``unlabelled``."""
-    from ._core.tiers import TIERS
+    from ._core.tiers import TIERS, canonical_tier
 
     by: dict[str, list[tuple[float, float]]] = {}
     for b in buildings:
-        tier = b.get(tier_field) or "unlabelled"
+        tier = canonical_tier(b.get(tier_field)) or "unlabelled"
         pred = b.get(pred_field, b.get("effective_height_m"))
         t = truth.get(b["key"])
         if pred is None or not t:
@@ -1046,9 +1048,9 @@ def score_by_tier(buildings: list[dict], truth: dict[str, dict],
 TWO_SOURCE = "two_source"        # survey + 3D Tiles, cross-checked: ``confirmed`` rows score
 SINGLE_SOURCE = "single_source"  # survey only (no 3D Tiles read): ``survey_only`` rows score
 NO_TRUTH = "none"
-#: Tiers whose rows claim two independent readings agree (``verified_2``; ``corroborated`` is
-#: the review's proposed name for it, item 6): a wrong one is a false corroboration.
-CORROBORATED_TIERS = ("verified_2", "corroborated")
+#: Tiers whose rows claim two independent readings agree (``corroborated``, called ``verified_2``
+#: until 2026-10-09; ``canonical_tier`` maps old rows): a wrong one is a false corroboration.
+CORROBORATED_TIERS = ("corroborated",)
 #: Tiers that publish an image reading (``single`` and the corroborated ones).
 READING_TIERS = ("single", *CORROBORATED_TIERS)
 
@@ -1273,8 +1275,10 @@ def method_readings(b: dict, elevated=(), seeds: dict | None = None) -> list[dic
 def _pred_tier(b: dict) -> tuple[float | None, str]:
     """The survey-blind published height and its tier (what the headline scores)."""
     pred = b.get("no_survey_height_m", b.get("effective_height_m"))
+    from ._core.tiers import canonical_tier
+
     return (None if pred is None else float(pred),
-            b.get("no_survey_tier") or b.get("tier") or "unlabelled")
+            canonical_tier(b.get("no_survey_tier") or b.get("tier")) or "unlabelled")
 
 
 def band_tier_table(buildings: list[dict], truth: dict[str, dict], bands=REVIEW_BANDS,

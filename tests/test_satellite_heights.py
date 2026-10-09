@@ -152,7 +152,7 @@ def test_tiers_with_satellite(monkeypatch):
     withhold_untagged_street_view(rows, recs, fallback=lambda r: (12.0, "prior"),
                                   measured_seeds={"seed_1"}, satellite=sat)
     d, s, ssr, lo = rows
-    assert d["effective_height_source"] == "withheld:elevated" and d["tier"] == "verified_2"
+    assert d["effective_height_source"] == "withheld:elevated" and d["tier"] == "corroborated"
     assert d["tier_methods"] == ["drone:seed_1", "lean"]
     assert s["effective_height_source"] == "withheld:satellite" and s["effective_height_m"] == 130.0
     assert s["tier"] == "single"

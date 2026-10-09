@@ -58,7 +58,7 @@ def test_truth_mode():
 
 
 def test_two_source_scores_confirmed_only_and_matches_the_headline():
-    rows = [_row("a", 12, "prior"), _row("b", 55, "tag"), _row("c", 140, "verified_2"),
+    rows = [_row("a", 12, "prior"), _row("b", 55, "tag"), _row("c", 140, "corroborated"),
             _row("d", 30, "single")]
     truth = {**_truth(a=10.0, b=50.0, c=120.0), **_truth("survey_only", d=31.0)}
     t = bm.bench_tables(rows, truth)
@@ -69,7 +69,7 @@ def test_two_source_scores_confirmed_only_and_matches_the_headline():
     assert allc["bias_m"] == head["bias_m"]
     assert t["band_tier"]["<15"]["prior"]["n"] == 1
     assert t["band_tier"]["40-100"]["tag"]["mae_m"] == 5.0
-    assert t["band_tier"][">100"]["verified_2"]["bias_m"] == 20.0
+    assert t["band_tier"][">100"]["corroborated"]["bias_m"] == 20.0
     assert t["band_tier"]["15-40"] == {}                        # no truth there
     assert t["band_tier_eubucco"]["10-20"]["prior"]["n"] == 1      # 10 m: [10, 20)
 
@@ -137,8 +137,8 @@ def test_attach_roof_stats_from_the_survey_cache():
 
 def test_pipeline_metrics():
     rows = [
-        _row("ok2", 52.0, "verified_2"),                         # corroborated, right
-        _row("bad2", 90.0, "verified_2"),                        # corroborated, wrong
+        _row("ok2", 52.0, "corroborated"),                         # corroborated, right
+        _row("bad2", 90.0, "corroborated"),                        # corroborated, wrong
         _row("single", 21.0, "single"),                          # published reading, right
         _row("held", 10.0, "prior", single_reading_m=45.0,       # withheld single: wrong
              no_survey_source="withheld:prior_gbm", street_view_m=11.0),  # + street: right

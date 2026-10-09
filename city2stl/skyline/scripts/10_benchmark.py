@@ -219,7 +219,7 @@ def print_table(results: list[dict]) -> None:
 
 def print_tiers(results: list[dict]) -> None:
     """Within 25 % per verification tier (F-SKY26): it should fall in tier order."""
-    tiers = ("survey", "verified_2", "tag", "single", "prior", "unlabelled")
+    tiers = ("survey", "corroborated", "tag", "single", "prior", "unlabelled")
     print()
     print(f"{'within 25 % by tier':22s} " + " ".join(f"{t:>14s}" for t in tiers))
     for r in results:
@@ -252,7 +252,7 @@ def _cell(e: dict | None) -> str:
                         bias=_fmt(e.get("bias_m"), "+6.1f"), tol=_fmt(e.get("tol"), "5.0%"))
 
 
-_TIER_ORDER = ("survey", "verified_2", "corroborated", "tag", "single", "prior", "unlabelled")
+_TIER_ORDER = ("survey", "corroborated", "tag", "single", "prior", "unlabelled")
 
 
 def print_band_tier(results: list[dict], key: str = "band_tier",

@@ -33,7 +33,7 @@ def _row(fid, tier, h, **kw):
 @pytest.fixture
 def rows():
     return [
-        _row("b1", "verified_2", 202.0, src="osm_tag", n_seeds=2,
+        _row("b1", "corroborated", 202.0, src="osm_tag", n_seeds=2,
              methods=["drone:seed_1", "drone:seed_6"],
              per_seed_median_m={"seed_1": 195.0, "seed_6": 199.0, "auto_090": 150.0},
              seed_disagreement_m=49.0, satellite={"shadow": [179.2, 0.62]},
@@ -48,10 +48,12 @@ def rows():
 
 class TestTierDisplay:
     def test_counts_use_the_stored_counts_and_add_unlabelled(self, rows):
-        assert td.tier_counts(rows) == {"survey": 0, "verified_2": 1, "tag": 1, "single": 1,
+        assert td.tier_counts(rows) == {"survey": 0, "corroborated": 1, "tag": 1, "single": 1,
                                         "prior": 1}
         assert td.tier_counts(rows + [{"feature_id": "old"}])["unlabelled"] == 1
-        assert td.tier_counts([], {"verified_2": 5, "prior": 2})["verified_2"] == 5
+        assert td.tier_counts([], {"corroborated": 5, "prior": 2})["corroborated"] == 5
+        # a schema 1-2 file's stored counts keep their old name
+        assert td.tier_counts([], {"verified_2": 5, "prior": 2})["corroborated"] == 5
 
     def test_hover_lists_methods_and_prior_disagreement(self, rows):
         assert "drone:seed_1, lean" in td.tier_hover(rows[2])
@@ -169,7 +171,7 @@ class TestSeedPageReadings:
                              matched_segments=segs)
         sv = SimpleNamespace(seed_lat=10.4, seed_lon=-75.55, seed_name="seed_4")
         html = _segments_table_html(sv, pr, {r["feature_id"]: r for r in rows})
-        assert "published m" in html and "Verified (2 sources)" in html
+        assert "published m" in html and "Corroborated" in html
         assert '<td class="unused">no</td><td>202</td>' in html
         assert "(tower behind)" in html
         # without published rows the table keeps its old columns
@@ -199,7 +201,7 @@ class TestPdfHeightsPage:
         with PdfPages(tmp_path / "h.pdf") as pdf:
             _render_heights_page(Spy(), survey, None, pano_only=True)
         joined = "\n".join(texts)
-        assert "Verified (2 sources) (1)" in joined and "Survey lidar (1)" in joined
+        assert "Corroborated (1)" in joined and "Survey lidar (1)" in joined
         assert "ČÚZK" in joined
         assert "verified: 2 (40 %)" in joined
         assert (tmp_path / "h.pdf").stat().st_size > 0
@@ -229,7 +231,8 @@ class TestReportsHeightsApi:
             "region": tmp_path / "region_reports", "height": tmp_path / "h",
             "trace": tmp_path / "t"})
         data = TestClient(app).get("/api/reports/heights/x_skyline_report").json()
-        assert data["tier_counts"]["verified_2"] == 2
+        assert data["tier_counts"]["corroborated"] == 2     # an old file: verified_2 on read
+        assert "verified_2" not in data["tier_counts"] and "verified_2" not in data["tiers"]
         assert data["n_verified"] == 3 and data["n_withheld"] == 1
         assert data["n_known_heights"] == 1
         assert data["tiers"]["single"]["color"] == "#D55E00"

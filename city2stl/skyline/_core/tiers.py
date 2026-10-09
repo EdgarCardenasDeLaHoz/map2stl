@@ -3,7 +3,7 @@
 Every published row says how far its height can be trusted, as one tier, best first:
 
 - ``survey``: the per-footprint survey nDSM height (published only with 2d, ``use_survey_heights``);
-- ``verified_2``: two *independent* readings agree (``independent`` + ``agree``);
+- ``corroborated``: two *independent* readings agree (``independent`` + ``agree``);
 - ``tag``: the OSM height tag;
 - ``single``: image readings, but no independent agreeing pair: published, labelled unverified;
 - ``prior``: no reading; the T41 height prior (or the constant fallback).
@@ -26,7 +26,7 @@ street + street (the roof-to-building assignment errs the same way from every st
 
 Tag + one reading (the user's rule, 2026-10-08, ``tag_witness``): an OSM ``height`` tag
 (``osm_tag``; never ``osm_levels``) that agrees within ``AGREE_REL`` with one independent image
-reading is ``verified_2`` (methods ``["osm_tag", <reading>]``). The reading can be a (trusted)
+reading is ``corroborated`` (methods ``["osm_tag", <reading>]``). The reading can be a (trusted)
 drone reading, a satellite lean or multiview, or a stereo reading of ``SAT_MIN_M`` or more; never
 a shadow (a lower bound), floors alone, or Street View.
 
@@ -75,9 +75,13 @@ import math
 from collections.abc import Callable, Sequence
 
 #: Tiers, best first.
-TIERS = ("survey", "verified_2", "tag", "single", "prior")
+TIERS = ("survey", "corroborated", "tag", "single", "prior")
+#: Old tier names -> the current one. ``verified_2`` was renamed ``corroborated`` on 2026-10-09
+#: ("verified" is for survey or human review; two independent methods agreeing is corroboration).
+#: Files written before the rename (``heights.json`` schema 1-2) still hold the old name.
+TIER_ALIASES = {"verified_2": "corroborated"}
 #: Tiers whose height is checked by something other than the image that produced it.
-VERIFIED_TIERS = ("survey", "verified_2")
+VERIFIED_TIERS = ("survey", "corroborated")
 #: The base agreement tolerance: two readings agree when the larger is at most ``1 + AGREE_REL``
 #: times the smaller (25 % of the smaller; the benchmark's "within 25 %" yardstick). Bands may
 #: tighten it (``AGREE_TOL``). Until 2026-10-09: 25 % of the larger.
@@ -112,6 +116,30 @@ SATELLITE_KINDS = ("lean", "multiview", "stereo")
 SINGLE_WITHHOLD_FACTOR = 2.0
 #: ``withheld_reason`` of a row whose single reading was withheld.
 SINGLE_WITHHELD_REASON = "single over 2x prior"
+
+
+def canonical_tier(tier: str | None) -> str | None:
+    """``tier`` under its current name (``verified_2`` -> ``corroborated``); others unchanged."""
+    return TIER_ALIASES.get(tier, tier) if isinstance(tier, str) else tier
+
+
+def upgrade_tiers(doc: dict) -> dict:
+    """``doc`` (a parsed ``heights.json``, any schema) with old tier names mapped in place:
+    each row's ``tier`` and ``no_survey_tier``, and the ``tier_counts`` keys (summed when both
+    names appear). Returns ``doc``. Every reader of a ``heights.json`` goes through it or
+    ``canonical_tier``, so files from before schema 3 stay readable."""
+    for row in doc.get("buildings") or ():
+        for key in ("tier", "no_survey_tier"):
+            if row.get(key) in TIER_ALIASES:
+                row[key] = TIER_ALIASES[row[key]]
+    counts = doc.get("tier_counts")
+    if isinstance(counts, dict) and any(k in TIER_ALIASES for k in counts):
+        fixed: dict = {}
+        for k, n in counts.items():
+            k = TIER_ALIASES.get(k, k)
+            fixed[k] = fixed.get(k, 0) + (n or 0)
+        doc["tier_counts"] = fixed
+    return doc
 
 
 def reading(kind: str, value_m: float, seed: str | None = None) -> dict:
@@ -271,18 +299,18 @@ def verification_tier(readings: Sequence[dict], tag_m: float | None = None,
     its OSM height tag when that is what is published; ``tag_source``: that tag's source
     (``osm_tag`` / ``osm_levels``); ``survey``: its survey nDSM height when that is published.
     A verified pair must also agree with the tag when there is one. Otherwise an ``osm_tag``
-    tag one reading agrees with (``tag_witness``) is ``verified_2`` too, unless an independent
+    tag one reading agrees with (``tag_witness``) is ``corroborated`` too, unless an independent
     pair disputes it; else the tag stands (tier ``tag``). ``methods`` name what the tier rests on.
     """
     if survey is not None:
         return "survey", ["survey"]
     pair = verified_pair(readings)
     if pair is not None and (tag_m is None or agree(_pair_value(pair), float(tag_m))):
-        return "verified_2", sorted(label(r) for r in pair)
+        return "corroborated", sorted(label(r) for r in pair)
     if tag_m is not None:
         w = tag_witness(readings, tag_m, tag_source) if pair is None else None
         if w is not None:
-            return "verified_2", ["osm_tag", label(w)]
+            return "corroborated", ["osm_tag", label(w)]
         return "tag", ["osm_tag"]
     rs = [r for r in readings if r.get("value_m") is not None]
     if rs:
@@ -311,7 +339,7 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
     if pair is not None and published_m is not None \
             and not agree(_pair_value(pair), float(published_m)):
         disputed_by = sorted(label(r) for r in pair)
-        if tier == "verified_2":
+        if tier == "corroborated":
             tier, methods = "single", sorted(label(r) for r in readings)
     if tier == "prior" and prior_source:
         methods = [prior_source]
@@ -339,7 +367,7 @@ SUPPORT_MIN_M = 40.0
 #: most this many times the smaller (|ln a/b| <= ln 1.5). Looser than the corroboration ``agree``
 #: (ratio 1.25 since b04b22f) on purpose, the user's decision of 2026-10-09: the stricter ``agree``
 #: dropped the support of b0691 (drone 55.9 m, lean 72.5 m at conf 1.0) and b0806 (drone 62.8 m,
-#: lean 48.4 m), which then published 16-19 m priors. Corroboration (verified_2, ``verified_pair``,
+#: lean 48.4 m), which then published 16-19 m priors. Corroboration (corroborated, ``verified_pair``,
 #: ``tag_witness``) keeps ``agree``.
 SUPPORT_RATIO = 1.5
 #: Validated satellite methods (``single_support``) and the confidence each needs: lean at 0.7

@@ -23,24 +23,31 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from ._core.tiers import TAG_DISAGREE_REL, TIERS, VERIFIED_TIERS, selection_reason
+from ._core.tiers import (
+    TAG_DISAGREE_REL,
+    TIERS,
+    VERIFIED_TIERS,
+    canonical_tier,
+    selection_reason,
+    upgrade_tiers,
+)
 
 #: tier -> short label shown in tables and legends.
 TIER_LABELS = {
     "survey": "Survey lidar",
-    "verified_2": "Verified (2 sources)",
+    "corroborated": "Corroborated",
     "tag": "OSM tag",
     "single": "Single reading",
     "prior": "Prior estimate",
     "unlabelled": "No tier",
 }
 #: tier -> one word, for tight columns (the PDF's monospace list).
-TIER_SHORT = {"survey": "survey", "verified_2": "verified", "tag": "tag", "single": "single",
+TIER_SHORT = {"survey": "survey", "corroborated": "corrob.", "tag": "tag", "single": "single",
               "prior": "prior", "unlabelled": "-"}
 #: tier -> one plain line saying what it means (legends, hover).
 TIER_HINTS = {
     "survey": "measured by an airborne lidar survey",
-    "verified_2": "two independent readings agree within 25 % of the smaller",
+    "corroborated": "two independent readings agree within 25 % of the smaller",
     "tag": "the building's OpenStreetMap height or levels tag",
     "single": "one kind of image reading, not confirmed by a second",
     "prior": "no usable reading; the height model's estimate",
@@ -49,7 +56,7 @@ TIER_HINTS = {
 #: tier -> colour (Okabe-Ito).
 TIER_COLORS = {
     "survey": "#0072B2",      # blue
-    "verified_2": "#009E73",  # bluish green
+    "corroborated": "#009E73",  # bluish green
     "tag": "#56B4E9",         # sky blue
     "single": "#D55E00",      # vermillion
     "prior": "#999999",       # grey
@@ -121,7 +128,7 @@ def with_unmeasured_tags(rows: Sequence[dict], records: Iterable) -> list[dict]:
 
 def row_tier(row: dict) -> str:
     """A row's tier, or ``unlabelled`` (a schema 1 file, or a tier this module does not know)."""
-    t = row.get("tier")
+    t = canonical_tier(row.get("tier"))
     return t if t in TIERS else "unlabelled"
 
 
@@ -129,6 +136,7 @@ def tier_counts(rows: Sequence[dict], stored: dict | None = None) -> dict[str, i
     """Rows per tier in ``TIERS`` order, ``unlabelled`` last only when non-zero. ``stored``: the
     file's own ``tier_counts``, used as is when given (it is what the run wrote)."""
     if stored:
+        stored = upgrade_tiers({"tier_counts": stored})["tier_counts"]
         out = {t: int(stored.get(t, 0) or 0) for t in TIERS}
         extra = int(stored.get("unlabelled", 0) or 0)
     else:

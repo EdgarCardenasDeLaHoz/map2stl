@@ -802,7 +802,7 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     it under the 2x rule (the user, 2026-10-08; the flag never fires on a satellite-low plot).
     Every row floors counted carries ``high_rise_seen``, ``floors`` and ``storey_m``.
     A tagged row whose ``osm_tag`` height one drone or satellite reading agrees with is
-    ``verified_2`` (``tiers.tag_witness``; the user, 2026-10-08). A tagged row whose agreeing
+    ``corroborated`` (``tiers.tag_witness``; the user, 2026-10-08). A tagged row whose agreeing
     pair is more than 10 % from the tag keeps the tag and carries ``measured_m``,
     ``measured_methods`` and ``tag_disagrees`` (``tiers.tag_measurement``; review item 6,
     2026-10-09). Every such row says why its value was chosen: ``selection_reason``

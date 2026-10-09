@@ -29,9 +29,9 @@ def _rules(monkeypatch):
 def test_cadastre_plus_one_image_reading_verifies():
     cad = reading("cadastre", 7.0)
     assert verification_tier([cad, reading("drone", 7.5, "seed_1")]) == (
-        "verified_2", ["cadastre", "drone:seed_1"])
-    assert verification_tier([cad, reading("multiview", 6.0)])[0] == "verified_2"
-    assert verification_tier([cad, reading("lean", 8.0)])[0] == "verified_2"
+        "corroborated", ["cadastre", "drone:seed_1"])
+    assert verification_tier([cad, reading("multiview", 6.0)])[0] == "corroborated"
+    assert verification_tier([cad, reading("lean", 8.0)])[0] == "corroborated"
 
 
 @pytest.mark.parametrize("other", [
@@ -46,7 +46,7 @@ def test_cadastre_never_verified_by(other):
 
 
 def test_tall_stereo_verifies_a_cadastre_tower():
-    assert verification_tier([reading("cadastre", 90.0), reading("stereo", 85.0)])[0] == "verified_2"
+    assert verification_tier([reading("cadastre", 90.0), reading("stereo", 85.0)])[0] == "corroborated"
 
 
 def test_tier_readings_skip_propiedad_horizontal():
@@ -121,7 +121,7 @@ def test_row_fields_and_attribution():
     assert td.source_label(row) == "cadastre floors"
     lines = td.height_attributions([row])
     assert len(lines) == 1 and "CC BY-SA 4.0" in lines[0] and "same licence" in lines[0]
-    verified = {"effective_height_source": "withheld:elevated", "tier": "verified_2",
+    verified = {"effective_height_source": "withheld:elevated", "tier": "corroborated",
                 "tier_methods": ["cadastre", "drone:seed_1"]}
     assert td.cadastre_attributions([verified]) == [td.CADASTRE_ATTRIBUTIONS["cartagena"]]
     assert td.height_attributions([{"effective_height_source": "withheld:prior_gbm"}]) == []

@@ -8,7 +8,9 @@ from city2stl.skyline._core.height import withhold_untagged_street_view
 from city2stl.skyline._core.tiers import (
     INDEPENDENT,
     SUPPORT_RATIO,
+    TIERS,
     agree,
+    canonical_tier,
     independent,
     reading,
     single_support,
@@ -16,6 +18,7 @@ from city2stl.skyline._core.tiers import (
     tag_witness,
     tier_counts,
     tier_fields,
+    upgrade_tiers,
     verification_tier,
 )
 from city2stl.skyline._core.types import BuildingRecord
@@ -80,9 +83,9 @@ def test_survey_beats_everything():
         ("survey", ["survey"])
 
 
-def test_verified_2_from_two_drone_seeds():
+def test_corroborated_from_two_drone_seeds():
     tier, methods = verification_tier([R("drone", 50, "seed_1"), R("drone", 55, "seed_2")])
-    assert tier == "verified_2" and methods == ["drone:seed_1", "drone:seed_2"]
+    assert tier == "corroborated" and methods == ["drone:seed_1", "drone:seed_2"]
 
 
 def test_correlated_pairs_do_not_verify():
@@ -98,7 +101,7 @@ def test_disagreeing_independent_readings_stay_single():
 
 def test_tag_stands_unless_the_pair_agrees_with_it():
     pair = [R("drone", 50, "seed_1"), R("drone", 52, "seed_2")]
-    assert verification_tier(pair, tag_m=48.0)[0] == "verified_2"
+    assert verification_tier(pair, tag_m=48.0)[0] == "corroborated"
     assert verification_tier(pair, tag_m=100.0) == ("tag", ["osm_tag"])
     assert verification_tier([R("drone", 50, "seed_1")], tag_m=100.0) == ("tag", ["osm_tag"])
 
@@ -114,7 +117,7 @@ def test_tier_fields_dispute_and_prior_disagrees():
     assert f["tier"] == "tag" and f["disputed_by"] == ["drone:seed_1", "drone:seed_2"]
     assert f["verified"] is False
     f = tier_fields(pair, published_m=51.0)
-    assert f["tier"] == "verified_2" and f["verified"] and f["disputed_by"] == []
+    assert f["tier"] == "corroborated" and f["verified"] and f["disputed_by"] == []
     # a pair the published value disagrees with never verifies it
     f = tier_fields(pair + [R("drone", 200, "seed_3")], published_m=120.0)
     assert f["tier"] == "single" and f["disputed_by"]
@@ -136,9 +139,9 @@ def test_tier_fields_dispute_and_prior_disagrees():
 def test_osm_tag_verified_by_one_reading(r):
     tier, methods = verification_tier([r], tag_m=190.0, tag_source="osm_tag")
     want = "drone:seed_1" if r["seed"] else r["kind"]
-    assert tier == "verified_2" and methods == ["osm_tag", want]
+    assert tier == "corroborated" and methods == ["osm_tag", want]
     f = tier_fields([r], published_m=190.0, tag_m=190.0, tag_source="osm_tag")
-    assert f["tier"] == "verified_2" and f["verified"] and f["disputed_by"] == []
+    assert f["tier"] == "corroborated" and f["verified"] and f["disputed_by"] == []
 
 
 @pytest.mark.parametrize("readings,source", [
@@ -178,8 +181,8 @@ def test_wiring_tagged_row_verified_by_a_satellite_lean(monkeypatch):
     recs = [_rec("allure", "osm_tag", 190.0), _rec("lv", "osm_levels", 62.0)]
     withhold_untagged_street_view(rows, recs, measured_seeds={"seed_1"}, satellite=sat)
     a, lv = rows
-    assert a["effective_height_m"] == 190.0 and a["tier"] == "verified_2"
-    assert a["tier_methods"] == ["osm_tag", "lean"] and a["no_survey_tier"] == "verified_2"
+    assert a["effective_height_m"] == 190.0 and a["tier"] == "corroborated"
+    assert a["tier_methods"] == ["osm_tag", "lean"] and a["no_survey_tier"] == "corroborated"
     assert lv["tier"] == "tag"                                       # levels: never by one reading
 
 
@@ -223,7 +226,7 @@ def test_high_rise_publishes_floors_and_is_exempt_from_the_2x_rule(monkeypatch):
 
 def test_tier_counts():
     rows = [{"tier": "tag"}, {"tier": "tag"}, {"tier": "prior"}, {}]
-    assert tier_counts(rows) == {"survey": 0, "verified_2": 0, "tag": 2, "single": 0,
+    assert tier_counts(rows) == {"survey": 0, "corroborated": 0, "tag": 2, "single": 0,
                                  "prior": 1, "unlabelled": 1}
 
 
@@ -267,9 +270,9 @@ def test_wiring_keeps_published_values_and_labels_tiers(monkeypatch):
     assert {k: (r["effective_height_m"], r["effective_height_source"]) for k, r in by.items()} \
         == EXPECTED_PUBLISHED
     # the osm_tag (100 m) and drone seed_1 (98 m) agree: verified by one reading (2026-10-08)
-    assert by["tag"]["tier"] == "verified_2"
+    assert by["tag"]["tier"] == "corroborated"
     assert by["tag"]["tier_methods"] == ["osm_tag", "drone:seed_1"]
-    assert by["drone2"]["tier"] == "verified_2" and by["drone2"]["verified"]
+    assert by["drone2"]["tier"] == "corroborated" and by["drone2"]["verified"]
     assert by["drone2"]["tier_methods"] == ["drone:seed_1", "drone:seed_2"]
     d1 = by["drone1"]                                                 # 61 vs 14: withheld
     assert d1["tier"] == "prior" and d1["prior_disagrees"] and not d1["verified"]
@@ -287,7 +290,7 @@ def test_single_withheld_rule():
     assert single_withheld("single", 41.0, 20.0) is True
     assert single_withheld("single", 40.0, 20.0) is False           # exactly 2x publishes
     assert single_withheld("single", 5.0, 20.0) is False            # under the prior: kept
-    assert single_withheld("verified_2", 200.0, 20.0) is False
+    assert single_withheld("corroborated", 200.0, 20.0) is False
     assert single_withheld("single", 50.0, None) is False
 
 
@@ -529,10 +532,10 @@ def test_heights_json_unmeasured_tag_verified_by_a_satellite_reading(tmp_path):
                         building_records=recs, known_heights=None, satellite=sat)
     doc = json.loads(path.read_text(encoding="utf-8"))
     by = {b["feature_id"]: b for b in doc["buildings"]}
-    assert by["b"]["tier"] == "verified_2" and by["b"]["tier_methods"] == ["osm_tag", "lean"]
-    assert by["b"]["no_survey_tier"] == "verified_2" and by["b"]["satellite"] == {"lean": [168.0, 1.0]}
+    assert by["b"]["tier"] == "corroborated" and by["b"]["tier_methods"] == ["osm_tag", "lean"]
+    assert by["b"]["no_survey_tier"] == "corroborated" and by["b"]["satellite"] == {"lean": [168.0, 1.0]}
     assert by["c"]["tier"] == "tag"
-    assert doc["tier_counts"]["verified_2"] == 1 and doc["tier_counts"]["tag"] == 1
+    assert doc["tier_counts"]["corroborated"] == 1 and doc["tier_counts"]["tag"] == 1
 
 
 def test_heights_json_has_schema_2_and_tier_counts(tmp_path):
@@ -552,8 +555,8 @@ def test_heights_json_has_schema_2_and_tier_counts(tmp_path):
     _write_heights_json(path, region_name="x", bbox=BBox, building_heights=rows,
                         building_records=recs, known_heights=None)
     doc = json.loads(path.read_text(encoding="utf-8"))
-    assert doc["schema_version"] == 2
-    assert doc["tier_counts"] == {"survey": 0, "verified_2": 0, "tag": 1, "single": 0, "prior": 1}
+    assert doc["schema_version"] == 3
+    assert doc["tier_counts"] == {"survey": 0, "corroborated": 0, "tag": 1, "single": 0, "prior": 1}
     allure = next(b for b in doc["buildings"] if b["feature_id"] == "b")
     assert allure["tier"] == "tag" and allure["effective_height_m"] == 190.0
 
@@ -579,7 +582,7 @@ def _scored():
              "c": {"status": "survey_only", "truth_m": 30.0, "tiles_m": None},
              "d": {"status": "disputed", "truth_m": None, "tiles_m": 100.0, "survey_m": 60.0}}
     buildings = [
-        {"key": "a", "effective_height_m": 52.0, "no_survey_height_m": 52.0, "tier": "verified_2"},
+        {"key": "a", "effective_height_m": 52.0, "no_survey_height_m": 52.0, "tier": "corroborated"},
         {"key": "b", "effective_height_m": 40.0, "no_survey_height_m": 40.0, "tier": "prior"},
         {"key": "c", "effective_height_m": 30.0, "no_survey_height_m": 12.0, "tier": "survey"},
         # a survey row on a disputed footprint: scored against 3D Tiles only (60 vs 100)
@@ -603,7 +606,7 @@ def test_score_by_tier_and_survey_rows():
     from city2stl.skyline import benchmark as bm
     buildings, truth = _scored()
     t = bm.score_by_tier(buildings, truth)
-    assert t["verified_2"]["n"] == 1 and t["verified_2"]["within_25pct"] == 1.0
+    assert t["corroborated"]["n"] == 1 and t["corroborated"]["within_25pct"] == 1.0
     assert t["prior"]["within_25pct"] == 0.0
     assert t["survey"]["n"] == 1 and t["survey"]["mae_m"] == 40.0   # d vs tiles; c has none
     sr = bm.score_survey_rows(buildings, truth)
@@ -628,6 +631,39 @@ def test_label_tiers_on_an_old_report():
     got = {b["key"]: b for b in bm.label_tiers(old, {"seed_1", "seed_2"})}
     assert got["t"]["tier"] == "tag"
     assert got["p"]["tier"] == "prior" and got["p"]["tier_methods"] == ["prior_gbm"]
-    assert got["e"]["tier"] == "verified_2"
+    assert got["e"]["tier"] == "corroborated"
     assert got["g"]["tier"] == "single" and got["g"]["tier_methods"] == ["street:s9"]
     assert got["x"]["tier"] == "survey"                              # labelled rows kept
+
+
+# --------------------------------------------------------------------------- the 2026-10-09 rename
+
+def test_old_verified_2_reads_as_corroborated(tmp_path):
+    """``verified_2`` was renamed ``corroborated`` (schema 3); schema 1-2 files still load."""
+    from city2stl.skyline import benchmark as bm
+    ring = [[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]
+    old = {"schema_version": 2, "region": "r",
+           "tier_counts": {"survey": 0, "verified_2": 2, "corroborated": 1, "tag": 0},
+           "buildings": [{"tier": "verified_2", "no_survey_tier": "verified_2",
+                          "footprint_lonlat": ring, "tier_methods": ["drone:s1", "lean"]},
+                         {"tier": "tag", "footprint_lonlat": ring}]}
+    assert canonical_tier("verified_2") == "corroborated"
+    assert canonical_tier("tag") == "tag" and canonical_tier(None) is None
+    doc = upgrade_tiers(json.loads(json.dumps(old)))
+    assert doc["tier_counts"] == {"survey": 0, "corroborated": 3, "tag": 0}
+    assert [b["tier"] for b in doc["buildings"]] == ["corroborated", "tag"]
+    assert doc["buildings"][0]["no_survey_tier"] == "corroborated"
+    assert doc["buildings"][0]["tier_methods"] == ["drone:s1", "lean"]    # methods untouched
+    path = tmp_path / "heights.json"
+    path.write_text(json.dumps(old), encoding="utf-8")
+    _, rows = bm.load_report(path)
+    assert [b["tier"] for b in rows] == ["corroborated", "tag"]
+    assert "verified_2" not in TIERS and "corroborated" in TIERS
+
+
+def test_scoring_old_rows_counts_them_as_corroborated():
+    from city2stl.skyline import benchmark as bm
+    truth = {"a": {"status": "confirmed", "truth_m": 50.0, "tiles_m": 50.0}}
+    rows = [{"key": "a", "effective_height_m": 90.0, "tier": "verified_2"}]
+    assert bm.score_by_tier(rows, truth)["corroborated"]["n"] == 1
+    assert bm._pred_tier(rows[0])[1] == "corroborated"

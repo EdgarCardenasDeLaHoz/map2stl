@@ -230,7 +230,7 @@ def _tiers_html(tiers: dict | None) -> str:
     return f"""<h2>By verification tier</h2>
 <table><tr><th>tier</th><th>n</th><th>MAE m</th><th>median AE m</th><th>bias m</th><th>within 25 %</th></tr>
 {_rows(tiers, '')}</table>
-<p class=mut>survey: the survey lidar height, scored against 3D Tiles only; verified_2: two
+<p class=mut>survey: the survey lidar height, scored against 3D Tiles only; corroborated: two
 independent readings agree; tag: the OSM tag; single: one reading, unverified; prior: no reading,
 the height prior.</p>"""
 

@@ -100,8 +100,9 @@ logger = logging.getLogger(__name__)
 #: ``heights.json`` layout version; 2 added ``tier_counts`` and per-row tiers (F-SKY26). Additive
 #: since (still 2, 2026-10-09): ``selection_reason`` on every row, ``measured_m`` /
 #: ``measured_methods`` / ``tag_disagrees`` on tagged rows a measurement disagrees with, and the
-#: top-level ``tag_disagreements`` list. The ``verified_2`` rename is the v3 bump.
-HEIGHTS_SCHEMA_VERSION = 2
+#: top-level ``tag_disagreements`` list. 3 (2026-10-09): tier ``verified_2`` is now ``corroborated``
+#: (``tiers.upgrade_tiers`` maps schema 1-2 files on read).
+HEIGHTS_SCHEMA_VERSION = 3
 
 
 def _drone_seen_rows(building_heights: list, building_records: list[BuildingRecord],
@@ -272,7 +273,7 @@ def _write_heights_json(
                     f"({', '.join(d['measured_methods'])}) vs tag {d['tag_m']:.0f} m; tag published")
 
     doc = {
-        # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c)
+        # 2: rows carry verification tiers and the survey-blind answer (F-SKY26 2a/2c); 3: tier names
         "schema_version": HEIGHTS_SCHEMA_VERSION,
         "region": region_name,
         "bbox_nsew": [bbox.north, bbox.south, bbox.east, bbox.west],

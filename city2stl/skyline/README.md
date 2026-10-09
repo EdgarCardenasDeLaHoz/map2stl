@@ -285,8 +285,9 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   (`benchmark.py::score_by_tier`, printed as "within 25 % by tier", a table on `benchmark.html`);
   old reports get their tiers from `benchmark.py::label_tiers`.
 - Verification tiers (`_core/tiers.py`, F-SKY26 2a): every `heights.json` row has `tier`
-  (`survey` / `verified_2` / `tag` / `single` / `prior`), `tier_methods`, `verified`,
-  `disputed_by`, `prior_disagrees`; the file has `schema_version: 2` and `tier_counts`.
+  (`survey` / `corroborated` / `tag` / `single` / `prior`), `tier_methods`, `verified`,
+  `disputed_by`, `prior_disagrees`; the file has `schema_version: 3` and `tier_counts` (3: `verified_2` became `corroborated`;
+  schema 1-2 files stay readable, `_core/tiers.py::upgrade_tiers` maps the old name on read).
 - Survey height per footprint for a run (`survey_heights.py`, F-SKY26 2b): the truth's survey
   statistic without 3D Tiles, cached in `runs/survey/<region>.json`. The p95 depends on the tile
   grid (`tiles_for` groups by the footprint set), so it equals the truth's only on the same tiles.

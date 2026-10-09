@@ -8,7 +8,7 @@ to what publishing and the verification tiers take. Opt-in per site: ``use_cadas
   non-PH match (towers included, as evidence), ``[]`` for a propiedad-horizontal predio, whose
   ``total_piso`` is often one unit's (Hotel Estelar, 52 floors, reads 1).
 - ``TIER_RULES`` (merged into ``tiers.INDEPENDENT`` by ``register_tier_rules``): the cadastre plus
-  one agreeing image reading is ``verified_2`` (the user, 2026-10-08): a drone reading from any
+  one agreeing image reading is ``corroborated`` (the user, 2026-10-08): a drone reading from any
   seed, a satellite lean or multiview, a stereo reading of ``tiers.SAT_MIN_M`` or more. Never a
   shadow (a lower bound), facade floors or Street View, as for ``tiers.tag_witness``.
 - ``prior_for(prior, c, sat_rs)``: what an untagged row falls back to. A publishable match (1 to

@@ -52,7 +52,7 @@ def test_metre_floor_is_off_by_default_and_only_below_15_m(monkeypatch):
     monkeypatch.setattr(tiers, "AGREE_FLOOR_M", 2.0)                     # switched on
     assert agree(4.0, 6.0) and agree(6.0, 4.0)
     assert tier_fields([R("drone", 4.0, "seed_1"), R("drone", 6.0, "seed_2")],
-                       published_m=5.0)["tier"] == "verified_2"
+                       published_m=5.0)["tier"] == "corroborated"
 
 
 def test_the_closest_pair_is_by_ratio():
@@ -63,14 +63,14 @@ def test_the_closest_pair_is_by_ratio():
 
 def test_corroboration_keeps_the_strict_agree():
     """The single-support ratio (``SUPPORT_RATIO`` 1.5, the user, 2026-10-09) does not loosen
-    corroboration: a 1.3x pair of independent readings is still not a ``verified_2``, nor does it
+    corroboration: a 1.3x pair of independent readings is still not a ``corroborated``, nor does it
     witness a tag."""
     assert tiers.SUPPORT_RATIO == 1.5 and not agree(60.0, 78.0) and agree(60.0, 74.0)
     pair = [R("drone", 60.0, "seed_1"), R("drone", 78.0, "seed_2")]
-    assert tier_fields(pair, published_m=69.0)["tier"] != "verified_2"
+    assert tier_fields(pair, published_m=69.0)["tier"] != "corroborated"
     assert tiers.verified_pair(pair) is None
     near = [R("drone", 60.0, "seed_1"), R("drone", 74.0, "seed_2")]          # 1.23x
-    assert tier_fields(near, published_m=67.0)["tier"] == "verified_2"
+    assert tier_fields(near, published_m=67.0)["tier"] == "corroborated"
     assert tiers.tag_witness([R("drone", 78.0, "seed_1")], 60.0, "osm_tag") is None
     assert tiers.tag_witness([R("drone", 74.0, "seed_1")], 60.0, "osm_tag") is not None
 
@@ -83,7 +83,7 @@ def test_palmetto_measurement_disagrees_with_its_tag():
     assert m["tag_disagrees"] is True and m["measured_methods"] == ["lean", "shadow"]
     assert m["measured_m"] == pytest.approx(135.85, abs=0.06)
     f = tier_fields(rs, published_m=156.0, tag_m=156.0, tag_source="osm_tag")
-    assert f["tier"] == "verified_2" and f["tag_disagrees"] and f["measured_m"] == m["measured_m"]
+    assert f["tier"] == "corroborated" and f["tag_disagrees"] and f["measured_m"] == m["measured_m"]
 
 
 @pytest.mark.parametrize("rs, tag", [
@@ -139,7 +139,7 @@ def test_wiring_tag_disagreement_and_selection_reasons(monkeypatch):
                                   measured_seeds={"seed_1", "seed_2"}, satellite=sat)
     by = {r["feature_id"]: r for r in rows}
     p = by["palm"]
-    assert p["effective_height_m"] == 156.0 and p["tier"] == "verified_2"   # the tag stays
+    assert p["effective_height_m"] == 156.0 and p["tier"] == "corroborated"   # the tag stays
     assert p["tag_disagrees"] and p["measured_methods"] == ["lean", "shadow"]
     assert "measured 136 m (lean, shadow) disagrees" in p["selection_reason"]
     assert "tag_disagrees" not in by["tag"]
@@ -203,7 +203,7 @@ def test_heights_json_lists_tag_disagreements(tmp_path):
 # --------------------------------------------------------------------------- display
 
 def test_tag_note_hover_and_lines():
-    row = {"feature_id": "b0598", "name": "Palmetto Eliptic", "tier": "verified_2",
+    row = {"feature_id": "b0598", "name": "Palmetto Eliptic", "tier": "corroborated",
            "tier_methods": ["lean", "shadow"], "effective_height_m": 156.0, "height_tag_m": 156.0,
            "measured_m": 135.9, "measured_methods": ["lean", "shadow"], "tag_disagrees": True,
            "selection_reason": "OSM height tag: ..."}
@@ -220,7 +220,7 @@ def test_tag_note_hover_and_lines():
     assert lines[0].startswith("Measured vs OSM tag (> 10% apart")
     assert "Palmetto Eliptic" in lines[1] and "measured  136 m (lean, shadow)" in lines[1]
     assert td.tag_disagreement_lines([]) == []
-    assert "of the smaller" in td.TIER_HINTS["verified_2"]
+    assert "of the smaller" in td.TIER_HINTS["corroborated"]
 
 
 def test_unmeasured_tag_rows_carry_a_selection_reason():
