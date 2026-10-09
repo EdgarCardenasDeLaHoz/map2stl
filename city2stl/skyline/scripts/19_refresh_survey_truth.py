@@ -403,7 +403,7 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
     except Exception as exc:  # noqa: BLE001 - the age flag is metadata; truth still counts
         logging.warning("[truth] %s: no OSM start dates (%s); temporal left unset", region, exc)
         start_dates = None
-    truth = bm.load_truth_cache(region)
+    truth: dict = {}
     added, st = 0, Counter()
     t0 = time.time()
     for i in range(0, len(sel), max(1, workers)):
@@ -411,6 +411,8 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
         rings = {k: meta[k]["ring6"] for t in batch for k in t.keys}
         got = sh.survey_footprint_heights(region, rings, provider, workers=workers,
                                           roof_stats=True)
+        # merged into the cache as it is on disk now: another writer's records survive
+        truth = bm.load_truth_cache(region)
         for k in rings:
             s = got.get(k)
             if s is None or s.get("error"):

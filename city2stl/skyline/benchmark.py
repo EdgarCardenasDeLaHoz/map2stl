@@ -462,10 +462,28 @@ def load_truth_cache(region: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
+def write_json_atomic(path: Path, obj, attempts: int = 10) -> None:
+    """Write ``obj`` as JSON to ``path`` through a temporary file and a rename, so a reader in
+    another process never sees half a file (retried while Windows holds the target open)."""
+    import os
+    import time
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, indent=1, sort_keys=True), encoding="utf-8")
+    for i in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.2 * (i + 1))
+
+
 def save_truth_cache(region: str, truth: dict) -> None:
-    p = _truth_cache_path(region)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(truth, indent=1, sort_keys=True), encoding="utf-8")
+    write_json_atomic(_truth_cache_path(region), truth)
 
 
 #: A 3D Tiles area without a building mesh (T40). Cartagena's tiles are terrain only: all

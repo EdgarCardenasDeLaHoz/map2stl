@@ -70,9 +70,7 @@ def load_cache(region: str) -> dict:
 
 
 def save_cache(region: str, cache: dict) -> None:
-    p = cache_path(region)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(cache, indent=1, sort_keys=True), encoding="utf-8")
+    bm.write_json_atomic(cache_path(region), cache)
 
 
 def _years(provider: str, bbox, part: str | None = None) -> list[int] | None:
@@ -192,8 +190,11 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
         for k in tile.keys:
             rec = measure(grid, todo[k], footprints[k])
             rec.update(provider=provider, years=years, stat=bm.STAT_VERSION)
-            fresh[k] = cache[k] = rec
-        save_cache(region, cache)  # checkpoint, then drop the tile's raster before the next
+            fresh[k] = rec
+        # checkpoint into the cache as it is on disk now (another process reading the same
+        # region keeps its records), then drop the tile's raster before the next
+        cache = {**load_cache(region), **{k: fresh[k] for k in tile.keys}}
+        save_cache(region, cache)
         del grid
         gc.collect()
     return {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}

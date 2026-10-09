@@ -340,3 +340,17 @@ def test_footprint_truth_stores_the_survey_roof_statistics(monkeypatch):
     for rec in truth.values():
         assert rec["survey_roof_m"]["p95"] == rec["survey_m"]
         assert rec["survey_ground_p5_m"] == 0.0
+
+
+def test_a_concurrent_writers_records_survive_the_checkpoint(monkeypatch):
+    # two processes reading one region (a truth chain and a --from-report run): each checkpoint
+    # merges into the cache as it is on disk, so neither drops the other's records
+    def fake(p, b, r=1.0):
+        sh.save_cache("benidorm", {**sh.load_cache("benidorm"),
+                                   "other": {"survey_m": 7.0, "provider": "cnig_mdsn"}})
+        return _synthetic_ndsm(b, r)
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    sh.survey_footprint_heights("benidorm", FOOTPRINTS)
+    assert set(sh.load_cache("benidorm")) == {"low", "tall", "other"}
+    assert not list(sh.cache_path("benidorm").parent.glob("*.tmp"))   # atomic write cleaned up
