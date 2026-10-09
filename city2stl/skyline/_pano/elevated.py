@@ -287,6 +287,10 @@ class ElevatedSeed:
     #: floor counts of the accepted, plot-matched MobileSAM instances (:func:`seed_floors`):
     #: ``{fid, floors, base_seen, spread, n_strips, instance, name, tag_m}`` (F-SKY26 steps 4/5)
     floors: list = field(default_factory=list)
+    #: geometric ownership of the trusted readings (``ownership.SeedOwnership``: the readings
+    #: whose top is not their footprint's, and their re-credits to a farther owner), None when
+    #: off (``ownership.enabled``); applied by :func:`elevated_estimates`
+    ownership: object = None
 
 
 def _ring(geom) -> np.ndarray | None:
@@ -321,10 +325,14 @@ def _label_masks(labels: np.ndarray) -> dict:
 
 def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: list,
                 feature_ids: list[str], depth: np.ndarray | None,
-                instances: np.ndarray | None = None) -> StitchedPanoResult:
+                instances: np.ndarray | None = None, recredits=()) -> StitchedPanoResult:
     """The report's pano result for an elevated seed: image, masks, depth and per-column
     headings rolled so north is mid-strip (as ``_build_and_detect_pano`` does), and one matched
-    segment per measured footprint with its box, bearing, height and OSM feature."""
+    segment per measured footprint with its box, bearing, height and OSM feature.
+    ``recredits``: ``[(from footprint, Measured)]`` (``ownership.SeedOwnership.recredits``), one
+    more segment each, ``height_src`` "recredit" and ``recredit_from`` the footprint read."""
+    rc_ids = {id(m): f for f, m in recredits}
+    measured = list(measured) + [m for _f, m in recredits]
     H, W = pano.labels.shape
     headings = (pano.frame_heading + pose.offset_deg) % 360.0
     north = int(np.argmin(np.minimum(headings, 360.0 - headings)))
@@ -337,11 +345,14 @@ def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: 
         x0, x1 = (m.x0 + roll) % W, (m.x1 + roll) % W
         mid = (x0 + (x1 - x0) % W // 2) % W
         index.setdefault(fid, len(index) + 1)
+        rc = rc_ids.get(id(m))
         segs.append({
             "x_left": int(x0), "x_right": int(x1), "top_y": int(round(m.top_row)),
             "base_y": int(round(m.bottom_row)), "mid_x": int(mid), "peak_x": int(mid),
             "true_bearing_deg": float(headings[mid]), "seed_index": index[fid],
-            "height_m": float(m.height_m), "height_src": "footprint",
+            "height_m": float(m.height_m),
+            "height_src": "footprint" if rc is None else "recredit",
+            **({} if rc is None else {"recredit_from": feature_ids[rc]}),
             "base_visible": bool(m.base_visible), "visible_frac": float(m.visible_frac),
             # why the reading is or is not used (the seed pages' reason column);
             # elevated_estimates adds "tower_behind" after fusion
@@ -542,10 +553,13 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                          _sc.source_hash(floor_bands, seed_floors)),
                         lambda: seed_floors(pano, pose, depth, instances, buildings),
                         kind="pickle")
+    own = seed_ownership(pano, pose, buildings, ms, depth, instances, seed.name)
     out = ElevatedSeed(seed.name, pf, ms, fids,
-                       pano_result(seed, pano, pose, ms, fids, depth, instances),
+                       pano_result(seed, pano, pose, ms, fids, depth, instances,
+                                   recredits=() if own is None else own.recredits),
                        _view_rows(seed, views, pano, pose, len(ms)),
-                       behind=behind_map(pano, pose, fps, fids, ms), floors=floors)
+                       behind=behind_map(pano, pose, fps, fids, ms), floors=floors,
+                       ownership=own)
     if keep:
         out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
     return out
@@ -1044,6 +1058,81 @@ def behind_map(pano: fd.Pano, pose: fd.PanoPose, footprints, feature_ids, ms) ->
     return out
 
 
+def seed_ownership(pano: fd.Pano, pose: fd.PanoPose, buildings: list[BuildingRecord], ms: list,
+                   depth=None, instances=None, seed_name: str = ""):
+    """``ownership.seed_ownership`` of a seed's trusted readings (review 2026-10-09, item 3), or
+    None when off (``ownership.enabled``) or when it fails (the run goes on without it).
+    Computed after the cached measurement (its key unchanged), while the pano and the instance
+    map are still in memory."""
+    from . import ownership
+
+    if not ownership.enabled():
+        return None
+    try:
+        got = ownership.seed_ownership(pano, pose, buildings, ms, instances=instances,
+                                       depth=depth, trusted=trusted)
+    except Exception as exc:                          # never lose the seed to the check
+        logger.warning("[elevated] %s: ownership failed (%r)", seed_name, exc)
+        return None
+    if got.reasons:
+        from collections import Counter
+
+        fids = footprints_from_records(buildings)[1]
+        logger.info("[elevated] %s: ownership: %d of %d trusted readings not their footprint's "
+                    "(%s), %d re-credited to a farther owner%s", seed_name, len(got.reasons),
+                    len(got.verdicts), dict(Counter(got.reasons.values())), len(got.recredits),
+                    "".join(f"; {fids[a]} -> {fids[m.footprint]} {m.height_m:.0f} m"
+                            for a, m in got.recredits))
+    return got
+
+
+def not_owned(seeds) -> dict:
+    """``{(seed_name, feature_id): reason}`` of the trusted readings whose top is not their
+    footprint's (:func:`seed_ownership`)."""
+    out = {}
+    for s in seeds:
+        own = getattr(s, "ownership", None)
+        for i, why in (getattr(own, "reasons", None) or {}).items():
+            out[(s.seed_name, s.feature_ids[i])] = why
+    return out
+
+
+def _mark_not_owner(seeds, reasons: dict) -> None:
+    """``trusted`` False and ``untrusted_reason`` = the ownership reason on the report segments
+    of the readings :func:`not_owned` lists (a re-credit segment keeps its own status)."""
+    for s in seeds:
+        for seg in getattr(s.pano_result, "matched_segments", None) or ():
+            fid = (seg.get("matched_projection") or {}).get("feature_id")
+            why = reasons.get((s.seed_name, fid))
+            if why and seg.get("height_src") != "recredit":
+                seg["trusted"] = False
+                seg["untrusted_reason"] = why
+
+
+def recredited(seeds, skip: dict | None = None) -> dict:
+    """``{seed_name: [(feature_id, Measured)]}``: each seed's re-credited readings, at most one
+    per footprint (the best weighted), and none for a footprint the seed already reads itself
+    with a trusted reading of its own that is kept (not in ``skip``)."""
+    skip = skip or {}
+    out = {}
+    for s in seeds:
+        own = getattr(s, "ownership", None)
+        if own is None or not own.recredits:
+            continue
+        have = {s.feature_ids[m.footprint] for m in s.measured if trusted(m)
+                and (s.seed_name, s.feature_ids[m.footprint]) not in skip}
+        best: dict = {}
+        for _src, m in own.recredits:
+            fid = s.feature_ids[m.footprint]
+            if fid in have:
+                continue
+            if fid not in best or fd.measurement_weight(m) > fd.measurement_weight(best[fid]):
+                best[fid] = m
+        if best:
+            out[s.seed_name] = sorted(best.items())
+    return out
+
+
 def _sat_fields(r) -> tuple[str, float, float]:
     if isinstance(r, dict):
         return str(r.get("method")), float(r.get("height_m")), float(r.get("conf"))
@@ -1295,7 +1384,12 @@ def elevated_estimates(seeds: list[ElevatedSeed],
 
     Raw satellite readings (``satellite_fusion.load_region``, ``method`` keys) are converted
     here and also drive :func:`tower_behind`: the readings it flags are left out (F-SKY26 step 6;
-    no re-credit to the tower behind).
+    no re-credit to the tower behind: that tower is chosen by agreeing evidence).
+
+    Geometric ownership (:attr:`ElevatedSeed.ownership`, review 2026-10-09 item 3): a reading
+    whose top a nearer footprint's claim holds, or that clears its footprint's claim, leaves
+    (:func:`not_owned`); one a farther footprint owns by line of sight joins as that footprint's
+    reading (:func:`recredited`), since line of sight, not height evidence, picks it.
 
     Floor counts (:attr:`ElevatedSeed.floors`, F-SKY26 steps 4/5, :func:`floors_info`): with a
     reliable storey calibration they join the fusion as ``kind`` "floors" readings (they can
@@ -1310,9 +1404,22 @@ def elevated_estimates(seeds: list[ElevatedSeed],
         logger.info("[elevated] tower behind: %d trusted readings on %d footprints untrusted "
                     "(satellite low, a farther footprint's evidence explains the top)",
                     len(behind), len({f for _s, f in behind}))
+    # geometric ownership (review 2026-10-09, item 3): readings whose top is not their
+    # footprint's leave; those a farther footprint owns by line of sight are its readings
+    unowned = not_owned(seeds)
+    _mark_not_owner(seeds, unowned)
+    left = {**behind, **unowned}
+    rcs = recredited(seeds, left)
+    if unowned:
+        logger.info("[elevated] ownership: %d trusted readings on %d footprints not their "
+                    "footprint's; %d re-credited to %d farther footprints", len(unowned),
+                    len({f for _s, f in unowned}), sum(map(len, rcs.values())),
+                    len({f for v in rcs.values() for f, _m in v}))
     by_seed = {s.seed_name: [dict(m.__dict__, footprint=s.feature_ids[m.footprint])
                              for m in s.measured if trusted(m)
-                             and (s.seed_name, s.feature_ids[m.footprint]) not in behind]
+                             and (s.seed_name, s.feature_ids[m.footprint]) not in left]
+                            + [dict(m.__dict__, footprint=f, recredit=True)
+                               for f, m in rcs.get(s.seed_name, ())]
                for s in seeds}
     if satellite:
         drone_fids = {d["footprint"] for ms in by_seed.values() for d in ms}
@@ -1329,6 +1436,7 @@ def elevated_estimates(seeds: list[ElevatedSeed],
     by_seed.update(floor_rs)
     fused = fd.fuse_heights(by_seed)
     by_key = {(s.seed_name, s.feature_ids[m.footprint]): (s, m) for s in seeds for m in s.measured}
+    by_key.update({(s.seed_name, f): (s, m) for s in seeds for f, m in rcs.get(s.seed_name, ())})
     # the segments carry each footprint's true bearing (their columns are rolled north-centre)
     bearing = {(s.seed_name, seg["matched_projection"]["feature_id"]): seg["true_bearing_deg"]
                for s in seeds for seg in s.pano_result.matched_segments}
@@ -1354,6 +1462,7 @@ def elevated_estimates(seeds: list[ElevatedSeed],
 
 __all__ = ["ElevatedSeed", "ElevatedEstimates", "measure_elevated_seed", "elevated_estimates",
            "seed_floors", "floors_info", "drop_contradicted_floors", "trusted", "pano_result",
+           "seed_ownership", "not_owned", "recredited",
            "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M", "measure_waterline",
            "outline_gate"]
 
