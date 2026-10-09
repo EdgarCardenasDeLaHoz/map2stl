@@ -346,7 +346,8 @@ def report_meta(report: Path, fps: list[dict]) -> dict[str, dict]:
 
 
 def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int,
-              plan: bool, report: Path | None = None, shard: tuple[int, int] = (0, 1)) -> dict:
+              plan: bool, report: Path | None = None, shard: tuple[int, int] = (0, 1),
+              reverse: bool = False) -> dict:
     from city2stl.height.providers import lidar_3dep_ept_laspy as ept
     from city2stl.skyline import survey_heights as sh
 
@@ -390,6 +391,9 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
         (free if set(t.keys) <= done or _nsew_on_disk(provider, t) else paid).append(t)
     i_sh, n_sh = shard   # shard i of n: every n-th tile to read; shard 0 also takes the free ones
     sel = (free if i_sh == 0 else []) + paid[:max_tiles][i_sh::n_sh]
+    if reverse:  # a helper from the far end of the list: it meets the forward reader midway, and
+        # each skips what the other has read (survey_footprint_heights re-checks the cache)
+        sel = paid[:max_tiles][i_sh::n_sh][::-1]
     plan_out = {"region": region, "areas": order, "footprints": len(meta),
                 "with_project": sum(1 for v in parts.values() if v),
                 "projects": dict(Counter(v for v in parts.values())),
@@ -518,6 +522,9 @@ def main() -> int:
     ap.add_argument("--shard", default="0/1",
                     help="--new-truth: I/N, read every N-th tile from the I-th (two readers of one "
                          "city; the caches are merged under a lock)")
+    ap.add_argument("--reverse", action="store_true",
+                    help="--new-truth: tiles to read in reverse order, no free ones (a helper "
+                         "beside a forward reader of the same city)")
     ap.add_argument("--from-report", type=Path, default=None,
                     help="--new-truth: the footprints of this heights.json instead of TRUTH_AREAS")
     ap.add_argument("--refresh", action="store_true",
@@ -530,7 +537,8 @@ def main() -> int:
             summary = roof_stats(region, args.fetch_workers)
         elif args.new_truth:
             summary = new_truth(region, args.areas, args.max_tiles, args.fetch_workers, args.plan,
-                                args.from_report, tuple(int(x) for x in args.shard.split("/")))
+                                args.from_report, tuple(int(x) for x in args.shard.split("/")),
+                                args.reverse)
         elif args.temporal:
             summary = temporal(region)
         else:
