@@ -72,6 +72,12 @@ REGIONS = {
     "la_defense": "ign_lidarhd",
     "madrid_cuatro_torres": "cnig_mdsn",
     "prague_pankrac": "cuzk_dmp",
+    # Cartagena-like beach-tower cities (user choice 2026-10-08). Their truth is survey-only
+    # (no 3D Tiles: monthly cap), so single-source. Sunny Isles is not listed: no 3DEP project
+    # covers it (FL_Southeast_B1 stops at ~25.96 N, the Broward line).
+    "san_juan": "usgs_3dep_ept",
+    "fort_lauderdale": "usgs_3dep_ept",
+    "honolulu": "usgs_3dep_ept",
 }
 
 

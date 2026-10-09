@@ -1,0 +1,146 @@
+{
+  "name": "honolulu",
+  "north": 21.295,
+  "south": 21.264,
+  "east": -157.815,
+  "west": -157.848,
+  "known_heights_m": {
+    "_note": "Published heights from en.wikipedia.org/wiki/List_of_tallest_buildings_in_Honolulu (raw wikitext read 2026-10-08; several rows cite The Skyscraper Center). Position = the polygon centroid of the OSM footprint matched by name (osm_name). Left out as ambiguous or unmatched in OSM: Hawaii Prince I/II (one named tower footprint for two towers), Yacht Harbor Towers I/II (two footprints, which is which unknown), Villa on Eaton Square (two footprints), Aqua Waikiki Marina Towers (OSM 'Marina Towers' tagged 54 m), The Windsor, Hawaii Monarch, Ohana Maile Sky Court (no OSM name), Waihonua (just west of the bbox).",
+    "Grand Islander Tower": {
+      "lat": 21.28269,
+      "lon": -157.83567,
+      "height_m": 121.9,
+      "floors": 37,
+      "osm_name": "The Grand Islander by Hilton Grand Vacations"
+    },
+    "Hawaiki Tower": {
+      "lat": 21.29294,
+      "lon": -157.84757,
+      "height_m": 121.9,
+      "floors": 46,
+      "osm_name": "Hawaiki Tower"
+    },
+    "Hyatt Regency Waikiki (Diamond Head + Ewa towers)": {
+      "lat": 21.27617,
+      "lon": -157.82518,
+      "height_m": 117.7,
+      "floors": 39,
+      "osm_name": "Hyatt Regency Waikiki Beach Resort and Spa (one footprint holds both towers)"
+    },
+    "Century Center": {
+      "lat": 21.29131,
+      "lon": -157.83535,
+      "height_m": 114.3,
+      "floors": 41,
+      "osm_name": "Century Center"
+    },
+    "Tapa Tower": {
+      "lat": 21.28297,
+      "lon": -157.83606,
+      "height_m": 114.3,
+      "floors": 36,
+      "osm_name": "Tapa Tower (the larger of its two parts)"
+    },
+    "Grand Waikikian": {
+      "lat": 21.28408,
+      "lon": -157.83729,
+      "height_m": 112.2,
+      "floors": 38,
+      "osm_name": "The Grand Waikikian by Hilton Grand Vacations"
+    },
+    "Ka Lai Waikiki Beach Hotel": {
+      "lat": 21.27941,
+      "lon": -157.83209,
+      "height_m": 112.1,
+      "floors": 39,
+      "osm_name": "Ka Laʻi Waikiki Beach, LXR Hotels & Resorts"
+    },
+    "The Ritz-Carlton Residences, Waikiki Beach, Diamond Head Tower": {
+      "lat": 21.28188,
+      "lon": -157.82955,
+      "height_m": 110.0,
+      "floors": 39,
+      "osm_name": "Ritz-Carlton Residences, Waikiki Beach, Diamond Head Tower"
+    },
+    "Island Colony": {
+      "lat": 21.28103,
+      "lon": -157.82575,
+      "height_m": 106.7,
+      "floors": 44,
+      "osm_name": "Island Colony (tagged 3 m; an unnamed 119 m footprint shares its centroid)"
+    },
+    "Waikiki Beach Tower": {
+      "lat": 21.27521,
+      "lon": -157.82419,
+      "height_m": 105.8,
+      "floors": 39,
+      "osm_name": "Aston Waikīkī Beach Tower (the tower; an overlapping 'Waikiki Beach Tower' footprint tagged 11 m is the podium)"
+    },
+    "Royal Kuhio": {
+      "lat": 21.28084,
+      "lon": -157.82717,
+      "height_m": 105.5,
+      "floors": 39,
+      "osm_name": "Royal Kuhio"
+    },
+    "Iolani Court Plaza": {
+      "lat": 21.28677,
+      "lon": -157.82371,
+      "height_m": 103.9,
+      "floors": 40,
+      "osm_name": "Iolani Court Plaza"
+    },
+    "Ala Wai Plaza Skyrise": {
+      "lat": 21.28705,
+      "lon": -157.8262,
+      "height_m": 101.5,
+      "floors": 38,
+      "osm_name": "Ala Wai Plaza Skyrise"
+    },
+    "Marco Polo Residences": {
+      "lat": 21.2873,
+      "lon": -157.82816,
+      "height_m": 101.5,
+      "floors": 36,
+      "osm_name": "Marco Polo (tagged 3 m)"
+    },
+    "Waikiki Landmark (Makai Tower)": {
+      "lat": 21.28746,
+      "lon": -157.83351,
+      "height_m": 97.5,
+      "floors": 38,
+      "osm_name": "Waikiki Landmark Makai Tower (the page lists the twin towers as one building)"
+    },
+    "Waikiki Landmark (Mauka Tower)": {
+      "lat": 21.28782,
+      "lon": -157.83345,
+      "height_m": 97.5,
+      "floors": 38,
+      "osm_name": "Waikiki Landmark Mauka Tower (the page lists the twin towers as one building)"
+    },
+    "Sheraton Waikiki Hotel": {
+      "lat": 21.27752,
+      "lon": -157.83039,
+      "height_m": 96.0,
+      "floors": 29,
+      "osm_name": "Sheraton Waikiki"
+    },
+    "Lanikea at Waikiki": {
+      "lat": 21.28376,
+      "lon": -157.83002,
+      "height_m": 91.4,
+      "floors": 29,
+      "osm_name": "Lanikea at Waikiki"
+    }
+  },
+  "seed_urls": [],
+  "elevated_seeds": [],
+  "pending_seed_urls": [
+    "https://www.google.com/maps/@21.2808000,-157.8408900,3a,75y,40h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRHl6Wks0Z2dF!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@21.2808300,-157.8398600,3a,75y,35h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRHl6Wks0bkFF!2e10!7i8192!8i4096"
+  ],
+  "_bbox_note": "Waikiki from Kapahulu Ave to the Ala Wai harbour and Hilton Hawaiian Village, plus the east edge of Ala Moana (Hawaiki Tower).",
+  "_pending_note": "2026-10-08: drone Photo Spheres confirmed by a one-image screen (free metadata scan of 3506 points within 2 km of the towers, 619 user spheres; 20 screened; OSM roads did not load, so the road-distance score term is flat). Both are Reno Gregory 2021-02, ~40-60 m up over the Duke Kahanamoku lagoon / Hilton breakwater, 214-302 m from the Hilton Hawaiian Village towers, with the Waikiki row in view. Not captured: a 2-row hi-res sphere (15 headings x pitches 8/-18 = 30 images, free allowance, ~$0.21 at list price) each needs approval. Rob Brown 2023-12 (21.27898,-157.84012) is elevated but at night. Most other high scorers are boats (Trailview Studios 2024-10 track, Will M, a Hilton catamaran) or ground level.",
+  "_satellite_note": "2026-10-08 (Esri identify, free): World Imagery = Vantor WV02 2025-02-01 0.5 m (central Waikiki) and WV03 2025-05-11 0.31 m (Hilton Hawaiian Village): satellite, so towers lean (off-nadir not measured); Wayback holds >= 7 scenes: USGS 2006 aerial, WV02 2014/2016, WV04 2018-11-28, WV03 2020-09-29, WV02 2022-10-03, WV03 2024-01-14, 2025.",
+  "_truth_note": "Survey-only truth, single source (2026-10-08): no Google 3D Tiles cross-check (monthly cap). Read from HI_NOAAMauiOahu_2_B20 (NOAA topobathy lidar, GPS-dated 2023-03-09 at Waikiki), the newest project here; the repo's project pick ranks it last (no year in its name) and would read USGS_LPC_HI_Oahu_2012_LAS_2015 (flown 2013-06-20), which predates Grand Islander (2017) and Ritz-Carlton Diamond Head (2018). 1102 footprints in runs/benchmark/truth/honolulu.json (18 of 52 strip tiles, tallest first; 207 footprints in S3-reset tiles still to read). Published vs survey on the named towers: 10 of the 12 read agree within 4.5 m; Grand Islander reads 112.7 (published 121.9) and Island Colony 116.7 (published 106.7)."
+}

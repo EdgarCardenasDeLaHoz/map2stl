@@ -1,0 +1,233 @@
+{
+  "name": "sunny_isles",
+  "north": 25.97,
+  "south": 25.918,
+  "east": -80.108,
+  "west": -80.136,
+  "known_heights_m": {
+    "_note": "Published heights from en.wikipedia.org/wiki/List_of_tallest_buildings_in_Sunny_Isles_Beach (raw wikitext read 2026-10-08, page revised 2026-03-09; metric values, Trump Towers I-III 500 ft from planning documents per the page; Google-Earth estimates left out). Position = the polygon centroid of the OSM footprint matched by name (osm_name). Single-source: no survey covers Sunny Isles (see _truth_note) and no 3D Tiles are read.",
+    "Estates at Acqualina South": {
+      "lat": 25.94175,
+      "lon": -80.12038,
+      "height_m": 204.8,
+      "floors": 52,
+      "osm_name": "The Estates at Acqualina - South Tower"
+    },
+    "Estates at Acqualina North": {
+      "lat": 25.94253,
+      "lon": -80.12038,
+      "height_m": 204.8,
+      "floors": 52,
+      "osm_name": "The Estates at Acqualina - Boutique North Tower"
+    },
+    "Muse": {
+      "lat": 25.93492,
+      "lon": -80.12098,
+      "height_m": 197.8,
+      "floors": 47,
+      "osm_name": "Muse"
+    },
+    "Turnberry Ocean Club Residences": {
+      "lat": 25.94766,
+      "lon": -80.1199,
+      "height_m": 197.8,
+      "floors": 52,
+      "osm_name": "Turnberry Ocean Club Residences"
+    },
+    "Mansions at Acqualina": {
+      "lat": 25.94005,
+      "lon": -80.12051,
+      "height_m": 196.0,
+      "floors": 46,
+      "osm_name": "The Mansions at Acqualina"
+    },
+    "Porsche Design Tower": {
+      "lat": 25.94819,
+      "lon": -80.11988,
+      "height_m": 195.4,
+      "floors": 57,
+      "osm_name": "Porsche Design Tower"
+    },
+    "Ritz-Carlton Residences": {
+      "lat": 25.92215,
+      "lon": -80.12164,
+      "height_m": 195.1,
+      "floors": 52,
+      "osm_name": "Ritz-Carlton Residences Sunny Isles Beach"
+    },
+    "Residences by Armani Casa": {
+      "lat": 25.95178,
+      "lon": -80.11974,
+      "height_m": 194.7,
+      "floors": 55,
+      "osm_name": "Residences By Armani Casa"
+    },
+    "Jade Signature": {
+      "lat": 25.93271,
+      "lon": -80.12113,
+      "height_m": 193.9,
+      "floors": 57,
+      "osm_name": "Jade Signature"
+    },
+    "Jade Beach": {
+      "lat": 25.93355,
+      "lon": -80.121,
+      "height_m": 175.0,
+      "floors": 51,
+      "osm_name": "Jade Beach"
+    },
+    "Trump Palace": {
+      "lat": 25.94398,
+      "lon": -80.12005,
+      "height_m": 168.0,
+      "floors": 43,
+      "osm_name": "Trump Palace"
+    },
+    "Acqualina Resort & Spa": {
+      "lat": 25.94079,
+      "lon": -80.1205,
+      "height_m": 167.6,
+      "floors": 51,
+      "osm_name": "Acqualina Resort & Residences On The Beach"
+    },
+    "Trump Royale": {
+      "lat": 25.94492,
+      "lon": -80.12,
+      "height_m": 167.6,
+      "floors": 43,
+      "osm_name": "Trump Royale"
+    },
+    "Jade Ocean": {
+      "lat": 25.93435,
+      "lon": -80.12098,
+      "height_m": 166.0,
+      "floors": 51,
+      "osm_name": "Jade Ocean"
+    },
+    "Trump Towers I": {
+      "lat": 25.92456,
+      "lon": -80.12173,
+      "height_m": 152.4,
+      "floors": 45,
+      "osm_name": "Trump Tower 1"
+    },
+    "Trump Towers II": {
+      "lat": 25.92371,
+      "lon": -80.12176,
+      "height_m": 152.4,
+      "floors": 45,
+      "osm_name": "Trump Tower 2"
+    },
+    "Trump Towers III": {
+      "lat": 25.92286,
+      "lon": -80.12179,
+      "height_m": 152.4,
+      "floors": 45,
+      "osm_name": "Trump Tower 3"
+    },
+    "Regalia": {
+      "lat": 25.95695,
+      "lon": -80.11939,
+      "height_m": 147.8,
+      "floors": 43,
+      "osm_name": "Regalia"
+    },
+    "The Pinnacle": {
+      "lat": 25.93914,
+      "lon": -80.12067,
+      "height_m": 145.1,
+      "floors": 40,
+      "osm_name": "The Pinnacle"
+    },
+    "Chateau Beach Residences": {
+      "lat": 25.93796,
+      "lon": -80.12064,
+      "height_m": 136.8,
+      "floors": 34,
+      "osm_name": "Chateau Beach Residences"
+    },
+    "La Perla Ocean Residences": {
+      "lat": 25.93026,
+      "lon": -80.12137,
+      "height_m": 136.3,
+      "floors": 42,
+      "osm_name": "La Perla Ocean Residences"
+    },
+    "Turnberry Ocean Colony North Tower": {
+      "lat": 25.92628,
+      "lon": -80.12154,
+      "height_m": 131.0,
+      "floors": 37,
+      "osm_name": "Turnberry Ocean North Tower"
+    },
+    "Turnberry Ocean Colony South Tower": {
+      "lat": 25.92538,
+      "lon": -80.12158,
+      "height_m": 131.0,
+      "floors": 37,
+      "osm_name": "Turnberry Ocean South Tower"
+    },
+    "Ocean Two Condominiums I": {
+      "lat": 25.95309,
+      "lon": -80.11972,
+      "height_m": 129.8,
+      "floors": 40,
+      "osm_name": "Ocean Two Condominiums 1"
+    },
+    "Ocean Two Condominiums II": {
+      "lat": 25.95369,
+      "lon": -80.11968,
+      "height_m": 129.8,
+      "floors": 40,
+      "osm_name": "Ocean Two Condominiums 2"
+    },
+    "Ocean Three Condominiums": {
+      "lat": 25.95087,
+      "lon": -80.11997,
+      "height_m": 123.4,
+      "floors": 37,
+      "osm_name": "Ocean Three"
+    },
+    "Ocean 4": {
+      "lat": 25.93547,
+      "lon": -80.12105,
+      "height_m": 122.8,
+      "floors": 40,
+      "osm_name": "OceanFour"
+    },
+    "The Millennium": {
+      "lat": 25.94875,
+      "lon": -80.11971,
+      "height_m": 115.8,
+      "floors": 36,
+      "osm_name": "The Millennium"
+    },
+    "Trump International Beach Resort": {
+      "lat": 25.94321,
+      "lon": -80.12054,
+      "height_m": 107.0,
+      "floors": 32,
+      "osm_name": "Trump International Beach Resort"
+    },
+    "Sayan Condominium": {
+      "lat": 25.92688,
+      "lon": -80.12157,
+      "height_m": 97.3,
+      "floors": 30,
+      "osm_name": "Sayan"
+    }
+  },
+  "seed_urls": [],
+  "elevated_seeds": [],
+  "pending_seed_urls": [
+    "https://www.google.com/maps/@25.9429000,-80.1270800,3a,75y,135h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRFY0cVRJN0FF!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9240600,-80.1200900,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJQ1dycnZMdWdF!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9306600,-80.1196300,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ1dyczJxSnc.!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9183100,-80.1250900,3a,75y,0h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ09fNWVhSkE.!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9606800,-80.1374000,3a,75y,135h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ2podG02RHc.!2e10!7i8192!8i4096"
+  ],
+  "_truth_note": "No survey truth (2026-10-08): no USGS 3DEP EPT project covers Sunny Isles Beach. USGS_LPC_FL_Southeast_B1_2018_LAS_2019 (Broward, flown 2018-06) stops at ~25.960 N, so it covers 1 of the 42 OSM towers >= 100 m (an unnamed one at 25.9618 N in Golden Beach/Aventura) and none of the Collins Ave strip; Google 3D Tiles are not read (monthly cap). Not in benchmark.REGIONS. The only heights here are the published ones in known_heights_m (single source). Most of the tallest towers (2015-2023) are newer than any 2018 survey anyway.",
+  "_bbox_note": "Collins Ave tower strip from Haulover (25.918 N) to Golden Beach (25.970 N), Intracoastal side included.",
+  "_pending_note": "2026-10-08: drone Photo Spheres confirmed by a one-image screen (free metadata scan of 4257 points within 2 km of the towers, 457 user spheres; 20 screened). Not captured: a 2-row hi-res sphere (15 headings x pitches 8/-18 = 30 Street View images, free allowance, ~$0.21 at list price) each needs approval. In order: Alexandre Pilot 2023-12, over the Intracoastal 613 m W of the towers, ~100 m up, whole Collins Ave skyline in view; Rick Goldman 2022-02, over the beach 171 m from Ritz-Carlton/Trump Towers, ~60-80 m up; Rick Goldman 2022-02, over the sea off Newport pier 186 m from the towers, low, tower row in view; John Abate 2022-06, high over Haulover inlet 426 m S of the towers, looking N along the strip; P Buchwald 2024-04, high over the Turnberry golf course 643 m W, Aventura + Sunny Isles in view. Also drones, further or facing away: John Abate 25.91204,-80.1264 (1.1 km), Rick Goldman 25.9197,-80.12034 (faces S) and 25.96813,-80.12139 (2022-09).",
+  "_satellite_note": "2026-10-08 (Esri identify, free): World Imagery = Miami-Dade County Orthos 2025-01-08, 7.6 cm, aerial (true-ortho like Miami: no lean, shadows only); Wayback holds >= 13 county ortho scenes 2010-2025 (2014-2025 yearly)."
+}
