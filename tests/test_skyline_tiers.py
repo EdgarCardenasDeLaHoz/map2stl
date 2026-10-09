@@ -363,14 +363,17 @@ def test_support_ratio_is_one_and_a_half(monkeypatch):
     assert single_support(60.0, [("lean", 96.0, 1.0)]) == []               # 1.6x
     assert single_support(96.0, [("lean", 60.0, 1.0)]) == []
     assert single_support(60.0, [("lean", 96.0, 1.0), ("multiview", 80.0, 0.5)]) == ["multiview"]
+    # the real b0806 lean (48.4 m) has conf 0.37: not validated, so it supports nothing (replay)
+    assert single_support(62.8, [("lean", 48.4, 0.37)]) == []
     assert single_support(80.0, [("lean", 53.0, 0.69)]) == []              # still needs conf 0.7
     assert single_support(80.0, [("lean", 39.0, 1.0)]) == []               # and 40 m
     assert not agree(55.9, 72.5) and not agree(60.0, 78.0)                 # agree stays 1.25
 
 
 def test_b0691_b0806_publish_their_drone_readings(monkeypatch):
-    """Cartagena v12 replay: the drone single and a lean 1.3x off it keep the single; a lean
-    1.6x off it does not."""
+    """Cartagena v12 replay: a drone single and a validated lean (conf 1.0) 1.3x off it keep the
+    single, a lean 1.6x off it does not. The values are b0691's and b0806's; the real b0806 lean
+    has conf 0.37, so only b0691 was restored in the replay."""
     for k in ("SKYLINE_WITHHOLD_UNTAGGED", "SKYLINE_PREFER_TAGS", "SKYLINE_WITHHOLD_SINGLE"):
         monkeypatch.delenv(k, raising=False)
     cases = {"b0691": (55.9, [("lean", 72.5, 1.0)]), "b0806": (62.8, [("lean", 48.4, 1.0)]),
