@@ -430,6 +430,22 @@ Two constraints follow:
   T41 in `region_pdf.py`, cross-check flag in `withhold_untagged_street_view`) is not applied
   while `STATUS` is "refused".
 
+- 2026-10-09, step 2d (`9f9e611`; decision "Survey LiDAR heights publish as tier `survey`"):
+  - `survey_publish.py` (site flag `use_survey_heights`, on for San Juan) publishes the cached
+    p95 as tier `survey` with provider (project), year, stat, percentiles and `selection_reason`;
+    image readings and `no_survey_*` stay on the row.
+  - Stale flags `start_date` and `readings_2x` keep the tier with `survey_stale`; nested parts do
+    not publish the survey.
+  - Benchmark: `survey_blind` before every score; `survey_rows` against `tiles_m`, stale ones apart.
+  - Reports say "N survey, K corroborated of M".
+  - San Juan (cache only, no Street View, `--no-tiles`): 17,916 rows, tiers survey 10,726 /
+    corroborated 0 / tag 7,188 / single 0 / prior 2 (before: tag 17,909 / prior 7); 0 stale-flagged
+    (3 OSM start dates, all before 2018; the 11 measured rows have no agreeing readings), 17 nested
+    withheld; survey-blind answers identical to the earlier report on all 17,916 rows; San Juan
+    headline scoring unchanged; Cosmopolitan 66 m (survey) against CTBUH 65 m (was 45 m).
+  - Miami headline unchanged (`--score-only --no-tiles`: n 168, MAE 5.62).
+  - Open: more cities' flags; `readings_2x` untested on real data.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:
@@ -458,7 +474,7 @@ Steps:
   - The `10_benchmark` headline scores the survey-blind value.
   - Survey rows are scored only against `tiles_m`.
   - `score_by_tier` checks that the tiers mean what they say.
-- **2d. Publish survey heights.**
+- **2d. Publish survey heights.** (Done 2026-10-09, `9f9e611`; see the Progress entry.)
   - Opt-in `use_survey_heights`.
   - Survey beats tag, drone and satellite unless suspected stale: OSM `start_date` at or after the
     survey year, `building=construction`, an empty lot later built, or a verified value at least

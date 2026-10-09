@@ -7,6 +7,50 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`.
 
+### 2026-10-09 — Survey LiDAR heights publish as tier `survey` (F-SKY26 2d), flagged where stale
+- **Decision:**
+  - `survey_publish.py`, site flag `use_survey_heights` (env `SKYLINE_SURVEY_HEIGHTS` overrides; on
+    for `san_juan` only). `region_pdf` reads the cached survey (`runs/survey/<region>.json`, stat 2)
+    and never measures. A footprint with a cached p95 publishes it: `tier` `survey`, `effective_height_m`
+    the p95, and on the row `survey_provider` (the lidar project, e.g. `USGS_LPC_PR_PRVI_E_2018`; the
+    truth cache's `survey_project`, new survey records carry `project`), `survey_source` (provider key),
+    `survey_year`, `survey_stat` `p95`, `survey_roof_m` (stored percentiles), `survey_cells`,
+    `selection_reason`. Survey outranks tags and image readings. The image readings and the
+    pre-survey answer stay on the row (`per_seed_median_m`, `satellite`, `no_survey_*`).
+  - **Stale flags** keep tier `survey` with `survey_stale`, `survey_stale_codes`, `survey_stale_reason`
+    (`verified` False, shown in the HTML hover and table note):
+    - `start_date`: OSM `start_date` in or after the survey's last year (the benchmark's
+      `temporal_flag` rule, not "strictly older"; the start dates come from the cached
+      `runs/benchmark/truth/<region>.start_dates.json`, the OSM id by centroid);
+    - `readings_2x`: the drone / satellite readings agree (`tiers.agree`; or the row was
+      `corroborated`) but sit more than 2x from the survey, either way.
+  - **Nested** footprints (`benchmark.nested_keys` over the published set) do not publish the survey
+    value: they keep their tier and height and carry `survey_withheld_reason` / `survey_withheld_m`.
+  - `heights.json` gets a `survey` block (`n_survey`, `n_stale`, `stale_by_code`, `n_nested_withheld`,
+    `providers`); schema stays 3 (additive). Tag-only rows get the survey too (`_write_heights_json`
+    and, through `survey_publish.set_active`, the HTML / PDF counts).
+  - **Benchmark:** `survey_blind` puts a `survey` row back to its `no_survey_*` height, source and tier
+    before anything is scored; a survey row without them is dropped, never scored on the survey.
+    `10_benchmark.score_report` scores the headline, `tiers`, `bench` and the benchmark page on those
+    rows; `survey_rows` scores survey rows against `tiles_m` only, stale ones counted apart
+    (`n_stale`). Tests: `tests/test_skyline_survey_publish.py`.
+  - **Wording:** the reports said "N of M verified" while counting corroborated rows. Now "N survey,
+    K corroborated of M" (HTML, PDF heights page, the app's reports pane); `n_verified` in the
+    heights API keeps its name.
+- **Why:** the user approved 2d. A survey height is the best reading of a footprint, but it shows the
+  building as it stood on the flight day: a newer building, or an empty lot built since, is the
+  failure the flags catch. The survey sees only the top of a stack, so a podium or part under a
+  taller footprint would publish the tower's height.
+- **Rejected:** scoring survey rows on the survey (circular); fetching the survey at run time (the
+  run stays offline, like satellite readings); publishing a stale-flagged row as its pre-survey tier
+  (the user asked for the flag on the row, not a silent fallback); flagging only a start_date strictly
+  after the year (the benchmark's rule includes the survey year).
+- **Open:** the flag is on for San Juan only; the other cities' caches are there. The stale check
+  for `readings_2x` needs readings, so it fires only where drone or satellite readings exist (none in
+  San Juan's report). Rows whose footprint key differs (survey cached under a full-precision key)
+  are not matched.
+- **Source:** commit `9f9e611`; scratch `2d/` (San Juan report `2d/sj/`).
+
 ### 2026-10-09 — The `verified_2` tier is renamed `corroborated`
 - **Decision:**
   - Tier `verified_2` is now `corroborated` in the tier value, `tier_counts`, the labels
