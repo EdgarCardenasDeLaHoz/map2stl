@@ -250,9 +250,12 @@ class TestGoogle3DProvider:
     def test_name(self):
         assert Google3DProvider.name == "google3d"
 
-    def test_covers_without_key(self):
+    def test_covers_without_key(self, monkeypatch):
+        # Force no key. The constructor falls back to get_api_key(), and
+        # test_skyline_benchmark loads map2stl/.env into the environment earlier in
+        # the same worker, which made this fail in the pre-push run (2026-10-09).
+        monkeypatch.setattr("city2stl.height.providers.google_3d.get_api_key", lambda: None)
         p = Google3DProvider(api_key=None)
-        # Force no env key
         assert not p.covers((41.4, 41.3, 2.2, 2.1))
 
     def test_covers_with_key(self):
