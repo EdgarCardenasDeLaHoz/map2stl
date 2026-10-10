@@ -25,12 +25,23 @@
       "osm_name": "Beach Club III Tower III"
     }
   },
-  "seed_urls": [],
-  "elevated_seeds": [],
-  "pending_seed_urls": [
+  "seed_urls": [
     "https://www.google.com/maps/@25.9911600,-80.1243300,3a,75y,120h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJRFY0dnloV1E.!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9839700,-80.1163700,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRDF0dUQ4aWdF!2e10!7i8192!8i4096"
+  ],
+  "elevated_seeds": [
+    "seed_1",
+    "seed_2"
+  ],
+  "_elevated_seeds_note": "2026-10-10: drone Photo Spheres captured 2026-10-09/10 at 15 headings x pitch rows 8/-18 (some also -36), 30 deg FOV, 640 px (scratch capture_truth/hires_truth.py); the region run reuses the cached images with SKYLINE_ELEVATED_HIRES=1 and SKYLINE_ELEVATED_HIRES_HEADINGS=15 (no fetch). Seed names: seed_1 = d1 (overhead fit, 64 m, 354 / 67), seed_2 = d3 (waterline + outline fit (gate pass), 69 m, 78 / 22).",
+  "_fit_note": {
+    "pending 1 (d2)": "no drone fit: the tower outline moves the camera 171 m (> 150)",
+    "pending 2 (d4)": "no drone fit: the OSM tower outline fits 4.58 deg off over 2717 columns (> 2.5)",
+    "pending 3 (d5)": "no drone fit: the tower outline moves the camera 188 m (> 150)",
+    "pending 4 (d6)": "no drone fit: the tower outline moves the camera 212 m (> 150)"
+  },
+  "pending_seed_urls": [
     "https://www.google.com/maps/@25.9871800,-80.1217400,3a,75y,135h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJQ1Z6YlRtX1FF!2e10!7i8192!8i4096",
-    "https://www.google.com/maps/@25.9839700,-80.1163700,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRDF0dUQ4aWdF!2e10!7i8192!8i4096",
     "https://www.google.com/maps/@25.9918600,-80.1161100,3a,75y,235h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJQ09sTnY0MXdF!2e10!7i8192!8i4096",
     "https://www.google.com/maps/@26.0083000,-80.1204500,3a,75y,155h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRHUtdDZidkFF!2e10!7i8192!8i4096",
     "https://www.google.com/maps/@25.9981700,-80.1147900,3a,75y,190h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJQy0yTWFCOHdF!2e10!7i8192!8i4096"

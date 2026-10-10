@@ -217,13 +217,23 @@
       "osm_name": "Sayan"
     }
   },
-  "seed_urls": [],
-  "elevated_seeds": [],
-  "pending_seed_urls": [
+  "seed_urls": [
     "https://www.google.com/maps/@25.9429000,-80.1270800,3a,75y,135h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJRFY0cVRJN0FF!2e10!7i8192!8i4096",
     "https://www.google.com/maps/@25.9240600,-80.1200900,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSF0NJSE0wb2dLRUlDQWdJQ1dycnZMdWdF!2e10!7i8192!8i4096",
     "https://www.google.com/maps/@25.9306600,-80.1196300,3a,75y,320h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ1dyczJxSnc.!2e10!7i8192!8i4096",
-    "https://www.google.com/maps/@25.9183100,-80.1250900,3a,75y,0h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ09fNWVhSkE.!2e10!7i8192!8i4096",
+    "https://www.google.com/maps/@25.9183100,-80.1250900,3a,75y,0h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ09fNWVhSkE.!2e10!7i8192!8i4096"
+  ],
+  "elevated_seeds": [
+    "seed_1",
+    "seed_2",
+    "seed_3",
+    "seed_4"
+  ],
+  "_elevated_seeds_note": "2026-10-10: drone Photo Spheres captured 2026-10-09/10 at 15 headings x pitch rows 8/-18 (some also -36), 30 deg FOV, 640 px (scratch capture_truth/hires_truth.py); the region run reuses the cached images with SKYLINE_ELEVATED_HIRES=1 and SKYLINE_ELEVATED_HIRES_HEADINGS=15 (no fetch). Seed names: seed_1 = d1 (overhead fit, 128 m, 604 / 36), seed_2 = d2 (overhead fit, 271 m, 42 / 2), seed_3 = d3 (overhead fit, 24 m, 92 / 46), seed_4 = d4 (overhead fit, 129 m, 190 / 7).",
+  "_fit_note": {
+    "pending 1 (d5)": "no drone fit: the OSM tower outline fits 22.15 deg off over 320 columns (> 2.5)"
+  },
+  "pending_seed_urls": [
     "https://www.google.com/maps/@25.9606800,-80.1374000,3a,75y,135h,90t/data=!3m6!1e1!3m4!1sCAoSFkNJSE0wb2dLRUlDQWdJQ2podG02RHc.!2e10!7i8192!8i4096"
   ],
   "_truth_note": "No survey truth (2026-10-08): no USGS 3DEP EPT project covers Sunny Isles Beach. USGS_LPC_FL_Southeast_B1_2018_LAS_2019 (Broward, flown 2018-06) stops at ~25.960 N, so it covers 1 of the 42 OSM towers >= 100 m (an unnamed one at 25.9618 N in Golden Beach/Aventura) and none of the Collins Ave strip; Google 3D Tiles are not read (monthly cap). Not in benchmark.REGIONS. The only heights here are the published ones in known_heights_m (single source). Most of the tallest towers (2015-2023) are newer than any 2018 survey anyway.",

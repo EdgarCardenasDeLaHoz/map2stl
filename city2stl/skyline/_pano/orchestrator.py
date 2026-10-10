@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 #: pixel thresholds of measure_footprints are scaled for it (2026-10-06: seed_1 got worse).
 _ELEVATED_HIRES_ENABLED = os.environ.get("SKYLINE_ELEVATED_HIRES", "0").strip().lower() in (
     "1", "true", "yes", "on")
+#: Headings of that capture: the spin headings (12 at 30 deg) unless set to a count N
+#: (headings i x 360 / N). The truth-city spheres (San Juan, Fort Lauderdale, Honolulu, Sunny
+#: Isles; 2026-10-10) are cached at 15 headings: a region run reuses them without a fetch with
+#: SKYLINE_ELEVATED_HIRES_HEADINGS=15 (``capture_sphere_pano`` gives up on the first miss).
+_ELEVATED_HIRES_HEADINGS = int(os.environ.get("SKYLINE_ELEVATED_HIRES_HEADINGS", "0") or 0)
 
 #: Pano screen, second measure (T35): a pano whose best view has a building meeting the sky in
 #: at least this share of its columns passes even below the building-coverage cut. A far skyline
@@ -288,7 +293,10 @@ def _seed_multiview_registration(
         if elevated_seeds and seed.name in elevated_seeds and elevated_state:
             with _phase("elevated seed (F-DET6 footprint-first)"):
                 try:
-                    hi = (capture_sphere_pano(seed, api_key, spin_headings, is_photosphere)
+                    hi_headings = (tuple(i * 360.0 / _ELEVATED_HIRES_HEADINGS
+                                         for i in range(_ELEVATED_HIRES_HEADINGS))
+                                   if _ELEVATED_HIRES_HEADINGS > 0 else spin_headings)
+                    hi = (capture_sphere_pano(seed, api_key, hi_headings, is_photosphere)
                           if _ELEVATED_HIRES_ENABLED else None)
                     got = measure_elevated_seed(seed, prefetch, effective_pitch, spin_step_deg,
                                                 seed_buildings, elevated_state, pano=hi)
