@@ -4,6 +4,17 @@ import pytest
 from city2stl import resources
 
 
+@pytest.fixture(autouse=True)
+def _private_gpu_lock(monkeypatch, tmp_path):
+    """Tests take a lock file of their own, never the machine-wide one: a running GPU job
+    holding ~/.cache/map2stl_gpu.lock made test_wait_for_gpu_waits_until_free time out in
+    the pre-push run (2026-10-09)."""
+    monkeypatch.setattr(resources, "GPU_LOCK_PATH", tmp_path / "gpu.lock")
+    monkeypatch.setattr(resources, "_gpu_lock_fd", None)
+    yield
+    resources.release_gpu_lock()
+
+
 def test_ram_ok(monkeypatch):
     monkeypatch.setattr(resources, "free_ram_gb", lambda: 8.0)
     assert resources.ram_ok(6.0)
