@@ -5,7 +5,75 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
-Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`.
+Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`.
+
+### 2026-10-10 — Cross-sphere triangulation of roof corners fails its Miami marks on yield (rejected; code kept off)
+- **Decision:** `_pano/triangulate.py` is not turned on (`TRIANGULATE = False`, env
+  `SKYLINE_TRIANGULATE`); no Cartagena replay (v15) was run, as the pre-registration says. The code,
+  its hooks and `seed_experiment.py --tri` stay for a denser sphere set.
+  - Method (fixed before the run, `tri/notes.md`): per sphere and measured footprint, the two limb
+    corners (`seed_corners`): the OSM vertex at the lowest / highest bearing only *names* the corner;
+    the ray is the image's: the column is the outer boundary of the footprint's MobileSAM instance in
+    a band of rows under the measured top (or a depth step >= 1.15 there), within +-max(8 px, 25 %
+    of the width) of the projected corner, the elevation the top of the mask 2-5 px inside it. Two
+    spheres of different camera groups that name the same vertex: nearest approach of the rays
+    (`intersect`), height = z of the midpoint, uncertainty = the miss. Gates: baseline >= 200 m, line
+    angle 10-170 deg, miss <= 15 m, both ranges >= 20 m, midpoint within 40 m of the named vertex.
+    A footprint's reading = median of its passing corners (`triangulate`, kind `triangulated`).
+  - Wired but off: `ElevatedSeed.corners` (`elevated.seed_corners`, after the cached measurement,
+    stage keys unchanged), `elevated.triangulated`, `elevated_estimates` joins the fusion as pseudo-seed
+    `tri` (`footprint_detect.fuse_heights` accepts kind `triangulated`) and publishes it under its
+    first sphere's seed name.
+  - **Independence (decided before the run):** a triangulated reading contains both spheres'
+    elevations and bearings, so it is not independent of a single from either; it is of a third
+    camera's and of satellite readings. `fuse_heights` counts it as a source only when its camera
+    groups are disjoint from the drone groups kept; `elevated_estimates` emits it only then, so
+    `tiers.independent` (drone pairs of different seeds) needs no change: the emitted row is a plain
+    view row of its first sphere. `seed_3` and `seed_3_sphere` are one camera (`camera_group`): their
+    position fits differ by 220 m, which is not a baseline.
+- **Measured** (Miami saved states seed_2, seed_3, seed_3_sphere, seed_4, seed_4_sphere_p8m18;
+  `seed_experiment.py --region miami --remeasure --tri`; LiDAR `confirmed`, truth >= 20 m; the
+  Martinez sphere is 4.9-7.4 km from the others and pairs with nothing):
+
+  | pass mark (pre-registered) | result |
+  |---|---|
+  | MAE of triangulated < MAE of the best single on the same footprints | n = 1: 26.5 m against 27.3 m (anchor), both wrong: YVE Hotel Miami, tri 33.6 (miss 1.8 m), single 32.8, LiDAR 60.1 |
+  | within max(25 %, 2 m) >= 0.80 | **0 of 1: fails** |
+  | the 4 tower-behind cases never a wrong height | no wrong height; untestable: Kaseya Center is read by one camera only (138 m untrusted, LiDAR 43), The Loft 1, The Guild Downtown X Miami and Brickell Key I have no reading in the current states |
+
+  - Funnel: 362 limb corners observed; not observed: instance merged into a block 350, edge too
+    far from the corner 31, no top 35, and 168 footprints with no start inside the mask or off the
+    pano and 69 with too small a band (both corners lost);
+    232 footprints have a corner, 10 have corners from two camera groups (9 with truth); only 33
+    footprints are measured by two camera groups at all (11 with truth >= 20 m, 6 trusted by both);
+    12 camera-pair x footprint combinations, 3 name the same limb vertex, 1 passes the gates (2
+    miss > 15 m, 1 angle). With every gate off the same 3 give 33.6 (LiDAR 60.1), 27.8 / 26.3 (no
+    truth) and 106.8 at a 170 deg line angle (LiDAR 126.8, miss 49 m).
+  - Geometry works: a rendered tower seen from two cameras comes back within 4 m
+    (`tests/test_skyline_triangulate.py`), and the one Miami pair agrees with the single reading.
+- **Yield diagnostic on Cartagena** (corner level on the saved seeds 1/4/5/6/7; not the v15 replay
+  and not a port): 398 footprints are measured by two or more seeds; 518 corner pairings, 364 name
+  different limb vertices, 154 the same one, of which 21 pass (90 miss > 15 m, 42 angle < 10 deg, 1
+  vertex); 18 footprints get a reading (4.5 % of the 398; 13 of the 362 not already trusted by two
+  seeds), none tagged. 15 have a trusted single and 14 agree with one within 25 %; 3 have none
+  (b0191 61 m, b0162 99 m, b0781 54 m). So at most 18 of the 142 withheld rows could gain a
+  triangulated reading.
+- **Why it fails:** a limb corner is view-dependent. The limb flips to the next vertex when the line
+  of sight crosses an edge direction, so two spheres 10 deg apart name the same one in 3 of 12 Miami
+  and 30 % of the Cartagena pairings. About half of the attempted corners are never observed (a block merged
+  into one instance, the corner off the pano), and the camera fits are not good enough for the rest
+  (the same camera's two fits are 220 m apart; 90 of Cartagena's 154 same-vertex pairs miss by more
+  than 15 m). The Miami cameras mostly look in different directions: 11 pairable footprints with
+  truth cannot support an accuracy mark.
+- **Rejected:** requiring nothing of the vertex (rays of different limbs of one footprint do not
+  meet); using the OSM vertex position for the distance (that is the single reading again, with no
+  independence); loosening the gates (the same 3 pairings, 2 of them wrong or without truth).
+- **Open:** non-limb vertical edges (facade corners) as observations, which would let any two
+  spheres share a corner; a sphere set with several cameras on one side of each target; a second
+  truth city with overlapping spheres (Chicago has two cameras, far apart).
+- **Source:** scratch `tri/` (notes.md = pre-registration; `out/` the runs and corner dumps;
+  diag1-3.py); harness flags `--tri`, `--tri-gates`, `--tri-dump`; tests
+  `tests/test_skyline_triangulate.py`.
 
 ### 2026-10-09 — Survey LiDAR heights publish as tier `survey` (F-SKY26 2d), flagged where stale
 - **Decision:**

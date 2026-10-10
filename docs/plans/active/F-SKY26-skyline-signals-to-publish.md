@@ -417,6 +417,16 @@ Two constraints follow:
   towers unchanged, 10 of 10 tag-correct readings kept, used drone readings on non-PH 1-3-floor
   plots 53 -> 2, b0490 11 m, tiers verified_2 / tag / single / prior 38 / 136 / 127 / 715 ->
   34 / 136 / 131 / 718.
+- 2026-10-10, cross-sphere triangulation of roof corners (decision "Cross-sphere triangulation of roof
+  corners fails its Miami marks on yield"): `_pano/triangulate.py` (`seed_corners`, `intersect`,
+  `triangulate`), `elevated.seed_corners` / `triangulated` / fusion pseudo-seed `tri`,
+  `fuse_heights` accepts kind `triangulated` (a source only when independent of the drone groups
+  kept); `seed_experiment.py --tri`. Miami (LiDAR): 1 triangulated footprint of 232 with a corner
+  (33.6 m, LiDAR 60.1, the single reads 32.8): within 25 % 0 of 1, fails 0.80; only 33 footprints
+  are measured by two camera groups. A limb corner flips with the view (3 of 12 pairings share a
+  vertex), 350 of 778 attempted corners merge into a block. Off (`SKYLINE_TRIANGULATE`), no Cartagena replay;
+  Cartagena yield diagnostic: 18 of 398 footprints seen by two seeds get a reading, 14 of 15 with a
+  trusted single agree with it, 3 have none.
 - 2026-10-09, Google Open Buildings 2.5D low-rise prior (review item 4): reader
   `height/providers/google_ob25d.py` (public bucket, S2 manifests, COG windows in
   `~/.cache/ob25d/`; not in `_REGISTRY`) and `skyline/lowrise_prior.py` (opt-in
