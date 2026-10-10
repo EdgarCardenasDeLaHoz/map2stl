@@ -22,6 +22,16 @@ to what publishing and the verification tiers take. Opt-in per site: ``use_cadas
   satellite and floors evidence decide.
 - ``row_fields(c)``: the ``cadastre`` block a row carries for the reports.
 
+Plausibility band (``load_band``, ``CadastreBand``; site flag ``use_cadastre_band``, 2026-10-10):
+the cadastre never publishes a height there. Its floor count only bounds what a single image
+reading may be, in place of the "2x the prior" rule where a match exists: a non-PH plot reads
+``floors x storey(use, area band, floors)`` within x0.5 .. x1.5 (``STOREY_M``: Puerto Rico LiDAR p95 /
+OSM ``building:levels``, S/storey/results.md model B); a propiedad-horizontal plot reads
+(``floors`` +- ``PH_FLOORS_SLACK``) x ``PH_STOREY_M``. ``_core/height.withhold_untagged_street_view``
+(``cadastre_band=``) withholds a ``single`` outside it (``withheld_reason`` ``cadastre_band``) and
+keeps one inside it without satellite support. Corroboration is unchanged (no cadastre reading
+enters the tiers).
+
 Licence: CC BY-SA 4.0. A report showing a height that rests on the cadastre prints
 ``tier_display.CADASTRE_ATTRIBUTION`` (``height_attributions``).
 
@@ -60,9 +70,14 @@ against it.
 
 from __future__ import annotations
 
+import json
 import logging
+import math
+import time
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from ._core import tiers
 from ._core.tiers import reading as tier_reading
@@ -156,6 +171,184 @@ def row_fields(c: CadastreReading) -> dict:
     return d
 
 
+# --------------------------------------------------------------------------- plausibility band
+#: Band edges (areas, m2 of the OSM footprint) and names of ``STOREY_M``.
+AREA_BANDS = (("<100", 0.0, 100.0), ("100-300", 100.0, 300.0), ("300-1000", 300.0, 1000.0),
+              (">1000", 1000.0, math.inf))
+#: Metres per floor by (use class, area band) for 1, 2 and 3+ floors: the median of LiDAR p95 /
+#: ``building:levels`` on 3,546 Puerto Rico footprints (San Juan, 2018 USGS survey), a cell under
+#: 20 footprints falling back to its area band over all classes (``any``), then to the global value
+#: (S/storey/results.md, model B, 2026-10-09). A 1-level building is one tall storey: 4.2-4.8 m for
+#: a small house, 6.7 m at 300-1000 m2. The 1-floor ``>1000`` cells use the 14 footprints there
+#: (12.83 m, IQR 10.7-31.7), not the global 5.4 m of the model: big one-floor sheds and shopping
+#: boxes are the tall ones, and Cartagena's 1-floor industrial / commercial plots over 1000 m2 read
+#: 10-11 m on Google 2.5D.
+STOREY_M = {
+    ("house", "<100"): (4.24, 3.21, 3.27),
+    ("house", "100-300"): (4.78, 3.6, 3.31),
+    ("house", "300-1000"): (6.66, 3.8, 3.93),
+    ("house", ">1000"): (12.83, 6.43, 4.8),
+    ("apartments", "<100"): (4.51, 3.16, 3.27),
+    ("apartments", "100-300"): (5.37, 3.6, 3.5),
+    ("apartments", "300-1000"): (6.66, 4.84, 3.51),
+    ("apartments", ">1000"): (12.83, 6.43, 4.8),
+    ("commercial", "<100"): (4.51, 3.31, 3.27),
+    ("commercial", "100-300"): (5.37, 3.94, 3.61),
+    ("commercial", "300-1000"): (6.66, 5.15, 3.93),
+    ("commercial", ">1000"): (12.83, 6.43, 4.8),
+    ("industrial", "<100"): (4.51, 3.31, 3.27),
+    ("industrial", "100-300"): (5.37, 3.69, 3.61),
+    ("industrial", "300-1000"): (6.66, 4.84, 3.93),
+    ("industrial", ">1000"): (12.83, 6.43, 4.8),
+    ("civic", "<100"): (4.51, 3.31, 3.27),
+    ("civic", "100-300"): (5.37, 3.69, 3.61),
+    ("civic", "300-1000"): (6.66, 4.84, 3.93),
+    ("civic", ">1000"): (12.83, 6.43, 4.8),
+    ("annex", "<100"): (4.51, 3.31, 3.27),
+    ("annex", "100-300"): (5.37, 3.69, 3.61),
+    ("annex", "300-1000"): (6.66, 4.84, 3.93),
+    ("annex", ">1000"): (12.83, 6.43, 4.8),
+    ("any", "<100"): (4.51, 3.31, 3.27),
+    ("any", "100-300"): (5.37, 3.69, 3.61),
+    ("any", "300-1000"): (6.66, 4.84, 3.93),
+    ("any", ">1000"): (12.83, 6.43, 4.8),
+}
+#: A reading is plausible from ``BAND_LOWER`` x to ``BAND_UPPER`` x the cadastre height.
+BAND_LOWER = 0.5
+BAND_UPPER = 1.5
+#: A propiedad-horizontal plot's count is a unit's, so its band is that many floors either side of
+#: it, at a flat storey.
+PH_FLOORS_SLACK = 2
+PH_STOREY_M = 3.5
+#: The cadastre's R2 table (Socrata ``yk9q-cw89``): the use of each predio (``uso1-3``), which the
+#: ``Construccion`` layer lacks. ``cad_class`` maps the use to ``STOREY_M``'s classes.
+R2_DOMAIN = "www.datos.gov.co"
+R2_DATASET = "yk9q-cw89"
+R2_BATCH = 80
+R2_CACHE = Path(__file__).resolve().parent / "runs" / "cadastre"
+
+
+def area_band(area_m2: float) -> str:
+    return next(name for name, lo, hi in AREA_BANDS if lo <= float(area_m2) < hi)
+
+
+def cad_class(use: str | None) -> str | None:
+    """The ``STOREY_M`` class of a cadastre use (``Residencial.Vivienda_Hasta_3_Pisos``): house,
+    apartments, commercial, industrial, civic or annex; None for no (or an unknown) use, which
+    ``storey_m`` reads as the area band over all classes."""
+    if not use:
+        return None
+    grp, _, name = use.partition(".")
+    n = name.lower()
+    if grp == "Residencial":
+        return "annex" if n.startswith("garajes") else "apartments" if n.startswith("apartamentos") else "house"
+    if grp == "Comercial":
+        return "industrial" if n.startswith("bodegas") else "commercial"
+    if grp == "Industrial":
+        return "industrial"
+    if grp == "Institucional":
+        return "civic"
+    if grp == "Anexo":
+        return "annex"
+    return None
+
+
+def storey_m(use_class: str | None, area_m2: float, floors: int) -> float:
+    """Metres per floor for a building of ``floors`` (1, 2, 3+) and ``area_m2`` of class ``use_class``
+    (None / unknown: the area band over all classes)."""
+    cls = use_class if (use_class, "<100") in STOREY_M else "any"
+    return STOREY_M[(cls, area_band(area_m2))][0 if floors <= 1 else 1 if floors == 2 else 2]
+
+
+@dataclass(frozen=True)
+class CadastreBand:
+    """What a footprint's cadastre match says a reading may be: ``lo_m`` .. ``hi_m``."""
+    floors: int
+    ph: bool
+    use: str | None
+    area_m2: float
+    storey_m: float
+    lo_m: float
+    hi_m: float
+    codigo: str = ""
+
+    def contains(self, height_m: float) -> bool:
+        return self.lo_m <= float(height_m) <= self.hi_m
+
+    def row_fields(self) -> dict:
+        d = asdict(self)
+        for k in ("area_m2", "storey_m", "lo_m", "hi_m"):
+            d[k] = round(d[k], 1)
+        return d
+
+
+def make_band(c: CadastreReading, area_m2: float, use: str | None = None) -> CadastreBand:
+    """The band of one match. PH: ``(floors +- PH_FLOORS_SLACK) x PH_STOREY_M`` (the lower end not
+    below 0). Otherwise ``floors x storey_m(use, area, floors)`` x ``BAND_LOWER`` .. ``BAND_UPPER``."""
+    if c.ph:
+        s = PH_STOREY_M
+        lo, hi = max(0, c.floors - PH_FLOORS_SLACK) * s, (c.floors + PH_FLOORS_SLACK) * s
+    else:
+        s = storey_m(cad_class(use), area_m2, c.floors)
+        lo, hi = BAND_LOWER * c.floors * s, BAND_UPPER * c.floors * s
+    return CadastreBand(floors=int(c.floors), ph=bool(c.ph), use=use, area_m2=float(area_m2),
+                        storey_m=float(s), lo_m=float(lo), hi_m=float(hi), codigo=c.codigo)
+
+
+def fetch_uses(codigos: Sequence[str], dataset: str = "cartagena", refresh: bool = False) -> dict:
+    """``{codigo: most frequent use}`` for the predial numbers, from the R2 table. Cached in
+    ``runs/cadastre/<dataset>_r2.json`` (``{codigo: {"uses": [...]}}``); numbers not cached are
+    fetched (Socrata, ``R2_BATCH`` a request), and a failed fetch leaves them without a use (the
+    band then reads the area band over all classes)."""
+    path = R2_CACHE / f"{dataset}_r2.json"
+    have: dict = {}
+    if path.exists() and not refresh:
+        try:
+            have = {k: list((v.get("uses") if isinstance(v, dict) else v) or [])
+                    for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+        except (OSError, ValueError):
+            have = {}
+    todo = sorted({c for c in codigos if c and c not in have})
+    if todo:
+        import requests  # noqa: PLC0415
+
+        try:
+            s = requests.Session()
+            for i in range(0, len(todo), R2_BATCH):
+                chunk = todo[i:i + R2_BATCH]
+                where = "referenciacatastral in (" + ",".join(f"'{c}'" for c in chunk) + ")"
+                r = s.get(f"https://{R2_DOMAIN}/resource/{R2_DATASET}.json",
+                          params={"$where": where, "$select": "referenciacatastral,uso1,uso2,uso3",
+                                  "$limit": 50000}, timeout=120)
+                r.raise_for_status()
+                for c in chunk:
+                    have.setdefault(c, [])
+                for row in r.json():
+                    have[row["referenciacatastral"]] += [row[k] for k in ("uso1", "uso2", "uso3")
+                                                         if row.get(k) and row[k] != "0"]
+                time.sleep(0.2)
+            R2_CACHE.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({k: {"uses": v} for k, v in have.items()}), encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - an opt-in source must never fail the run
+            log.warning("[cadastre] R2 uses unavailable for %d predios (%s)", len(todo), exc)
+    return {c: Counter(have[c]).most_common(1)[0][0] for c in codigos if have.get(c)}
+
+
+def load_band(region: str, records: Sequence, dataset: str | None = None) -> dict:
+    """``{feature_id: CadastreBand}`` for the run's ``records`` with a cadastre match (``load_region``
+    matching; the use from the R2 table, ``fetch_uses``); {} when no cadastre covers them. Does not
+    register the cadastre tier rules: nothing from the cadastre enters the tiers."""
+    by = {r.feature_id: r for r in records if getattr(r, "geometry", None) is not None}
+    matches = load_region(region, list(by.values()), dataset, register=False)
+    if not matches:
+        return {}
+    uses = fetch_uses([c.codigo for c in matches.values() if not c.ph], dataset=dataset or "cartagena")
+    out = {fid: make_band(c, by[fid].area_m2, uses.get(c.codigo)) for fid, c in matches.items()}
+    log.info("[cadastre] %s: plausibility band for %d footprints (%d PH, %d with a use)",
+             region, len(out), sum(b.ph for b in out.values()), sum(b.use is not None for b in out.values()))
+    return out
+
+
 # --------------------------------------------------------------------------- loading
 
 def _bbox(records: Sequence) -> tuple[float, float, float, float]:
@@ -164,9 +357,11 @@ def _bbox(records: Sequence) -> tuple[float, float, float, float]:
     return max(lats), min(lats), max(lons), min(lons)
 
 
-def load_region(region: str, records: Sequence, dataset: str | None = None) -> dict:
+def load_region(region: str, records: Sequence, dataset: str | None = None,
+                register: bool = True) -> dict:
     """``{feature_id: CadastreReading}`` for the run's ``records``; {} when no cadastre covers
-    them or the layer cannot be fetched (a run never fails on it)."""
+    them or the layer cannot be fetched (a run never fails on it). ``register``: add the cadastre
+    tier rules (:func:`register_tier_rules`); off for the plausibility band."""
     from city2stl.height.providers import co_catastro as cc  # noqa: PLC0415
 
     recs = [r for r in records if getattr(r, "geometry", None) is not None]
@@ -181,7 +376,8 @@ def load_region(region: str, records: Sequence, dataset: str | None = None) -> d
     except Exception as exc:  # noqa: BLE001 - an opt-in source must never fail the run
         log.warning("[cadastre] %s: %s unavailable (%s)", region, ds.dataset_id, exc)
         return {}
-    register_tier_rules()
+    if register:
+        register_tier_rules()
     out = {fid: from_match(m, ds.name) for fid, m in matches.items()}
     log.info("[cadastre] %s: %d of %d footprints matched (%d publishable, %d PH, %d towers); %s",
              region, len(out), len(recs), sum(c.publishable for c in out.values()),
@@ -190,5 +386,7 @@ def load_region(region: str, records: Sequence, dataset: str | None = None) -> d
     return out
 
 
-__all__ = ["CadastreReading", "KIND", "TIER_RULES", "disputed_by_satellite", "from_match",
-           "load_region", "prior_for", "register_tier_rules", "row_fields", "tier_readings"]
+__all__ = ["CadastreReading", "CadastreBand", "KIND", "STOREY_M", "TIER_RULES", "area_band",
+           "cad_class", "disputed_by_satellite", "fetch_uses", "from_match", "load_band",
+           "load_region", "make_band", "prior_for", "register_tier_rules", "row_fields",
+           "storey_m", "tier_readings"]

@@ -78,6 +78,7 @@ from .region_data import (
     _load_site_pano_only_pdf,
     _load_site_render_pdf,
     _load_site_seed_urls,
+    _load_site_use_cadastre_band,
     _load_site_use_commons_photos,
     _load_site_use_cross_view_scoring,
     _load_site_use_pano_coastline_recovery,
@@ -622,6 +623,12 @@ def run_region_pdf_report(
             # raw readings: elevated_estimates makes the fusion readings and also uses the
             # low ones (dropped from fusion) for the tower-behind test (F-SKY26 step 6)
             elevated_state["satellite"] = satellite
+    # 2026-10-10 (site flag use_cadastre_band): the cadastre's floor count bounds a single image
+    # reading in place of the 2x rule; the cadastre never publishes a height
+    cadastre_band = None
+    if _load_site_use_cadastre_band(region_name):
+        from .cadastre_heights import load_band  # noqa: PLC0415
+        cadastre_band = load_band(region_name, building_records) or None
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,
@@ -659,7 +666,7 @@ def run_region_pdf_report(
         building_heights, building_records,
         fallback=_fallback,
         measured_seeds=set(elevated_seeds or ()), satellite=satellite,
-        floors=(elevated_state or {}).get("floors"))
+        floors=(elevated_state or {}).get("floors"), cadastre_band=cadastre_band)
     _fill_unread_heights(building_heights)
     if n_withheld:
         logger.info(f"[withhold_untagged] {n_withheld} untagged building(s): Street View "

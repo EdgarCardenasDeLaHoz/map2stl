@@ -117,6 +117,9 @@ SATELLITE_KINDS = ("lean", "multiview", "stereo")
 SINGLE_WITHHOLD_FACTOR = 2.0
 #: ``withheld_reason`` of a row whose single reading was withheld.
 SINGLE_WITHHELD_REASON = "single over 2x prior"
+#: ``withheld_reason`` of a single outside its cadastre plausibility band (2026-10-10,
+#: ``cadastre_heights.CadastreBand``): where a cadastre match exists the band replaces the 2x rule.
+CADASTRE_BAND_REASON = "cadastre_band"
 
 
 def canonical_tier(tier: str | None) -> str | None:
@@ -354,6 +357,14 @@ def tier_fields(readings: Sequence[dict], *, published_m: float | None,
     return out
 
 
+def single_outside_band(tier: str, published_m: float | None, lo_m: float | None,
+                        hi_m: float | None) -> bool:
+    """Whether a row's ``single`` height lies outside its cadastre plausibility band (``lo_m`` ..
+    ``hi_m``); False for other tiers, a missing height or band."""
+    return bool(tier == "single" and published_m is not None and lo_m is not None
+                and hi_m is not None and not (float(lo_m) <= float(published_m) <= float(hi_m)))
+
+
 def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
                     factor: float = SINGLE_WITHHOLD_FACTOR) -> bool:
     """Whether a row's ``single`` height is withheld for the prior: tier ``single`` and the
@@ -374,7 +385,9 @@ SUPPORT_RATIO = 1.5
 #: Validated satellite methods (``single_support``) and the confidence each needs: lean at 0.7
 #: (Chicago LiDAR: lean over 100 m within 25 % 94 %), lean + shadow agreeing (``ls``) at any,
 #: multiview at 0.3 (over 40 m within 25 % 84 %). Stereo is not listed (40-100 m: ~59 %).
-SUPPORT_MIN_CONF = {"lean": 0.7, "ls": 0.0, "multiview": 0.3}
+#: ``sat_joint`` (lean and shadow fitted together, 2026-10-10) is listed but off: no confidence reaches the
+#: 0.8 share within tol (``height.satellite.joint.C_PUB``), so the entry is above any confidence.
+SUPPORT_MIN_CONF = {"lean": 0.7, "ls": 0.0, "multiview": 0.3, "sat_joint": 1.01}
 #: ``single_support`` entry of a single kept because floor counts flagged its plot a high-rise.
 HIGH_RISE_SUPPORT = "high_rise_floors"
 
@@ -452,11 +465,18 @@ def selection_reason(row: dict) -> str:
         if row.get("single_support"):
             out += ("; over 2x the prior, kept: supported by "
                     + ", ".join(map(str, row["single_support"])))
+        elif row.get("cadastre_band") and row["cadastre_band"].get("inside"):
+            out += (f"; inside the cadastre plausibility band "
+                    f"({row['cadastre_band']['lo_m']:.0f}-{row['cadastre_band']['hi_m']:.0f} m)")
         return out
     if base.endswith("cadastre"):
         return SELECTION_REASONS["cadastre"]
     if src.startswith("withheld:"):
         if row.get("withheld_reason"):
+            if row.get("withheld_reason") == CADASTRE_BAND_REASON and row.get("cadastre_band"):
+                b = row["cadastre_band"]
+                return (f"the height prior: the reading was withheld ({row['withheld_reason']}: "
+                        f"{b['floors']} cadastre floors allow {b['lo_m']:.0f}-{b['hi_m']:.0f} m)")
             return f"the height prior: the reading was withheld ({row['withheld_reason']})"
         if row.get("drone_seen"):
             return SELECTION_REASONS["prior"] + " (the drone seeds that saw it gave none)"

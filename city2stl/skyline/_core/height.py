@@ -752,7 +752,7 @@ def _withhold_single_enabled() -> bool:
 
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],
                                   fallback=None, measured_seeds=(), satellite=None,
-                                  floors=None) -> int:
+                                  floors=None, cadastre_band=None) -> int:
     """Replace the Street View height of every untagged building in ``rows`` (the output of
     ``aggregate_building_heights``) by a fallback, and (``SKYLINE_PREFER_TAGS``, default on)
     that of every tagged building by its OSM height; returns how many were replaced.
@@ -801,6 +801,13 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     ``"withheld:high_rise"``, tier ``single``, ``high_rise`` holds the count); the flag supports
     it under the 2x rule (the user, 2026-10-08; the flag never fires on a satellite-low plot).
     Every row floors counted carries ``high_rise_seen``, ``floors`` and ``storey_m``.
+
+    ``cadastre_band``: ``{feature_id: CadastreBand}`` (``cadastre_heights.load_band``, site flag
+    ``use_cadastre_band``; 2026-10-10). Where a row has a band it replaces the 2x rule: a ``single``
+    inside ``lo_m`` .. ``hi_m`` stays ``single`` (no satellite support needed), one outside it
+    publishes the prior (tier ``prior``, ``withheld_reason`` ``cadastre_band``, the reading kept as
+    evidence). The row carries ``cadastre_band`` (the band and ``inside``). The cadastre height is
+    never published and no cadastre reading enters the tiers. Rows without a band keep the 2x rule.
     A tagged row whose ``osm_tag`` height one drone or satellite reading agrees with is
     ``corroborated`` (``tiers.tag_witness``; the user, 2026-10-08). A tagged row whose agreeing
     pair is more than 10 % from the tag keeps the tag and carries ``measured_m``,
@@ -809,9 +816,11 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     (``tiers.selection_reason``).
     """
     from .tiers import (  # noqa: PLC0415
+        CADASTRE_BAND_REASON,
         SINGLE_WITHHELD_REASON,
         reading,
         selection_reason,
+        single_outside_band,
         single_support,
         single_withheld,
         tier_fields,
@@ -877,7 +886,16 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             tag_source=rec.height_source if tagged else None,
             prior_m=prior[0] if prior else None, prior_source=prior[1] if prior else None))
         support = None
-        if (prior is not None and _withhold_single_enabled()
+        band = (cadastre_band or {}).get(row.get("feature_id"))
+        withheld_reason = SINGLE_WITHHELD_REASON
+        if band is not None and prior is not None and row["tier"] == "single":
+            # 2026-10-10: the cadastre plausibility band replaces the 2x rule where a match exists
+            outside = single_outside_band(row["tier"], h, band.lo_m, band.hi_m)
+            row["cadastre_band"] = dict(band.row_fields(), inside=not outside)
+            if outside and _withhold_single_enabled():
+                support = []
+                withheld_reason = CADASTRE_BAND_REASON
+        elif (prior is not None and _withhold_single_enabled()
                 and single_withheld(row["tier"], h, prior[0])):
             # refined by the user (2026-10-09): a validated satellite reading >= 40 m that agrees,
             # or the floors high-rise flag (which carries the satellite veto; it covers the
@@ -894,7 +912,7 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
             row["single_reading_m"] = h
             row["single_source"] = src
             row["single_methods"] = row["tier_methods"]
-            row["withheld_reason"] = SINGLE_WITHHELD_REASON
+            row["withheld_reason"] = withheld_reason
             row["effective_height_m"] = float(prior[0])
             row["effective_height_source"] = f"withheld:{prior[1]}"
             row.update(tier="prior", tier_methods=[prior[1]], verified=False,

@@ -111,6 +111,14 @@ def scene_tiles(footprints, M: float, margin_m: float = 60.0) -> set:
     return T
 
 
+def anchor_view(fps, anchors: dict) -> list:
+    """The footprints as the scene geometry fit sees them with ``--anchors``: an anchor carries its
+    known height as the tag (source ``osm_tag``), every other footprint is untagged. OSM tags are
+    not read (2026-10-10: the vectors are fitted on buildings of known height, not on tags)."""
+    return [dict(f, tag=float(anchors[f["fid"]]), src="osm_tag") if f["fid"] in anchors
+            else dict(f, tag=None, src="default") for f in fps]
+
+
 def fit_scene(sc: ss.Scene, fps, by_fid, M, lat0, lon0) -> dict:
     lean = ss.fit_lean(sc.tiles, fps, M)
     if "error" in lean:
@@ -145,21 +153,36 @@ def main(argv=None) -> int:
                          "drone or floors reading widens their search; same scenes: re-measure "
                          "only the footprints whose search window changes. Not for publishing "
                          "(refused 2026-10-09: spurious tall leans)")
+    ap.add_argument("--merge-joint", default=None, metavar="FILE",
+                    help="add the sat_joint readings of another readings.json (a --joint run written "
+                         "with --out) to the region's readings.json, keeping its other readings")
     ap.add_argument("--fids", default=None, help="file of footprint ids: measure only these")
     ap.add_argument("--out", default=None,
                     help="write here instead (the region's readings.json is still read for --add)")
+    ap.add_argument("--anchors", default=None,
+                    help="JSON {fid: height_m} of buildings of known height: the scene vectors "
+                         "(fit_lean, solve_sun) are fitted on these instead of the OSM tags")
+    ap.add_argument("--joint", action="store_true",
+                    help="measure the per-scene shadow and lean profiles (no plane sweep) and write "
+                         "each footprint's sat_joint reading (the kappas fitted on --anchors); write "
+                         "it with --out and add it to the region's readings with --merge-joint")
     ap.add_argument("--jobs", type=int, default=1,
                     help=f"measuring processes (block groups; at most the guard's {workers})")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     if a.recalibrate:
         return recalibrate(readings_path(a.region))
+    if a.merge_joint:
+        return merge_joint(readings_path(a.region), Path(a.merge_joint))
     t0 = time.time()
     rd = region_dir(a.region)
     rd.mkdir(parents=True, exist_ok=True)
     recs, bbox = load_records(a.region)
     fps = footprints_from_records(recs)
-    by_fid = {f["fid"]: f for f in fps}
+    anchors = {str(k): float(v) for k, v in json.loads(Path(a.anchors).read_text(encoding="utf-8")).items()} \
+        if a.anchors else {}
+    fit_fps = anchor_view(fps, anchors) if anchors else fps
+    fit_by_fid = {f["fid"]: f for f in fit_fps}
     lat_c, lon_c = (bbox.north + bbox.south) / 2, (bbox.east + bbox.west) / 2
     cfg_path = rd / "waybackconfig.json"
     if a.wayback_config and not cfg_path.exists():
@@ -209,7 +232,7 @@ def main(argv=None) -> int:
     M = ss.mpp(lat0)
     log.info("%d footprints, %d on cached %s tiles; M %.4f", len(fps), len(sel), ref, M)
     # ---- scene geometry (cached)
-    gpath = rd / "scenes.json"
+    gpath = rd / ("scenes_anchor.json" if anchors else "scenes.json")
     geom = json.loads(gpath.read_text(encoding="utf-8")) if gpath.exists() and not a.refit else {}
     fixed_sun = {k: tuple(map(float, v.split(","))) for k, v in (s.split("=", 1) for s in a.sun)}
     scenes = []
@@ -218,7 +241,9 @@ def main(argv=None) -> int:
         sc = ss.Scene(name=n, tiles=src, date=n[:10].replace("-", ""), sensor=n[11:])
         if n not in geom:
             log.info("fitting %s", n)
-            geom[n] = fit_scene(sc, fps, by_fid, M, lat0, lon0)
+            geom[n] = fit_scene(sc, fit_fps, fit_by_fid, M, lat0, lon0)
+            if anchors:
+                geom[n]["anchors"] = len(anchors)
             gpath.write_text(json.dumps(geom, indent=1, default=str), encoding="utf-8")
         g = geom[n]
         if "error" in g["lean"]:
@@ -283,12 +308,17 @@ def main(argv=None) -> int:
         from concurrent.futures import ProcessPoolExecutor  # noqa: PLC0415
 
         with ProcessPoolExecutor(len(parts)) as ex:
-            for s1, m1 in ex.map(_measure_part, [(fps, ref_sc, scenes, ref, M, p) for p in parts]):
+            for s1, m1 in ex.map(_measure_part, [(fps, ref_sc, scenes, ref, M, p, a.joint) for p in parts]):
                 single.update(s1)
                 multi.update(m1)
     elif parts:
-        single, multi = _measure_part((fps, ref_sc, scenes, ref, M, parts[0]))
-    rs = sr.from_measurements(single, multi, ref)
+        single, multi = _measure_part((fps, ref_sc, scenes, ref, M, parts[0], a.joint))
+    model = None
+    if a.joint:
+        model = joint_model(scenes, multi, anchors)
+    rs = sr.from_measurements(single, multi, ref, joint=model)
+    for o in multi.values():
+        o.pop("profiles", None)
     where = {f["fid"]: dict(lat=round(f["lat"], 7), lon=round(f["lon"], 7)) for f in todo}
     if done:                                    # --add / --hints: keep the others
         for fid, v in prev.items():
@@ -301,6 +331,9 @@ def main(argv=None) -> int:
                 dark=ref_sc.dark, measured=measured, hints=hints,
                 outline_footprints={n: len(inside[n]) for n in names},
                 built=time.strftime("%Y-%m-%d %H:%M"), seconds=round(time.time() - t0))
+    if model is not None:
+        meta["joint"] = dict(kappas={k: list(v) for k, v in model.kappas.items()}, n_anchors=len(anchors),
+                             c_pub=model.c_pub)
     out = Path(a.out) if a.out else out
     sr.save(out, rs, meta, where)
     by_m = {}
@@ -309,6 +342,20 @@ def main(argv=None) -> int:
             by_m[r.method] = by_m.get(r.method, 0) + 1
     log.info("wrote %s: %d footprints with readings %s, %.0f s", out, len(rs), by_m, time.time() - t0)
     return 0
+
+
+def joint_model(scenes, multi: dict, anchors: dict):
+    """The ``joint.JointModel`` of a run: per-scene kappas fitted on the anchors' profiles, the
+    confidence table and publication threshold of ``joint`` (``CONF_TABLE`` / ``C_PUB``)."""
+    from city2stl.height.satellite import joint as sj  # noqa: PLC0415
+
+    fit = [(multi[f]["profiles"], h) for f, h in anchors.items() if f in multi and multi[f].get("profiles")]
+    names = [s.name for s in scenes]
+    kf = sj.fit_kappas(fit, names) if fit else {}
+    kappas = {n: (kf.get(n, {}).get("lean", 1.0), kf.get(n, {}).get("shadow", 1.0)) for n in names}
+    log.info("joint: kappas fitted on %d anchors with profiles: %s", len(fit),
+             {n: tuple(round(v, 2) for v in k) for n, k in kappas.items()})
+    return sj.JointModel(kappas=kappas, table=sj.CONF_TABLE, c_pub=sj.C_PUB)
 
 
 def block_groups(todo, n: int, bs: int = 1024) -> list[list]:
@@ -326,13 +373,36 @@ def block_groups(todo, n: int, bs: int = 1024) -> list[list]:
 
 def _measure_part(job) -> tuple[dict, dict]:
     """Shadow + lean on the reference scene and the multi-scene sweep for one group of ids."""
-    fps, ref_sc, scenes, ref, M, ids = job
+    fps, ref_sc, scenes, ref, M, ids, profiles = job
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")   # spawned workers
     single = sm.measure_single(fps, ref_sc, M, dark=ref_sc.dark or 80.0, only=set(ids),
                                progress=log.info) if ref_sc.shadow_bearing is not None else {}
-    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, list(ids), M, progress=log.info)) \
-        if len(scenes) >= 2 else {}
+    multi = sm.finish_multi(sm.measure_multi(fps, scenes, ref, list(ids), M, progress=log.info,
+                                             profiles=profiles, sweep=not profiles)) if len(scenes) >= 2 else {}
     return single, multi
+
+
+def merge_joint(dst: Path, src: Path) -> int:
+    """Add ``src``'s ``sat_joint`` readings to ``dst`` (matched by footprint id and, when both
+    sides have it, centroid within 3 m); every other reading of ``dst`` is kept as it is."""
+    meta, data = sr.load(dst, calibrate=False)
+    smeta, sdata = sr.load(src, calibrate=False)
+    n = 0
+    for fid, v in sdata.items():
+        j = [r for r in v["readings"] if r.method == "sat_joint"]
+        d = data.get(fid)
+        if not j or d is None:
+            continue
+        if None not in (d.get("lat"), v.get("lat")) and _dist_m(dict(lat=d["lat"], lon=d["lon"]), v["lat"], v["lon"]) > 3.0:
+            continue
+        d["readings"] = [r for r in d["readings"] if r.method != "sat_joint"] + j
+        n += 1
+    rs = {fid: v["readings"] for fid, v in data.items()}
+    where = {fid: {k: v[k] for k in ("lat", "lon", "osm_id") if k in v} for fid, v in data.items()}
+    meta = dict(meta, joint=dict(smeta.get("joint") or {}, merged=time.strftime("%Y-%m-%d"), n=n))
+    sr.save(dst, rs, meta, where)
+    log.info("merged %d sat_joint readings from %s into %s", n, src, dst)
+    return 0
 
 
 def recalibrate(path: Path) -> int:

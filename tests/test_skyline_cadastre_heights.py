@@ -125,3 +125,68 @@ def test_row_fields_and_attribution():
                 "tier_methods": ["cadastre", "drone:seed_1"]}
     assert td.cadastre_attributions([verified]) == [td.CADASTRE_ATTRIBUTIONS["cartagena"]]
     assert td.height_attributions([{"effective_height_source": "withheld:prior_gbm"}]) == []
+
+
+# ------------------------------------------------------------------------------ plausibility band
+def test_band_of_a_non_ph_plot_is_floors_times_the_fitted_storey_within_half_and_one_and_a_half():
+    # 2 floors, 150 m2 house: 3.60 m a floor -> 7.2 m, band 3.6 .. 10.8 m
+    b = ch.make_band(C(floors=2), 150.0, "Residencial.Vivienda_Hasta_3_Pisos")
+    assert (b.storey_m, round(b.lo_m, 2), round(b.hi_m, 2)) == (3.6, 3.6, 10.8) and not b.ph
+    assert b.contains(7.0) and not b.contains(3.0) and not b.contains(11.0)
+    # 1 floor is one tall storey, taller with area: 150 m2 house 4.78 m, 500 m2 6.66 m
+    assert ch.make_band(C(floors=1), 150.0, "Residencial.Vivienda_Hasta_3_Pisos").hi_m == pytest.approx(7.17)
+    assert ch.make_band(C(floors=1), 500.0, "Residencial.Vivienda_Hasta_3_Pisos").storey_m == 6.66
+    # no use (or one the table has no class for): the area band over all classes
+    assert ch.make_band(C(floors=3), 120.0, None).storey_m == 3.61
+    assert ch.make_band(C(floors=3), 120.0, "Otro.Algo").storey_m == 3.61
+    assert ch.cad_class("Comercial.Bodegas_Comerciales") == "industrial"
+    assert ch.cad_class("Residencial.Apartamentos_4_y_mas_pisos") == "apartments"
+    assert ch.cad_class("Residencial.Garajes") == "annex" and ch.cad_class(None) is None
+
+
+def test_band_of_a_propiedad_horizontal_plot_is_two_floors_either_side_of_the_count():
+    b = ch.make_band(C(floors=12, ph=True), 900.0, None)
+    assert (b.lo_m, b.hi_m, b.ph) == (35.0, 49.0, True)
+    assert ch.make_band(C(floors=1, ph=True), 900.0).lo_m == 0.0       # the lower end stops at 0
+
+
+def _band_rows(single_m):
+    from city2stl.skyline._core.height import withhold_untagged_street_view
+    rec = SimpleNamespace(feature_id="f1", height_source="default", area_m2=150.0)
+    row = {"feature_id": "f1", "effective_height_m": 20.0, "effective_height_source": "geometric",
+           "per_seed_median_m": {"seed_1": single_m}}
+    return withhold_untagged_street_view, rec, row
+
+
+def test_a_single_outside_the_band_is_withheld_and_inside_it_stays_single(monkeypatch):
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    band = {"f1": ch.make_band(C(floors=2), 150.0, "Residencial.Vivienda_Hasta_3_Pisos")}   # 3.6-10.8
+    fn, rec, row = _band_rows(30.0)                      # 30 m on a 2-floor house: outside
+    fn([row], [rec], fallback=lambda r: (8.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["tier"] == "prior" and row["effective_height_m"] == 8.0
+    assert row["withheld_reason"] == "cadastre_band" and row["single_reading_m"] == 30.0
+    assert row["cadastre_band"]["inside"] is False and row["cadastre_band"]["hi_m"] == 10.8
+    assert "cadastre_band" in tiers.selection_reason(row)
+    fn, rec, row = _band_rows(10.0)                      # 10 m: inside, although 1.25x the 8 m prior
+    fn([row], [rec], fallback=lambda r: (4.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["tier"] == "single" and row["effective_height_m"] == 10.0   # 2.5x the prior: kept anyway
+    assert row["cadastre_band"]["inside"] is True and "withheld_reason" not in row
+    assert "single_support" not in row
+    fn, rec, row = _band_rows(2.0)                       # under the band: withheld too
+    fn([row], [rec], fallback=lambda r: (8.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["tier"] == "prior" and row["withheld_reason"] == "cadastre_band"
+    # no band for the row: the 2x rule as before (30 m over 2x the 8 m prior, nothing supports it)
+    fn, rec, row = _band_rows(30.0)
+    fn([row], [rec], fallback=lambda r: (8.0, "prior"), measured_seeds={"seed_1"}, cadastre_band={})
+    assert row["tier"] == "prior" and row["withheld_reason"] == "single over 2x prior"
+    assert "cadastre_band" not in row
+
+
+def test_the_band_never_publishes_a_cadastre_height_or_adds_a_tier_reading(monkeypatch):
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    band = {"f1": ch.make_band(C(floors=2), 150.0, "Residencial.Vivienda_Hasta_3_Pisos")}
+    fn, rec, row = _band_rows(None)
+    row["per_seed_median_m"] = {}                         # no reading at all: the prior, not the cadastre
+    fn([row], [rec], fallback=lambda r: (12.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["effective_height_m"] == 12.0 and row["tier"] == "prior"
+    assert "cadastre" not in row["tier_methods"] and "cadastre_band" not in row

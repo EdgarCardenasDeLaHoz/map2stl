@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -669,6 +670,16 @@ def _load_site_use_satellite_heights(region_name: str) -> bool:
     ``scripts/20_satellite_heights.py``) into drone fusion, the tiers and the untagged fallback.
     Default False."""
     return bool(_read_site_config(region_name).get("use_satellite_heights", False))
+
+def _load_site_use_cadastre_band(region_name: str) -> bool:
+    """Per-region opt-in for the cadastre plausibility band (``cadastre_heights.load_band``,
+    2026-10-10): the cadastre's floor count bounds a single image reading in place of the "2x the
+    prior" rule; it never publishes a height. Default False; the env var ``SKYLINE_CADASTRE_BAND``
+    overrides."""
+    env = os.environ.get("SKYLINE_CADASTRE_BAND")
+    if env is not None:
+        return env.strip().lower() not in ("0", "false", "no", "off", "")
+    return bool(_read_site_config(region_name).get("use_cadastre_band", False))
 
 def _load_site_use_survey_heights(region_name: str) -> bool:
     """Per-region opt-in for publishing survey LiDAR heights as tier ``survey`` (F-SKY26 step 2d,

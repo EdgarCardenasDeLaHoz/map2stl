@@ -8,7 +8,10 @@ One footprint gets at most one reading per method (``SatReading``):
   so they are one source (decision 2026-10-07). A shadow is a ``lower_bound``;
 - ``stereo``: the pair consensus across dated scenes (``measure.consensus``);
 - ``multiview``: the plane-sweep NCC peak over all scene pairs (``stereo_multiview``);
-- ``ls``: lean and shadow agreeing (within 25 %): the conf-weighted mean, conf the larger.
+- ``ls``: lean and shadow agreeing (within 25 %): the conf-weighted mean, conf the larger;
+- ``sat_joint``: lean and shadow fitted together at every candidate height with the scenes' own
+  vectors (``joint``; 2026-10-10), conf the calibrated share within tol; made only by a run with
+  profiles (``from_measurements(joint=)``), kept beside the others.
 
 Readings under ``weights.MIN_CONF`` (0.15) are not made. The rules are those of the F-SKY26
 harness ``Code/claude/scripts/seed_experiment.py::load_sat`` (2026-10-07), which the satellite
@@ -41,7 +44,7 @@ from .weights import MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
 #: Two readings agree within this share (the benchmark's 25 % yardstick).
 AGREE = 0.25
 #: Methods a footprint can have, in the order fusion considers them.
-METHODS = ("ls", "lean", "shadow", "stereo", "multiview")
+METHODS = ("ls", "lean", "shadow", "stereo", "multiview", "sat_joint")
 READINGS_VERSION = 1
 #: A lean under ``TALL_M`` is not a roof reading whatever its peak shape. LiDAR (2026-10-08,
 #: S/satellite_cities/val): Chicago lean 15-40 m at conf >= 0.7 within 25 % of truth 1 of 61
@@ -168,9 +171,11 @@ def footprint_readings(*, lean: dict | None = None, shadows: dict | None = None,
 _calibrate = calibrate
 
 
-def from_measurements(single: dict | None, multi: dict | None, ref_scene: str) -> dict:
+def from_measurements(single: dict | None, multi: dict | None, ref_scene: str, joint=None) -> dict:
     """``{fid: [SatReading]}`` from ``measure.measure_single`` (lean; its shadow too when no
-    multi-scene run covers the footprint) and ``measure.finish_multi`` rows."""
+    multi-scene run covers the footprint) and ``measure.finish_multi`` rows. ``joint``: a
+    ``joint.JointModel``; a footprint whose multi row has ``profiles`` also gets its ``sat_joint``
+    reading."""
     out = {}
     for fid in set(single or {}) | set(multi or {}):
         s = (single or {}).get(fid) or {}
@@ -181,6 +186,13 @@ def from_measurements(single: dict | None, multi: dict | None, ref_scene: str) -
         lean = s.get("lean") if (s.get("lean") or {}).get("height_m", 0) and s["lean"]["height_m"] >= 2.5 else None
         rs = footprint_readings(lean=lean, shadows=shadows, stereo=(m or {}).get("stereo"),
                                 multiview=(m or {}).get("stereo_multiview"), ref_scene=ref_scene)
+        if joint is not None and m and m.get("profiles"):
+            from . import joint as sj  # noqa: PLC0415
+
+            jr = sj.make_reading(m["profiles"], joint)
+            if jr is not None and jr["height_m"] >= 2.5 and jr["conf"] > 0:
+                rs.append(SatReading("sat_joint", jr["height_m"], jr["conf"], n_scenes=jr["extra"]["n_shadow"],
+                                     extra=jr["extra"]))
         if rs:
             out[fid] = rs
     return out

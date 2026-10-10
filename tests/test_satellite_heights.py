@@ -418,3 +418,66 @@ def test_scene_outline_takes_every_polygon_of_the_scene_in_the_bbox(monkeypatch)
     got = ss.in_rings(o["2025-05-11_WV03"], [0.5, 1.5, 2.2, 2.5], [0.5, 0.5, 0.5, 0.5])
     assert got.tolist() == [True, False, True, False]
     assert ss.scene_polygon(cfg, "r", "2025-05-11_WV03", [], bbox=(0, 0, 3, 1)) == o["2025-05-11_WV03"]
+
+
+# ------------------------------------------------------------------------------ joint (sat_joint)
+def _shadow_scene(Hb=30.0, el=45.0, bearing=320.0, M=0.5):
+    from skimage.draw import polygon as skpoly
+
+    gray = np.full((800, 800), 180.0, np.float32)
+    ub = ss.uv(bearing)
+    sq = np.array([[380, 380], [420, 380], [420, 420], [380, 420]], float)
+    L = Hb / math.tan(math.radians(el)) / M
+    for fr in np.linspace(0, 1, 200):
+        rr, cc = skpoly(sq[:, 1] + ub[1] * L * fr, sq[:, 0] + ub[0] * L * fr, gray.shape)
+        gray[rr, cc] = 30.0
+    rr, cc = skpoly(sq[:, 1], sq[:, 0], gray.shape)
+    gray[rr, cc] = 200.0
+    lab = np.zeros(gray.shape, np.int32)
+    lab[rr, cc] = 1
+    return sm.ShadowCtx(gray=gray, lab=lab, water=np.zeros(gray.shape, bool),
+                        veg=np.zeros(gray.shape, bool), B={0: dict(P=[sq], tag=None)}, ub=ub,
+                        COT=1.0, p_ls=0.0, DEN_ROOF=1.0, DARK=80.0, M=M)
+
+
+def test_profiles_are_returned_on_request_and_do_not_change_the_reading():
+    c = _shadow_scene()
+    plain, with_p = sm.shadow_height(c, 0), sm.shadow_height(c, 0, profile=True)
+    assert "profile" not in plain and with_p["profile"]["valid"]
+    assert {k: v for k, v in with_p.items() if k != "profile"} == plain
+    lc = _lean_scene(H=40.0)
+    lp, lq = sm.lean_height(lc, 0), sm.lean_height(lc, 0, profile=True)
+    assert "profile" not in lp and {k: v for k, v in lq.items() if k != "profile"} == lp
+    assert lq["profile"]["k"] == pytest.approx(0.4)
+
+
+def test_joint_reading_finds_the_height_both_profiles_support():
+    from city2stl.height.satellite import joint as sj
+
+    sh = sm.shadow_height(_shadow_scene(Hb=30.0), 0, profile=True)["profile"]
+    ln = sm.lean_height(_lean_scene(H=30.0), 0, profile=True)["profile"]
+    got = sj.joint_reading({"s1": dict(shadow=sh, lean=ln)})
+    assert got is not None and got["height_m"] == pytest.approx(30.0, abs=2.5)
+    assert got["zl"] >= sj.Z_SUPPORT and got["zs"] >= sj.Z_SUPPORT and got["J"] > 1.0
+    # a lean that disagrees (40 m) with the shadow (30 m): the joint peak cannot be supported by both
+    ln40 = sm.lean_height(_lean_scene(H=40.0), 0, profile=True)["profile"]
+    both = sj.joint_reading({"s1": dict(shadow=sh, lean=ln40)})
+    assert both is None or abs(both["height_m"] - 30.0) > 2.0 or abs(both["height_m"] - 40.0) > 2.0
+    assert sj.joint_reading({"s1": dict(shadow=sh, lean=None)}) is None      # needs both kinds
+
+
+def test_fit_kappas_recovers_a_scale_and_the_conf_table_is_monotone_in_j():
+    from city2stl.height.satellite import joint as sj
+
+    # lean profiles whose roof sits at 1.1x the nominal shift: kappa_lean ~ 1.1
+    anchors = []
+    for H in (40.0, 55.0, 70.0, 90.0, 110.0, 130.0):
+        c = _lean_scene(H=H * 1.1, k=0.4)
+        c.B[0]["tag"] = H * 1.1
+        anchors.append(({"s1": dict(lean=sm.lean_height(c, 0, profile=True)["profile"], shadow=None)}, H))
+    fit = sj.fit_kappas(anchors, ["s1"])
+    assert fit["s1"]["lean"] == pytest.approx(1.1, abs=0.04) and fit["s1"]["n_lean"] == 6
+    assert fit["s1"]["shadow"] == 1.0 and fit["s1"]["n_shadow"] == 0
+    rows = [(20.0, 0.7, i % 4 == 0) for i in range(40)] + [(20.0, 1.5, i % 8 != 0) for i in range(40)]
+    tab = sj.fit_conf_table(rows)
+    assert sj.conf_of(tab, 20.0, 1.5) > sj.conf_of(tab, 20.0, 0.7) > 0

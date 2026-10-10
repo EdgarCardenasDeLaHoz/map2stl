@@ -21,6 +21,8 @@
   "use_ownership": true,
   "use_cadastre_occluders": true,
   "use_cadastre_heights": false,
+  "use_cadastre_band": true,
+  "_use_cadastre_band_note": "2026-10-10, docs/decisions/building-heights.md: the cadastre floor count bounds a single image reading (non-PH: floors x storey(use, area, floors) x 0.5-1.5; PH: floors +-2 x 3.5 m) in place of the 2x-prior rule; a single outside it publishes the prior (withheld_reason cadastre_band). The cadastre never publishes a height.",
   "_use_cadastre_heights_note": "Opt-in (2026-10-08, docs/decisions/building-heights.md): AMB cadastre floors (datos.gov.co d7hk-qg8h, CC BY-SA 4.0) replace the prior on matched non-PH low-rises and join the tiers; off until the colonial floor counts are spot-checked.",
   "use_cross_view_scoring": true,
   "use_pano_coastline_recovery": true,
