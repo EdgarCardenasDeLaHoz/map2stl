@@ -5,9 +5,115 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 [survey-lidar.md](survey-lidar.md) (surveyed lidar references), [roofs-landmarks.md](roofs-landmarks.md)
 (roof geometry). Research notebook behind the shadow entries: [../research/shadow-heights.md](../research/shadow-heights.md).
 
-Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`.
+Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
-### 2026-10-10 — Cross-sphere triangulation of roof corners fails its Miami marks on yield (rejected; code kept off)
+### 2026-10-10 — The cadastre floor count bounds a single image reading (plausibility band) in place of "2x the prior"
+- **Decision:**
+  - `cadastre_heights.py`: `load_band` / `CadastreBand` / `make_band` / `STOREY_M` / `fetch_uses`; site flag
+    `use_cadastre_band` (`region_data._load_site_use_cadastre_band`, env `SKYLINE_CADASTRE_BAND` overrides;
+    on in `sites/cartagena.json`); `withhold_untagged_street_view(cadastre_band=)`; `region_pdf` loads it.
+  - Non-PH match: bound = `floors x storey(use, area band, floors)`, a reading is plausible from x0.5 to
+    x1.5. Storey: Puerto Rico LiDAR p95 / OSM `building:levels` (3,546 footprints; model B of scratch
+    `storey/results.md`): 1 floor 4.2-4.8 m (< 300 m2 house), 6.7 m (300-1000 m2); 2 floors 3.2-5.2 m; 3+
+    floors 3.3-3.9 m. Use class from the R2 table (`yk9q-cw89`, `uso1-3`, cached in `runs/cadastre/`); no
+    use: the area band over all classes. The 1-floor > 1000 m2 cells use the 14 footprints there (12.83 m),
+    not the model's 5.4 m global fallback (n < 20): a one-floor shed is the tall case.
+  - PH match: `(floors +- 2) x 3.5 m` around the count (the match's max floor), lower end not under 0.
+  - A `single` outside the band is withheld: tier `prior`, `withheld_reason` `cadastre_band`, the reading
+    kept in `single_reading_m`; inside it stays `single` with no satellite support needed. Rows with no
+    match keep the 2x rule. Corroborated and tag rows are untouched; the cadastre height is never
+    published and no cadastre reading enters the tiers (`load_band` does not register the cadastre rules).
+    The row carries `cadastre_band` (`floors`, `ph`, `use`, `storey_m`, `lo_m`, `hi_m`, `inside`).
+- **Measured** (replay `Cartagena_v15_band` against v14; `_pano/elevated.py` and `footprint_detect.py`, which
+  another agent is editing in the same worktree, were loaded at HEAD; `Cartagena_v15_sat`, which only adds
+  stored sat_joint readings, reproduces v14 exactly: 0 rows changed):
+  - the 7 towers unchanged (202 / 190 / 170 / 188 / 161 / 160 / 156, corroborated); 10 of 10 tag-correct
+    readings kept; used drone readings on non-PH 1-3-floor plots 2 (gate <= 2);
+  - tiers corroborated / tag / single / prior 34 / 136 / 131 / 718 -> 34 / 136 / 74 / 775; withheld rows
+    165 (2x rule) -> 168 `cadastre_band` + 54 `single over 2x prior` (no match);
+  - 85 rows change (list: scratch `anchors/band_changed_rows.md`): 71 singles -> prior (41 PH, 30 non-PH),
+    14 priors -> single (9 PH; 5 non-PH hotels of 14-15 floors read 45-81 m, inside their 33-108 m band);
+  - the Miami drone harness (`seed_experiment.py --region miami --remeasure`) is identical before and
+    after except its timing fields (9 differences, all `t_s` / `*_s`).
+- **What the list shows** (for the user's call; Cartagena has no LiDAR, so none of it is truth):
+  - 64 of the 71 withheld singles had been kept by v14 as supported (lean conf >= 0.7, `ls`, multiview
+    >= 0.3 or the high-rise flag): the band overrules a validated satellite reading on them.
+  - Non-PH: 1- and 2-floor plots read 45-100 m (b0136 100 m on a 1-floor house; b0128 78 m, stereo 79 m, on
+    a 2-floor house): the tower-behind cases the band is for. 17 of the 30 publish a prior above their own band.
+  - PH is the weak side: the count is often a unit's. Of the 41 singles withheld, 26 publish a prior below
+    the band's lower end (b0440 and b0038, 10 floors, lean + shadow `ls` 54-56 m at conf 1.0, band 28-42 m,
+    now 23 m and 14 m; b0112, 7 floors, lean 67 m at 0.9 and stereo 65 m; b0076, 1 floor, lean 66 m at 1.0).
+    A PH reading above the band may be a taller building as well as a wrong reading.
+  - Options not taken (not asked): let a validated satellite reading override the band; publish the band's
+    nearest bound instead of the T41 prior (the cadastre never publishes).
+- **Supersedes / superseded by:** the "2x the prior" rule of 2026-10-08 where a match exists; the
+  `use_cadastre_heights` path (cadastre heights replacing the prior, tier readings) stays off.
+- **Source:** scratch `anchors/` (`cart_v15_band.log`, `gate15.py`, `gate15_band.json`,
+  `band_changed_rows.md`, `tier_map_v15.py`); tier map
+  `runs/region_reports/Cartagena_v15_band_skyline_report/tiers_map.png` (red edge: withheld by the band,
+  green: kept inside it; in Bocagrande most orange singles turn grey).
+- **Tests:** `tests/test_skyline_cadastre_heights.py` (band values, PH band, outside / inside, never publishes).
+
+### 2026-10-10 — sat_joint: lean and shadow fitted together with per-scene vectors from anchors; refused on its pre-registered marks
+- **Decision:**
+  - Code kept, **off**: `height/satellite/joint.py` (`lean_evidence`, `shadow_evidence`, `joint_reading`,
+    `fit_kappas`, `JointModel`, `CONF_TABLE`, `C_PUB` = 1.01); profile outputs in `measure.shadow_height` /
+    `lean_height(profile=True)` and `measure_multi(profiles=True, sweep=False)`; reading method `sat_joint`
+    (`readings.from_measurements(joint=)`); `20_satellite_heights.py --anchors FILE --joint` (vectors fitted
+    on buildings of known height, not OSM tags; `--out` + `--merge-joint` keep the other readings);
+    `tiers.SUPPORT_MIN_CONF["sat_joint"]` = 1.01. Nothing reads a sat_joint reading.
+  - **The low-lean cap stays** (`readings.LOW_LEAN_MAX_CONF` 0.3): no lean height band x conf_peak band
+    reaches a 0.8 share within max(25 %, 2 m) on Honolulu, San Juan and Fort Lauderdale (below).
+- **Method** (pre-registered in scratch `anchors/notes.md` before any run):
+  - Anchors: truth 40-175 m, area > 250 m2, the OSM outline is the tower (tag within 25 % of truth, not
+    nested in a taller truth footprint): Honolulu 65, San Juan 153, Fort Lauderdale 138 (Cartagena: the 7
+    tagged towers and 6 drone + drone corroborated rows, 13). Per scene `fit_lean` + `solve_sun` on them,
+    then a scale `kappa` for the lean shift and the shadow length (the evidence at the anchors' truth heights
+    is maximised). Fitting on all 538 Honolulu truth towers >= 40 m (podium slices read the tower's p95)
+    gave lean k 0.05 for the Waikiki scene (OSM-tag fit 0.43): hence the outline rule.
+  - `sat_joint`: every scene's shadow profile and lean profile scored at every height on a 0.5 m grid, scenes
+    averaged within a kind, `J = Zl + Zs`, argmax, made only when both kinds support it (>= 0.3). Confidence
+    = share within tol of the training cities' readings in the (height band, J bucket) cell.
+  - Measured untagged (60 m windows): a 35 % hash sample of truth < 10 m (weighted back) and all truth >= 10 m:
+    Honolulu 1,805 footprints (6 Wayback scenes), San Juan 4,058 (6), Fort Lauderdale 1,844 (5 aerial
+    orthos, leans 0.07-0.22 m/m).
+- **Low-lean cap table** (reference-scene lean by its peak confidence `conf_peak`; raw n / share within tol,
+  low-truth rows weighted; the 3 cities):
+
+  | lean band | .15-.3 | .3-.5 | .5-.7 | .7-.9 | .9-1 |
+  |---|---|---|---|---|---|
+  | < 15 m | 730 / 0.43 | 679 / 0.41 | 254 / 0.35 | 158 / 0.33 | 411 / 0.33 |
+  | 15-40 m | 378 / 0.05 | 341 / 0.04 | 266 / 0.05 | 168 / 0.05 | 282 / 0.11 |
+
+  The best cell is Honolulu < 15 m at conf 0.7-0.9, 0.43 (n 51); 15-40 m is 0.00-0.21 in every city (Chicago,
+  2026-10-08 validation, 0.00-0.12). Threshold per band (smallest `conf_peak` edge with share >= 0.8 and
+  n >= 20): none, in every leave-one-city-out fold: the cap stays at 0.3 for both bands.
+- **Pass marks** (the user's; scored on all readings, because no confidence reaches a 0.8 share, so `c_pub`
+  does not exist in any fold):
+  - A-T1, 10-40 m truth, leave-one-city-out, sat_joint MAE <= 5 m and within tol >= 0.6: **fail**.
+    Honolulu 120 readings of 641 footprints (19 %): MAE 8.91 m, within 0.392. San Juan 362 of 1,591 (23 %):
+    MAE 5.17 m, within 0.492. (Fort Lauderdale 106 of 615: MAE 6.45 m, within 0.651; not a mark.) The current
+    readings on the same footprints: lean within 0.253 / 0.184 / 0.174, shadow 0.340 / 0.361 / 0.484.
+  - A-T2, Honolulu towers >= 100 m, no loss against the current lean within tol (220 m windows, cross-fit
+    anchors): **fail**. sat_joint 4 hits of 13 readings, lean 34 hits of 85 (129 towers).
+  - A-T3, Cartagena replay `Cartagena_v15_sat` (13 anchors; 118 of 3,018 footprints get a sat_joint reading,
+    6 of them >= 40 m, conf <= 0.39): the 7 towers unchanged; used drone readings on non-PH 1-3-floor plots 2;
+    tiers 34 / 136 / 131 / 718 as v14, 0 rows changed; withheld rows gaining support: 0 (of 165, none has a
+    sat_joint >= 40 m within 1.5x of its single, at any confidence). It passes because sat_joint is off.
+- **Why it fails:** each profile alone is poor under 40 m (Honolulu 15-40 m: the per-kind argmax is within tol
+  of truth for 0.24-0.29 of footprints, unbiased after the kappas, errors two-sided with the 25th-75th
+  percentile at 0.4-1.3x truth). The joint fit lifts it (15-40 m within tol: San Juan 0.65, Honolulu 0.37) but
+  J, the per-kind evidence, the argmax agreement and the scene count separate right from wrong readings in
+  none of the cities. The lean kappas are 0.8-1.0 (mostly 0.8-0.9): `fit_lean`'s shift per metre of height is
+  about 15 % high.
+- **Open:** a lean profile that sees the facade base better (the base shift), occlusion-aware shadows; a
+  second truth source for the footprints a profile cannot read.
+- **Source:** scratch `anchors/` (`notes.md`, `run_city.py`, `eval_joint.py`, `loco.py`, `cap_table.py`,
+  `eval_towers.py`, outputs `*.txt`); copy in `Code/claude/scratch_backup_2026-10-10/anchors/`.
+- **Tests:** `tests/test_satellite_heights.py` (profiles, joint reading, kappas, confidence table),
+  `tests/test_skyline_tiers.py` (sat_joint support wired but off).
+
+### 2026-10-10 — Cross-sphere triangulation of roof corners fails its Miami marks on yield LiDAR heights publish as tier `survey` (F-SKY26 2d), flagged where stale (rejected; code kept off)
 - **Decision:** `_pano/triangulate.py` is not turned on (`TRIANGULATE = False`, env
   `SKYLINE_TRIANGULATE`); no Cartagena replay (v15) was run, as the pre-registration says. The code,
   its hooks and `seed_experiment.py --tri` stay for a denser sphere set.

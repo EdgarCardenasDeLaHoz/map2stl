@@ -456,6 +456,21 @@ Two constraints follow:
   - Miami headline unchanged (`--score-only --no-tiles`: n 168, MAE 5.62).
   - Open: more cities' flags; `readings_2x` untested on real data.
 
+- 2026-10-10, cadastre plausibility band and sat_joint (decisions "The cadastre floor count bounds a single image
+  reading" and "sat_joint ... refused on its pre-registered marks"; scratch `anchors/`):
+  - Cadastre band (`cadastre_heights.load_band`, site flag `use_cadastre_band`, on for Cartagena): a single
+    outside floors x storey(use, area, floors) x 0.5-1.5 (PH: floors +- 2 x 3.5 m) publishes the prior
+    (`withheld_reason` `cadastre_band`), inside it stays single; rows with no match keep the 2x rule; the
+    cadastre never publishes a height. `Cartagena_v15_band`: 7 towers unchanged, 10 / 10 tag-correct kept,
+    non-PH 1-3-floor used readings 2; tiers 34 / 136 / 131 / 718 -> 34 / 136 / 74 / 775; 85 rows change (71
+    singles -> prior, 64 of them satellite-supported in v14; 14 priors -> single); Miami harness identical.
+    Open for the user: PH counts are a unit's (26 of 41 withheld PH singles publish a prior below the band).
+  - sat_joint (lean + shadow fitted together with per-scene vectors from anchors, `height/satellite/joint.py`):
+    failed its marks (San Juan 10-40 m MAE 5.17 m / within 0.49, Honolulu 8.91 m / 0.39; Honolulu towers 4 hits
+    vs the lean's 34), so it is stored but off (`C_PUB` 1.01). The low-lean cap stays: no band x conf_peak
+    cell reaches 0.8 within tol on Honolulu, San Juan and Fort Lauderdale (15-40 m leans 0.00-0.21).
+    `20_satellite_heights.py --anchors / --joint / --merge-joint`; the existing readings are kept beside it.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:
