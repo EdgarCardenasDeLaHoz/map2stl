@@ -1,5 +1,6 @@
 {
   "name": "miami",
+  "use_survey_heights": true,
   "north": 25.8178,
   "south": 25.7222,
   "east": -80.1269,

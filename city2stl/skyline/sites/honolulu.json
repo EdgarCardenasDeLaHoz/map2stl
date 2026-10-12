@@ -1,5 +1,6 @@
 {
   "name": "honolulu",
+  "use_survey_heights": true,
   "north": 21.295,
   "south": 21.264,
   "east": -157.815,

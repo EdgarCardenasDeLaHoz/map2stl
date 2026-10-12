@@ -1,5 +1,6 @@
 {
   "name": "fort_lauderdale",
+  "use_survey_heights": true,
   "north": 26.145,
   "south": 25.972,
   "east": -80.098,
