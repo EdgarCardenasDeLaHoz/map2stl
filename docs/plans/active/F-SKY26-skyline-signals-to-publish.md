@@ -465,6 +465,12 @@ Two constraints follow:
     non-PH 1-3-floor used readings 2; tiers 34 / 136 / 131 / 718 -> 34 / 136 / 74 / 775; 85 rows change (71
     singles -> prior, 64 of them satellite-supported in v14; 14 priors -> single); Miami harness identical.
     Open for the user: PH counts are a unit's (26 of 41 withheld PH singles publish a prior below the band).
+    Decided 2026-10-12 (the user): the band applies to non-PH plots only (PH keeps the 2x rule with
+    `single_support`), and a satellite-supported non-PH single outside the band is withheld only over 2x
+    the band's upper end (`tiers.band_tolerated`, `cadastre_band_tolerated`). `Cartagena_v16`: 7 towers
+    unchanged, 10 / 10 tag-correct kept, non-PH 1-3-floor used readings 2, b0440 / b0038 publish 56 / 54 m
+    again, rows >= 30 m on non-PH 1-3-floor plots 3 (v14 24); tiers 34 / 136 / 112 / 737; 29 rows change
+    against v14, all non-PH (24 singles -> prior, 5 hotel priors -> single); 2 tolerated (b0508, b1393).
   - sat_joint (lean + shadow fitted together with per-scene vectors from anchors, `height/satellite/joint.py`):
     failed its marks (San Juan 10-40 m MAE 5.17 m / within 0.49, Honolulu 8.91 m / 0.39; Honolulu towers 4 hits
     vs the lean's 34), so it is stored but off (`C_PUB` 1.01). The low-lean cap stays: no band x conf_peak

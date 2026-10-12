@@ -10,6 +10,7 @@ from city2stl.skyline._core.tiers import (
     SUPPORT_RATIO,
     TIERS,
     agree,
+    band_tolerated,
     canonical_tier,
     independent,
     reading,
@@ -678,3 +679,13 @@ def test_sat_joint_supports_a_single_only_where_a_confidence_is_validated(monkey
     assert single_support(62.0, [("sat_joint", 60.0, 0.7)]) == ["sat_joint"]
     assert single_support(62.0, [("sat_joint", 60.0, 0.5)]) == []
     assert single_support(35.0, [("sat_joint", 34.0, 0.9)]) == []        # under SUPPORT_MIN_M
+
+
+def test_band_tolerated_needs_satellite_support_within_2x_the_upper_end():
+    """A non-PH single outside its cadastre band is published when a validated satellite reading
+    supports it and it is within 2x the band's upper end (the user, 2026-10-10)."""
+    assert band_tolerated(55.0, 30.0, ["ls"])
+    assert band_tolerated(60.0, 30.0, ["lean"])                 # exactly 2x: kept
+    assert not band_tolerated(61.0, 30.0, ["lean"])             # over 2x: withheld
+    assert not band_tolerated(55.0, 30.0, [])                   # unsupported: withheld
+    assert not band_tolerated(None, 30.0, ["lean"]) and not band_tolerated(55.0, None, ["lean"])

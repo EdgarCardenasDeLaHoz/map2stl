@@ -24,13 +24,16 @@ to what publishing and the verification tiers take. Opt-in per site: ``use_cadas
 
 Plausibility band (``load_band``, ``CadastreBand``; site flag ``use_cadastre_band``, 2026-10-10):
 the cadastre never publishes a height there. Its floor count only bounds what a single image
-reading may be, in place of the "2x the prior" rule where a match exists: a non-PH plot reads
+reading may be, in place of the "2x the prior" rule on a non-PH plot with a match: it reads
 ``floors x storey(use, area band, floors)`` within x0.5 .. x1.5 (``STOREY_M``: Puerto Rico LiDAR p95 /
-OSM ``building:levels``, S/storey/results.md model B); a propiedad-horizontal plot reads
-(``floors`` +- ``PH_FLOORS_SLACK``) x ``PH_STOREY_M``. ``_core/height.withhold_untagged_street_view``
-(``cadastre_band=``) withholds a ``single`` outside it (``withheld_reason`` ``cadastre_band``) and
-keeps one inside it without satellite support. Corroboration is unchanged (no cadastre reading
-enters the tiers).
+OSM ``building:levels``, S/storey/results.md model B). ``_core/height.withhold_untagged_street_view``
+(``cadastre_band=``) withholds a ``single`` outside it (``withheld_reason`` ``cadastre_band``) unless
+a validated satellite reading supports it within 2x the band's upper end
+(``tiers.band_tolerated``, ``cadastre_band["reason"]`` ``cadastre_band_tolerated``), and keeps one
+inside it without satellite support. A propiedad-horizontal plot's band, (``floors`` +-
+``PH_FLOORS_SLACK``) x ``PH_STOREY_M``, is computed but not applied: its count is often a unit's,
+so PH plots keep the 2x rule (the user, 2026-10-10). Corroboration is unchanged (no cadastre
+reading enters the tiers).
 
 Licence: CC BY-SA 4.0. A report showing a height that rests on the cadastre prints
 ``tier_display.CADASTRE_ATTRIBUTION`` (``height_attributions``).

@@ -803,11 +803,15 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     Every row floors counted carries ``high_rise_seen``, ``floors`` and ``storey_m``.
 
     ``cadastre_band``: ``{feature_id: CadastreBand}`` (``cadastre_heights.load_band``, site flag
-    ``use_cadastre_band``; 2026-10-10). Where a row has a band it replaces the 2x rule: a ``single``
-    inside ``lo_m`` .. ``hi_m`` stays ``single`` (no satellite support needed), one outside it
-    publishes the prior (tier ``prior``, ``withheld_reason`` ``cadastre_band``, the reading kept as
-    evidence). The row carries ``cadastre_band`` (the band and ``inside``). The cadastre height is
-    never published and no cadastre reading enters the tiers. Rows without a band keep the 2x rule.
+    ``use_cadastre_band``; 2026-10-10). On a non-PH plot with a band it replaces the 2x rule: a
+    ``single`` inside ``lo_m`` .. ``hi_m`` stays ``single`` (no satellite support needed), one
+    outside it publishes the prior (tier ``prior``, ``withheld_reason`` ``cadastre_band``, the
+    reading kept as evidence) unless a validated satellite reading supports it and it is within
+    2x the band's upper end (``tiers.band_tolerated``): then it stays ``single`` with
+    ``single_support`` and ``cadastre_band["reason"]`` ``cadastre_band_tolerated``. The row carries
+    ``cadastre_band`` (the band and ``inside``). PH plots ignore their band (the count is often a
+    unit's, the user, 2026-10-10) and keep the 2x rule, as do rows without a band. The cadastre
+    height is never published and no cadastre reading enters the tiers.
     A tagged row whose ``osm_tag`` height one drone or satellite reading agrees with is
     ``corroborated`` (``tiers.tag_witness``; the user, 2026-10-08). A tagged row whose agreeing
     pair is more than 10 % from the tag keeps the tag and carries ``measured_m``,
@@ -817,7 +821,9 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
     """
     from .tiers import (  # noqa: PLC0415
         CADASTRE_BAND_REASON,
+        CADASTRE_BAND_TOLERATED,
         SINGLE_WITHHELD_REASON,
+        band_tolerated,
         reading,
         selection_reason,
         single_outside_band,
@@ -888,13 +894,23 @@ def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRe
         support = None
         band = (cadastre_band or {}).get(row.get("feature_id"))
         withheld_reason = SINGLE_WITHHELD_REASON
-        if band is not None and prior is not None and row["tier"] == "single":
-            # 2026-10-10: the cadastre plausibility band replaces the 2x rule where a match exists
+        if band is not None and not band.ph and prior is not None and row["tier"] == "single":
+            # 2026-10-10: on a non-PH plot the cadastre plausibility band replaces the 2x rule
+            # (a PH count is often a unit's, so PH plots keep the 2x rule below)
             outside = single_outside_band(row["tier"], h, band.lo_m, band.hi_m)
             row["cadastre_band"] = dict(band.row_fields(), inside=not outside)
             if outside and _withhold_single_enabled():
-                support = []
-                withheld_reason = CADASTRE_BAND_REASON
+                # a validated satellite reading (no high-rise flag) keeps a single that is within
+                # 2x the band's upper end; beyond that, or unsupported, the prior is published
+                sat_support = single_support(
+                    h, [(r.method, r.height_m, r.conf) for r in sat_rs],
+                    satellite_low=_satellite_low(sat_rs))
+                if band_tolerated(h, band.hi_m, sat_support):
+                    row["single_support"] = sat_support
+                    row["cadastre_band"]["reason"] = CADASTRE_BAND_TOLERATED
+                else:
+                    support = []
+                    withheld_reason = CADASTRE_BAND_REASON
         elif (prior is not None and _withhold_single_enabled()
                 and single_withheld(row["tier"], h, prior[0])):
             # refined by the user (2026-10-09): a validated satellite reading >= 40 m that agrees,

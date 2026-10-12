@@ -18,12 +18,20 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
     floors 3.3-3.9 m. Use class from the R2 table (`yk9q-cw89`, `uso1-3`, cached in `runs/cadastre/`); no
     use: the area band over all classes. The 1-floor > 1000 m2 cells use the 14 footprints there (12.83 m),
     not the model's 5.4 m global fallback (n < 20): a one-floor shed is the tall case.
-  - PH match: `(floors +- 2) x 3.5 m` around the count (the match's max floor), lower end not under 0.
-  - A `single` outside the band is withheld: tier `prior`, `withheld_reason` `cadastre_band`, the reading
-    kept in `single_reading_m`; inside it stays `single` with no satellite support needed. Rows with no
+  - PH match: `(floors +- 2) x 3.5 m` around the count (the match's max floor), lower end not under 0;
+    computed, **not applied** (amended 2026-10-12, the user: a PH count is often one unit's floor, not
+    the building's, and the cadastre is a cross-check, never a source that overrides a measured height
+    there). PH plots keep the 2x rule with `tiers.single_support`, and carry no `cadastre_band`.
+  - Non-PH: a `single` outside the band is withheld: tier `prior`, `withheld_reason` `cadastre_band`, the
+    reading kept in `single_reading_m`; inside it stays `single` with no satellite support needed.
+    Tolerance (2026-10-12): a single outside the band that a validated satellite reading supports
+    (`single_support` without the high-rise flag: lean >= 0.7, `ls`, multiview >= 0.3, >= 40 m, within
+    1.5x) is withheld only if it exceeds the band's upper end by more than 2x (`tiers.band_tolerated`,
+    `BAND_TOLERANCE_FACTOR`); otherwise it is published as `single` with `single_support` and
+    `cadastre_band["reason"]` `cadastre_band_tolerated` (`selection_reason` says so). Rows with no
     match keep the 2x rule. Corroborated and tag rows are untouched; the cadastre height is never
     published and no cadastre reading enters the tiers (`load_band` does not register the cadastre rules).
-    The row carries `cadastre_band` (`floors`, `ph`, `use`, `storey_m`, `lo_m`, `hi_m`, `inside`).
+    The row carries `cadastre_band` (`floors`, `ph`, `use`, `storey_m`, `lo_m`, `hi_m`, `inside`, `reason`).
 - **Measured** (replay `Cartagena_v15_band` against v14; `_pano/elevated.py` and `footprint_detect.py`, which
   another agent is editing in the same worktree, were loaded at HEAD; `Cartagena_v15_sat`, which only adds
   stored sat_joint readings, reproduces v14 exactly: 0 rows changed):
@@ -35,6 +43,22 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
     14 priors -> single (9 PH; 5 non-PH hotels of 14-15 floors read 45-81 m, inside their 33-108 m band);
   - the Miami drone harness (`seed_experiment.py --region miami --remeasure`) is identical before and
     after except its timing fields (9 differences, all `t_s` / `*_s`).
+- **Measured, non-PH only + tolerance** (replay `Cartagena_v16`, 2026-10-12, against v14 and v15_band; 0
+  Google requests):
+  - gates: the 7 towers unchanged (202 / 190 / 170 / 188 / 161 / 160 / 156); 10 of 10 tag-correct readings
+    kept; used drone readings on non-PH 1-3-floor plots 2 (<= 2); b0440 and b0038 publish their satellite
+    readings again (55.9 m and 53.8 m, `ls` + lean at conf 1.0, were 23 m / 14 m in v15_band); rows >= 30 m
+    on non-PH 1-3-floor plots 3 (v14 24, v15_band 2; b0508 tolerated, b1068 a 32 m prior, b1540 a tag);
+  - tiers 34 / 136 / 131 / 718 (v14) and 34 / 136 / 74 / 775 (v15_band) -> 34 / 136 / 112 / 737; withheld
+    rows 139 `single over 2x prior` (all PH and unmatched rows) + 45 `cadastre_band`; 0 PH rows carry a band;
+  - 29 rows change against v14, all non-PH (list: scratch `band16/band16_changed_rows.md`): 24 singles ->
+    prior (22 of them satellite-supported in v14; 1-2-floor plots reading 45-100 m: b0136, b0128, b0774,
+    b0788 ...), 5 priors -> single (the 14-15-floor hotels inside their band: b0369, b0075, b0567, b0699,
+    b0443). The 56 PH rows v15_band changed are back at their v14 values;
+  - tolerated: 2 (b0508, 6 floors, band 14-43 m, lean 57 m at 0.87; b1393, 5 floors, band 10-30 m, lean
+    47 m at 0.97). The 22 supported singles the band still withholds exceed their band's upper end by
+    2.4-14x (b0934 2.4x and b0988 2.9x nearest the line, both 1-floor plots reading 47-55 m); the 2
+    unsupported ones just over it (b0482 7.7 m vs 7.2, b0920 10.2 m vs 10.0) publish a prior of 10 m.
 - **What the list shows** (for the user's call; Cartagena has no LiDAR, so none of it is truth):
   - 64 of the 71 withheld singles had been kept by v14 as supported (lean conf >= 0.7, `ls`, multiview
     >= 0.3 or the high-rise flag): the band overrules a validated satellite reading on them.
@@ -46,13 +70,19 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
     A PH reading above the band may be a taller building as well as a wrong reading.
   - Options not taken (not asked): let a validated satellite reading override the band; publish the band's
     nearest bound instead of the T41 prior (the cadastre never publishes).
-- **Supersedes / superseded by:** the "2x the prior" rule of 2026-10-08 where a match exists; the
-  `use_cadastre_heights` path (cadastre heights replacing the prior, tier readings) stays off.
+- **Supersedes / superseded by:** the "2x the prior" rule of 2026-10-08 on non-PH plots with a match (PH
+  plots keep it since 2026-10-12); the `use_cadastre_heights` path (cadastre heights replacing the prior,
+  tier readings) stays off.
 - **Source:** scratch `anchors/` (`cart_v15_band.log`, `gate15.py`, `gate15_band.json`,
   `band_changed_rows.md`, `tier_map_v15.py`); tier map
   `runs/region_reports/Cartagena_v15_band_skyline_report/tiers_map.png` (red edge: withheld by the band,
-  green: kept inside it; in Bocagrande most orange singles turn grey).
-- **Tests:** `tests/test_skyline_cadastre_heights.py` (band values, PH band, outside / inside, never publishes).
+  green: kept inside it; in Bocagrande most orange singles turn grey). v16: scratch `band16/`
+  (`run_cart_v16.py`, `cart_v16.log`, `gate16.py`, `gate16.json`, `band16_changed_rows.md`,
+  `tier_map_v16.py`; copy in `Code/claude/scratch_backup_2026-10-10/band16/`); tier map
+  `runs/region_reports/Cartagena_v16_skyline_report/tiers_map.png` (Bocagrande's orange PH singles are
+  back; the red edges are 1-2-floor plots on the mainland and Manga; cyan: tolerated).
+- **Tests:** `tests/test_skyline_cadastre_heights.py` (band values, PH band, outside / inside, never
+  publishes; PH ignored, tolerated within 2x the upper end), `tests/test_skyline_tiers.py` (`band_tolerated`).
 
 ### 2026-10-10 — sat_joint: lean and shadow fitted together with per-scene vectors from anchors; refused on its pre-registered marks
 - **Decision:**

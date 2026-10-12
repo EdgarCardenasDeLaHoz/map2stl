@@ -118,8 +118,14 @@ SINGLE_WITHHOLD_FACTOR = 2.0
 #: ``withheld_reason`` of a row whose single reading was withheld.
 SINGLE_WITHHELD_REASON = "single over 2x prior"
 #: ``withheld_reason`` of a single outside its cadastre plausibility band (2026-10-10,
-#: ``cadastre_heights.CadastreBand``): where a cadastre match exists the band replaces the 2x rule.
+#: ``cadastre_heights.CadastreBand``): on a non-PH plot with a cadastre match the band replaces the
+#: 2x rule (PH plots keep it: their count is often a unit's, the user, 2026-10-10).
 CADASTRE_BAND_REASON = "cadastre_band"
+#: ``cadastre_band["reason"]`` of a non-PH single outside its band that is published anyway: a
+#: validated satellite reading supports it (``single_support``, no high-rise flag) and it is within
+#: ``BAND_TOLERANCE_FACTOR`` x the band's upper end (the user, 2026-10-10).
+CADASTRE_BAND_TOLERATED = "cadastre_band_tolerated"
+BAND_TOLERANCE_FACTOR = 2.0
 
 
 def canonical_tier(tier: str | None) -> str | None:
@@ -365,6 +371,15 @@ def single_outside_band(tier: str, published_m: float | None, lo_m: float | None
                 and hi_m is not None and not (float(lo_m) <= float(published_m) <= float(hi_m)))
 
 
+def band_tolerated(published_m: float | None, hi_m: float | None, support: Sequence[str],
+                   factor: float = BAND_TOLERANCE_FACTOR) -> bool:
+    """Whether a non-PH ``single`` outside its cadastre band is published anyway (the user,
+    2026-10-10): ``support`` names a validated satellite reading (``single_support`` without the
+    high-rise flag) and the height does not exceed ``factor`` x the band's upper end ``hi_m``."""
+    return bool(support and published_m is not None and hi_m is not None
+                and float(published_m) <= factor * float(hi_m))
+
+
 def single_withheld(tier: str, published_m: float | None, prior_m: float | None,
                     factor: float = SINGLE_WITHHOLD_FACTOR) -> bool:
     """Whether a row's ``single`` height is withheld for the prior: tier ``single`` and the
@@ -462,10 +477,16 @@ def selection_reason(row: dict) -> str:
         return out
     if base in ("elevated", "satellite", "high_rise"):
         out = SELECTION_REASONS[base]
-        if row.get("single_support"):
+        band = row.get("cadastre_band") or {}
+        if band.get("reason") == CADASTRE_BAND_TOLERATED:
+            out += (f"; outside the cadastre plausibility band ({band['lo_m']:.0f}-{band['hi_m']:.0f} m) "
+                    f"but within {BAND_TOLERANCE_FACTOR:.0f}x its upper end, kept "
+                    f"({CADASTRE_BAND_TOLERATED}): supported by "
+                    + ", ".join(map(str, row.get("single_support") or ())))
+        elif row.get("single_support"):
             out += ("; over 2x the prior, kept: supported by "
                     + ", ".join(map(str, row["single_support"])))
-        elif row.get("cadastre_band") and row["cadastre_band"].get("inside"):
+        elif band.get("inside"):
             out += (f"; inside the cadastre plausibility band "
                     f"({row['cadastre_band']['lo_m']:.0f}-{row['cadastre_band']['hi_m']:.0f} m)")
         return out

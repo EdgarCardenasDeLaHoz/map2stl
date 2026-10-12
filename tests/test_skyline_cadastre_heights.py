@@ -190,3 +190,43 @@ def test_the_band_never_publishes_a_cadastre_height_or_adds_a_tier_reading(monke
     fn([row], [rec], fallback=lambda r: (12.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
     assert row["effective_height_m"] == 12.0 and row["tier"] == "prior"
     assert "cadastre" not in row["tier_methods"] and "cadastre_band" not in row
+
+
+def test_a_ph_plot_ignores_its_band_and_keeps_the_2x_rule(monkeypatch):
+    """The user (2026-10-10): a PH count is often a unit's, so the band never overrides a measured
+    height there; the 2x rule with satellite support applies as before."""
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    band = {"f1": ch.make_band(C(floors=10, ph=True), 900.0)}           # 28-42 m
+    fn, rec, row = _band_rows(55.0)                                      # b0440: ls 55 m at 1.0
+    fn([row], [rec], fallback=lambda r: (23.0, "prior"), measured_seeds={"seed_1"},
+       satellite={"f1": [sat("ls", 55.0, 1.0)]}, cadastre_band=band)
+    assert row["tier"] == "single" and row["effective_height_m"] == 55.0
+    assert row["single_support"] == ["ls"] and "cadastre_band" not in row
+    fn, rec, row = _band_rows(55.0)                                      # unsupported: the 2x rule
+    fn([row], [rec], fallback=lambda r: (23.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["tier"] == "prior" and row["withheld_reason"] == "single over 2x prior"
+    assert "cadastre_band" not in row
+    fn, rec, row = _band_rows(20.0)                                      # under the PH band: kept
+    fn([row], [rec], fallback=lambda r: (23.0, "prior"), measured_seeds={"seed_1"}, cadastre_band=band)
+    assert row["tier"] == "single" and row["effective_height_m"] == 20.0
+
+
+def test_a_supported_non_ph_single_outside_the_band_is_tolerated_within_2x_its_upper_end(monkeypatch):
+    monkeypatch.setenv("SKYLINE_WITHHOLD_UNTAGGED", "1")
+    band = {"f1": ch.make_band(C(floors=15), 900.0, "Comercial.Hoteles")}   # 15 x 3.93: 29.5-88.4 m
+    fn, rec, row = _band_rows(120.0)                                     # 1.36x the upper end
+    fn([row], [rec], fallback=lambda r: (15.0, "prior"), measured_seeds={"seed_1"},
+       satellite={"f1": [sat("lean", 90.0, 0.9)]}, cadastre_band=band)   # 1.33x: support, not agreement
+    assert row["tier"] == "single" and row["effective_height_m"] == 120.0
+    assert row["single_support"] == ["lean"] and row["cadastre_band"]["inside"] is False
+    assert row["cadastre_band"]["reason"] == "cadastre_band_tolerated"
+    assert "cadastre_band_tolerated" in tiers.selection_reason(row) and "withheld_reason" not in row
+    fn, rec, row = _band_rows(180.0)                                     # over 2x the upper end
+    fn([row], [rec], fallback=lambda r: (15.0, "prior"), measured_seeds={"seed_1"},
+       satellite={"f1": [sat("lean", 130.0, 0.9)]}, cadastre_band=band)
+    assert row["tier"] == "prior" and row["withheld_reason"] == "cadastre_band"
+    assert "single_support" not in row and "reason" not in row["cadastre_band"]
+    fn, rec, row = _band_rows(120.0)                                     # stereo alone: no support
+    fn([row], [rec], fallback=lambda r: (15.0, "prior"), measured_seeds={"seed_1"},
+       satellite={"f1": [sat("stereo", 90.0, 1.0)]}, cadastre_band=band)
+    assert row["tier"] == "prior" and row["withheld_reason"] == "cadastre_band"
