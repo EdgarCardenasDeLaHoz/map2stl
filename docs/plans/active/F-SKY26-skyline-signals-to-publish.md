@@ -477,6 +477,25 @@ Two constraints follow:
     cell reaches 0.8 within tol on Honolulu, San Juan and Fort Lauderdale (15-40 m leans 0.00-0.21).
     `20_satellite_heights.py --anchors / --joint / --merge-joint`; the existing readings are kept beside it.
 
+- 2026-10-12, audit items 8 and 9 (decisions "Survey tier published for Honolulu, Fort Lauderdale and
+  Miami" and "OSM tag bias is a selection effect of banding by truth ..."; scratch `survey_tags/`):
+  - 2d flag `use_survey_heights` on for Honolulu, Fort Lauderdale and Miami (San Juan already).
+    `survey_publish.republish` put the survey tier on the existing reports without a rerun:
+    `runs/region_reports/<city>_survey_skyline_report/` (survey rows Honolulu 897, Fort Lauderdale 700,
+    Miami 299, San Juan 10,726; 0 stale; nested withheld 245 / 13 / 53 / 17). Survey-blind headline
+    and band tables identical (Miami n 168, MAE 5.62). Not met: Miami survey rows within 25 % of 3D
+    Tiles 81.5 % (mark 90 %; 94.7 % on confirmed truth; the misses are buildings built after the 2019
+    survey, which neither stale flag can see without drone or satellite readings or a `start_date`).
+  - `skyline/intervals.py`: per tier x band residuals of the published height against truth, the
+    tag-bias table per city, split-conformal 80 / 90 % intervals (fit cities weighted equally), leave-
+    one-city-out coverage; fit in `data/height_intervals.json`. Rows carry `interval_lo_m` /
+    `interval_hi_m` / `tag_bias_m` (tags not corrected); the newest Cartagena report annotated with a
+    no-truth note. Verdict: not passed (coverage 66-91 % held out, pass 1 of 11 bands): tag error is
+    city-specific below 40 m. The audit's -12 to -24 m tag biases were a truth-banding artefact; by
+    published band the median log bias is within +-0.12 everywhere.
+  - Open: `readings_2x` on the drone-seed reruns; intervals for `single` / `corroborated` once the
+    truth cities have such rows; a city's own truth for its tag intervals below 40 m.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:

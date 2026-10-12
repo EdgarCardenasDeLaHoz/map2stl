@@ -211,6 +211,49 @@ def test_heights_json_counts_survey_rows_and_the_reports_see_them(tmp_path):
     assert by["b"]["survey_stale"] is True and by["c"]["tier"] == "tag"
 
 
+def test_republish_applies_the_overlay_to_an_existing_report(tmp_path):
+    """Audit item 8: the survey tier on a report without a new run; the survey-blind answer
+    of every row is the input's, nested parts withhold, a pre-tier report gets its tiers."""
+    from city2stl.skyline.region_pdf import _write_heights_json
+
+    class BBox:
+        north, south, east, west = 18.5, 18.3, -65.9, -66.1
+
+    a = _rec("a", _box(-66.0, 18.40), tag=22.0, src="osm_tag", name="Tagged")
+    b = _rec("b", _box(-66.01, 18.40), name="Measured")
+    big = _rec("big", _box(-66.02, 18.40, 0.001, 0.001), tag=90.0, src="osm_tag")
+    part = _rec("part", _box(-66.0198, 18.4002, 0.0002, 0.0002), tag=20.0, src="osm_tag")
+    recs = [a, b, big, part]
+    rows = [_row("b", 62.0, per_seed_median_m={"seed_1": 60.0, "seed_2": 64.0})]
+    rows[0].pop("tier", None)                      # a report from before the tiers
+    src = tmp_path / "old" / "heights.json"
+    src.parent.mkdir()
+    _write_heights_json(src, region_name="testville", bbox=BBox, building_heights=rows,
+                        building_records=recs, known_heights=None, survey=None)
+    survey = {"a": _survey(25.0, project=PROJECT), "b": _survey(20.0, project=PROJECT),
+              "big": _survey(88.0, project=PROJECT), "part": _survey(88.0, project=PROJECT)}
+    sh.save_cache("testville", {_key(r): survey[r.feature_id] for r in recs})
+    out = sp.republish("testville", src, tmp_path / "new", osm_data={},
+                       drone_seeds=("seed_1", "seed_2"))
+    assert out["applied"] == {"survey": 2, "stale": 1, "nested": 1} and out["n_rows"] == 4
+    doc = json.loads((tmp_path / "new" / "heights.json").read_text(encoding="utf-8"))
+    by = {r["feature_id"]: r for r in doc["buildings"]}
+    assert doc["tier_counts"]["survey"] == 3 and doc["tier_counts"]["tag"] == 1
+    assert doc["survey"]["n_nested_withheld"] == 1
+    assert doc["survey_republished"]["region"] == "testville"
+    assert by["a"]["tier"] == "survey" and by["a"]["effective_height_m"] == 25.0
+    assert by["a"]["no_survey_height_m"] == 22.0 and by["a"]["no_survey_tier"] == "tag"
+    assert by["b"]["survey_stale"] is True and by["b"]["no_survey_height_m"] == 62.0
+    assert by["b"]["no_survey_tier"] in ("single", "corroborated")  # labelled before the overlay
+    assert by["part"]["tier"] == "tag" and by["part"]["survey_withheld_m"] == 88.0
+    # the benchmark sees the same survey-blind rows as the input
+    blind = {r["feature_id"]: r for r in bm.survey_blind(doc["buildings"])}
+    assert blind["a"]["effective_height_m"] == 22.0 and blind["b"]["effective_height_m"] == 62.0
+    with pytest.raises(ValueError):
+        sp.republish("testville", tmp_path / "new" / "heights.json", tmp_path / "again",
+                     osm_data={}, drone_seeds=())
+
+
 def test_survey_attribution_for_a_lidar_project_name():
     from city2stl.skyline.tier_display import survey_attributions
 

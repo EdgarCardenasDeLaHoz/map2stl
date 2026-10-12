@@ -7,6 +7,115 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-12 — Survey tier published for Honolulu, Fort Lauderdale and Miami (audit item 8), by overlay on the existing reports
+- **Decision:**
+  - `use_survey_heights` true in `sites/honolulu.json`, `sites/fort_lauderdale.json`, `sites/miami.json`
+    (San Juan since 2026-10-09). The next pipeline run of each city publishes the cached survey p95 as
+    tier `survey` (decision "Survey LiDAR heights publish as tier `survey`").
+  - `survey_publish.republish(region, heights_json, out_dir)` applies the same `SurveyOverlay` to the
+    rows of an existing report and writes a new `heights.json` (`RowRecord` stands in for the
+    `BuildingRecord`; a pre-tier report is labelled by `benchmark.label_tiers` first; the OSM data for
+    the `start_date` check comes from the OSM cache). It is how the reports below were made: no Street
+    View, no GPU, no Google request, and the survey-blind answer of every row is the input's.
+  - Reports: `runs/region_reports/<city>_survey_skyline_report/` for the four truth cities (San Juan's
+    is the 2026-10-09 scratch `2d/sj` run saved into `runs/`). Rows / cached survey / published survey /
+    nested withheld / stale: Honolulu 1,179 / 1,142 / 897 / 245 / 0 (HI_NOAAMauiOahu_2_B20);
+    Fort Lauderdale 716 / 713 / 700 / 13 / 0; Miami 27,987 / 352 / 299 / 53 / 0 (usgs_3dep_ept 2019;
+    the Miami cache has 1,464 records, 385 without a survey value); San Juan 17,916 / - / 10,726 / 17 / 0.
+  - Marks (`10_benchmark --report ... --no-tiles --cached-truth`, `runs/benchmark/2026-10-10_1015` and
+    `_1021`): survey-blind headline and every band x tier table (measured and published scopes, review
+    and EUBUCCO bands, pipeline metrics) identical to `2026-10-09_1333`: Miami n 168, MAE 5.62 m, tag
+    85 / prior 83 by tier; Honolulu single-source n 142, MAE 9.12; Fort Lauderdale n 254, MAE 4.61.
+    0 survey rows on nested parts (Miami: 0 of 299; the 53 nested carry `survey_withheld_m`).
+  - **Not met:** Miami survey rows within 25 % of `tiles_m`: 81.5 % of the 173 measured rows (MAE
+    4.38 m, median 1.16, bias -3.64), 82.3 % of all 299, 85.3 % within max(25 %, 2 m); the mark was
+    >= 90 %. By truth status: 94.7 % of the 244 `confirmed` rows, 27 % of the 55 `disputed` ones. The
+    big misses are buildings newer than the 2019 survey (The Elser Hotel: 3D Tiles 172 m, survey 9 m,
+    tag 160; Miami Plaza 113 / 12 / 115; b19902 113 / 13 / 115; Waldorf Astoria site 67 / 10), then
+    low buildings where survey and 3D Tiles disagree by a few metres. Neither stale flag fired: OSM has
+    19 `start_date` tags in the Miami bbox (fetched 2026-10-10, `truth/miami.start_dates.json`), none
+    in or after 2019; `readings_2x` needs agreeing drone or satellite readings, and these reports have
+    none (no drone seeds then, no satellite readings). Honolulu and Fort Lauderdale have no 3D Tiles,
+    so the mark is not testable there.
+  - Stale-flag counts by reason: 0 `start_date`, 0 `readings_2x` in all four cities.
+- **Why:** audit 2026-10-09 item 8, approved by the user. The overlay on the existing rows is exactly
+  the pipeline's last step, so the marks test the rule, not a rerun; a full rerun needed the GPU the
+  drone-seed reruns were using and would not have reproduced the 2026-10-06 Miami rows anyway.
+- **Rejected:** a `tag_2x` stale code (a tag >= 2x above the survey). It would flag 11 of the 299 Miami
+  survey rows: 5 disputed (3 where the tag is right: Elser, Miami Plaza, b19902) and 6 confirmed where the
+  tag is wrong. Recorded, not shipped: the user keeps the survey over tags; a flag that is wrong 6 of
+  11 times needs a second city before it goes on rows.
+- **Open:** the `readings_2x` check gets its first real test when the drone-seed reruns (b48a711) run
+  with the flag on; `10_benchmark._newest_report` now also finds the `<city>_survey_` folders (they
+  start with the region name), which is fine because every score is survey-blind.
+- **Source:** scratch `survey_tags/` (logs, tables; copy in `Code/claude/scratch_backup_2026-10-10/survey_tags/`).
+
+### 2026-10-12 — OSM tag bias is a selection effect of banding by truth; split-conformal intervals per tier x band are published, not validated across cities (audit item 9)
+- **Decision:**
+  - `skyline/intervals.py`: residuals e = ln(published / truth) of the survey-blind published rows
+    (tag-only rows too, nested out, `scoring_truth`'s records), banded by the **published** height
+    (the only height known at publish time), per tier. `fit` per tier x band with n >= 30: bias term
+    b = median(e) and the split-conformal quantile q of |e - b| at 80 % and 90 %, the fit cities
+    weighted equally (one unit of weight per city per cell); a cell under 30 falls back to the tier's
+    all-band cell; `coverage` / `leave_one_out` test a held-out city. The fit on Miami, Honolulu, Fort
+    Lauderdale and San Juan ships in `data/height_intervals.json` (with the per-city bias tables and
+    the leave-one-out coverage inside).
+  - Rows carry `interval_lo_m` / `interval_hi_m` (80 %: truth in `[pub x exp(-b - q), pub x exp(-b + q)]`)
+    and, on `tag` rows, `tag_bias_m` = pub - pub x exp(-b), the tag's expected signed error. **Tags
+    are not corrected** (the user keeps tags until they decide). `survey` rows get no interval; tiers
+    with no truth-city rows (`single`, `corroborated`) get none yet. `heights.json` gets an `intervals`
+    block (level, fit cities, cells, note). Written by `intervals.annotate_report` (`python -m
+    city2stl.skyline.intervals apply <heights.json>`); applied to the four `_survey_` reports and to
+    `Cartagena_v15_band` (911 of 1,019 rows: 775 prior, 136 tag) and `Cartagena_v16` (873: 737 prior,
+    136 tag), each with the note: no truth, pooled fit, not validated.
+  - **Tag bias, tag tier, by published band** (n / median ln(pub/truth) / mean bias m / MAE m):
+
+    | city | <15 m | 15-40 m | 40-100 m | >100 m |
+    |---|---|---|---|---|
+    | Miami | 83 / +0.189 / +0.5 / 2.8 | 42 / +0.110 / +0.8 / 5.0 | 26 / +0.089 / +4.8 / 6.6 | 17 / +0.013 / +3.6 / 4.2 |
+    | Honolulu | 360 / -0.050 / -11.3 / 13.8 | 200 / -0.014 / -3.3 / 7.3 | 220 / -0.028 / -0.5 / 5.2 | 59 / +0.011 / +5.8 / 7.6 |
+    | Fort Lauderdale | 268 / +0.090 / -0.6 / 3.7 | 97 / +0.079 / -3.1 / 9.3 | 74 / +0.065 / +2.4 / 9.0 | 19 / -0.012 / +8.1 / 16.2 |
+    | San Juan | 10,084 / -0.124 / -1.5 / 1.9 | 531 / -0.093 / -2.6 / 3.8 | 106 / -0.048 / -0.9 / 5.3 | - |
+
+    The audit's figures (Honolulu 40-100 m -12.1 m, >100 m -18.4 m; Fort Lauderdale >100 m -23.5 m;
+    San Juan 40-100 m -8.7 m) band by *truth*: a truth band collects the tags that under-read into it,
+    so its mean bias is negative by construction. By published band the tag's median log bias is
+    within +-0.12 in every cell and within +-0.05 from 40 m up (San Juan 40-100 m -0.048); the metre
+    biases at 40 m up are +2 to +8 m (tags above the p95: parapets and roof plant). The Honolulu <15 m
+    cell (-11.3 m, MAE 13.8) is low tags on tall buildings, not a band-wide offset (median -0.050).
+  - **Coverage, leave one city out, nominal 80 %** (n / covered / median ln bias after the band's
+    term; pass = 75-85 % and |bias| <= 0.05; nt = n < 30):
+
+    | held out | <15 m | 15-40 m | 40-100 m | >100 m |
+    |---|---|---|---|---|
+    | Miami | 83 / 88.0 % / +0.237 | 42 / 73.8 % / +0.127 | 26 nt | 17 nt |
+    | Honolulu | 360 / 66.4 % / -0.064 | 200 / 70.0 % / -0.026 | 220 / 85.0 % / -0.070 | 59 / 79.7 % / -0.002 **pass** |
+    | Fort Lauderdale | 268 / 81.3 % / +0.111 | 97 / 77.3 % / +0.094 | 74 / 73.0 % / +0.056 | 19 nt |
+    | San Juan | 10,084 / 80.6 % / -0.222 | 531 / 91.0 % / -0.156 | 106 / 76.4 % / -0.092 | - |
+
+    Nominal 90 %: Miami 92.8 / 90.5 / nt / nt; Honolulu 73.6 / 92.5 / 96.4 / 100; Fort Lauderdale
+    96.3 / 81.4 / 89.2 / nt; San Juan 96.0 / 97.7 / 91.5 / -. With the rows pooled instead of the
+    cities weighted, 80 % coverage passed 1 band of 11 (San Juan's 10,084 tags set every quantile:
+    Miami <15 m 62.7 %, Honolulu 47.2 %); weighting the cities equally passes 1 of 11 on both marks and
+    6 of 11 on coverage alone, so it is the fit rule.
+  - **Verdict: not passed.** The tag's error is city-specific below 40 m (bias after the band's term
+    -0.22 to +0.24): a conformal interval fitted on other cities covers 66-91 % where 75-85 % was
+    required. From 40 m up the bias term holds (|bias| <= 0.09) and coverage sits at 73-85 %.
+    The pooled intervals are published as the best available error bar, with this table beside them,
+    not as a validated one. The `prior` tier's <15 m cell has q = 4.39 (its rows in Honolulu and
+    Miami include priors on towers), so its interval says nothing; the prior's intervals need the
+    prior's own calibration.
+- **Why:** audit 2026-10-09 item 9 (review item 9), approved by the user. Honest error bars need a
+  held-out test; the test says a city's own truth is needed for its tags below 40 m.
+- **Rejected:** correcting published tags by the bias term (the user's call; the measured bias is also
+  city-specific, so a pooled correction would move Miami's tags the wrong way); banding by truth for
+  the fit (unknown at publish time, and it is what produced the audit's spurious -12 to -24 m biases);
+  per-city intervals for Cartagena (no truth there).
+- **Supersedes / superseded by:** —. Review 2026-10-09 item 9; audit §8.3 item 9.
+- **Source:** scratch `survey_tags/` (`intervals_fit_weighted.log`, `equal_weight.py`,
+  `tag_residuals.json`; copy in `Code/claude/scratch_backup_2026-10-10/survey_tags/`); tests
+  `tests/test_skyline_intervals.py`.
+
 ### 2026-10-10 — The cadastre floor count bounds a single image reading (plausibility band) in place of "2x the prior"
 - **Decision:**
   - `cadastre_heights.py`: `load_band` / `CadastreBand` / `make_band` / `STOREY_M` / `fetch_uses`; site flag
