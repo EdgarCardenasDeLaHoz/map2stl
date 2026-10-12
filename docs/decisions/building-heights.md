@@ -7,6 +7,79 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-12 — Truth-city drone spheres are wired; the ownership rule passes its catch mark in two truth cities but not its false-flag mark (the second-city acceptance stays open)
+- **Decision:**
+  - The 10 fitted drone Photo Spheres are in `seed_urls` + `elevated_seeds` (San Juan d1/d2,
+    Fort Lauderdale d1/d3, Honolulu d1/d2, Sunny Isles d1-d4; seed names = position in `seed_urls`);
+    the 5 that failed the outline gate stay in `pending_seed_urls` with a `_fit_note` (commit
+    `b48a711`). `SKYLINE_ELEVATED_HIRES_HEADINGS=N` (`_pano/orchestrator.py`) lets a region run
+    rebuild the hi-res pano from the N-heading capture cache (the spheres are cached at 15 headings,
+    the run's spin is 12).
+  - Cartagena's `use_ownership` / `use_cadastre_occluders` are **not** changed: the catch mark passed
+    in both new cities, the false-flag mark failed in both, and the kept-within mark is not testable
+    (n < 30) everywhere. The ownership rule is not turned on for the new sites either.
+- **Measured** (pre-registered in scratch `truth_drone/notes.md` before the runs; region reports
+  `runs/benchmark/2026-10-12_drones` from cache, no Street View request, no 3D Tiles, survey truth
+  `--no-tiles`; scored in `runs/benchmark/2026-10-12_1626`):
+  - Tiers (report rows, survey / corroborated / tag / single / prior): San Juan 10,825 / 1 / 7,194 /
+    0 / 6; Fort Lauderdale 873 / 0 / 40 / 0 / 3; Honolulu 945 / 6 / 273 / 0 / 4; Sunny Isles 0 / 3 /
+    1,049 / 6 / 234. The first `corroborated` rows outside Miami: 10 in all, every one within tol
+    (San Juan 3, Honolulu 5 with truth; MAE 3.5 / 8.5 m).
+  - Drone readings against survey p95 by truth band (survey-blind; n / MAE / bias / within
+    max(25 %, 2 m); a band is not testable under n 30, n 10 above 100 m):
+
+    | city | <15 | 15-40 | 40-100 | >100 |
+    |---|---|---|---|---|
+    | San Juan | 202 / 31.5 / +31.4 / 0.00 | 45 / 18.2 / +17.1 / 0.16 | 17 / 17.9 / -8.5 / 0.29 (n.t.) | none |
+    | Fort Lauderdale | 52 / 81.9 / +81.8 / 0.00 | 4 (n.t.) | 13 / 77.7 / +77.7 / 0.31 (n.t.) | 6 / 27.2 / +27.2 / 0.67 (n.t.) |
+    | Honolulu | 12 (n.t.) | 7 (n.t.) | 15 / 56.4 / +56.4 / 0.13 (n.t.) | 10 / 11.7 / +8.8 / 0.90 |
+
+    The low bands are wrong-owner readings (a tower top credited to the small footprint in front),
+    the Miami failure the ownership rule addresses; the pipeline withholds nearly all of them
+    (`single over 2x prior`: San Juan 27, Fort Lauderdale 46, Honolulu 8), so the published tables
+    barely move: published-row MAE vs the no-drone reports within +-1 m in every band except
+    Fort Lauderdale 40-100 (9.6 -> 13.7 m, n 72 -> 80) and >100 (29.6 -> 33.3, n 22 -> 12) and
+    Honolulu >100 (27.3 -> 28.6).
+  - Sunny Isles (30-tower list only, no survey): report MAE 1.8 m on 30 towers (all OSM tags); a
+    drone median on 5 towers, 3 within tol (Trump Towers III 145 vs 152, Turnberry Colony N/S 115 /
+    104 vs 131); Acqualina South 25 m and Ritz-Carlton 20 m are wrong-owner readings. Not testable.
+  - Second-city acceptance (`seed_experiment.py --region <city> --remeasure --own` on the capture
+    states, survey truth >= 20 m, wrong = more than 25 % off; marks as pre-registered on Miami):
+
+    | city | trusted with truth | wrong caught (>= 50 %) | right flagged (<= 5 %) | within tol: before -> kept (>= 0.80) |
+    |---|---|---|---|---|
+    | Fort Lauderdale | 33 | 10 of 16 (62 %) n.t. | 6 of 17 (35 %) FAIL, n.t. | 0.52 -> 0.65 (n 17) n.t. |
+    | Honolulu | 39 | 19 of 20 (95 %) n.t. | 5 of 19 (26 %) FAIL, n.t. | 0.49 -> 0.93 (n 15) n.t. |
+    | San Juan | 53 | 30 of 40 (75 %) PASS | 5 of 13 (38 %) FAIL, n.t. | 0.25 -> 0.44 (n 18) n.t. |
+    | Miami (2026-10-09) | 64 | 20 of 28 (71 %) | 1 of 36 (2.8 %) | 0.56 -> 0.81 (n 43) |
+
+    Flag reasons: owner_farther 17 / 20 / 181, owner_above_tag 16 / 19 / 46, owner_nearer 4 / 4 / 31
+    (Fort Lauderdale / Honolulu / San Juan). The false-flag rate is 26-38 % against Miami's 2.8 %:
+    the mark fails in both new cities, but on 13-19 right readings each (not testable at the
+    pre-registered n 30).
+  - Withhold rule `single over 2x prior` (region reports, survey truth, `pipeline_metrics`): precision
+    1.00 / 0.96 / 1.00 and recall 0.93 / 0.90 / 0.73 (San Juan 34 readings, Fort Lauderdale 52,
+    Honolulu 16): PASS where testable (San Juan, Fort Lauderdale); Honolulu n.t.
+  - False-corroborated rate by band (corroborated rows off by more than tol, Wilson 95 %):
+    San Juan 15-40 0/1 (0-0.79), 40-100 0/2 (0-0.66); Honolulu 40-100 0/1 (0-0.79), >100 0/4
+    (0-0.49); Fort Lauderdale none. Not testable everywhere.
+- **Why:** the audit's item 2 asked for two truth cities before the ownership and withhold rules
+  count as more than "Miami only". The withhold rule now has them. The ownership rule catches wrong
+  tops in all three cities but flags 26-38 % of right ones, so it cannot go on for the new sites,
+  and Cartagena's flags are left as they are (the plan's "set them false" applies to a fail in both
+  cities on testable marks; the false-flag denominators are 13-19).
+- **Rejected:**
+  - Fetching the 12-heading spin or the seed-resolution probe for the drone seeds (one 75-deg image
+    per seed): the run reused the capture (a scratch shim answers the probe with the cached
+    heading-0 view; the three-row spheres are rebuilt on their three cached rows). A plain region run
+    would fetch one probe per drone seed.
+  - Turning `use_ownership` on for San Juan, Fort Lauderdale or Honolulu.
+- **Not applied:** the region-run `seed_resolution_cache.json` entries (tracked, left unstaged).
+- **Supersedes / superseded by:** —.
+- **Source:** scratch `truth_drone/` (`notes.md`, `region_run.py`, `analyse.py`, `final_tables.txt`,
+  `final_analysis.txt`, `exp_<city>.json`); `claude/scripts/seed_experiment.py` (regions
+  san_juan / fort_lauderdale / honolulu, survey truth keyed on the report ring).
+
 ### 2026-10-12 — Survey tier published for Honolulu, Fort Lauderdale and Miami (audit item 8), by overlay on the existing reports
 - **Decision:**
   - `use_survey_heights` true in `sites/honolulu.json`, `sites/fort_lauderdale.json`, `sites/miami.json`

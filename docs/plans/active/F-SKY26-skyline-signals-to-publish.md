@@ -496,6 +496,21 @@ Two constraints follow:
   - Open: `readings_2x` on the drone-seed reruns; intervals for `single` / `corroborated` once the
     truth cities have such rows; a city's own truth for its tag intervals below 40 m.
 
+- 2026-10-12, truth-city drone spheres wired and scored (decision "Truth-city drone spheres are wired; the
+  ownership rule passes its catch mark ..."; audit §8.2 items 1-2; commit `b48a711`):
+  - 10 fitted spheres in `seed_urls` + `elevated_seeds` (San Juan 2, Fort Lauderdale 2, Honolulu 2, Sunny
+    Isles 4); 5 failed fits pending with a `_fit_note`; `SKYLINE_ELEVATED_HIRES_HEADINGS` for the 15-heading
+    capture cache. Region reports `runs/benchmark/2026-10-12_drones` (cache only), scored
+    `runs/benchmark/2026-10-12_1626`.
+  - First `corroborated` rows outside Miami: San Juan 1, Honolulu 6, Sunny Isles 3 (every one with truth
+    within tol). Drone readings in the <15 / 15-40 m bands are wrong-owner (bias +17 to +82 m) and are
+    withheld by the 2x rule (precision 0.96-1.00, recall 0.73-0.93).
+  - Ownership on the new states: wrong caught 62 / 95 / 75 % (FL / HNL / SJ), right flagged 35 / 26 / 38 %
+    (Miami 2.8 %): the false-flag mark fails in both new cities on 13-19 readings each (not testable at
+    n 30); Cartagena's flags unchanged.
+  - Open: the probe fetch for drone seeds in a plain region run (10 images); the five pending spheres need a
+    top-down fit; the ownership false flags (owner_farther / owner_above_tag) in the beach cities.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:
