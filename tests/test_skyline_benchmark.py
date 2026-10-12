@@ -707,3 +707,92 @@ def test_report_key_is_the_key_a_region_report_row_gets():
     written = [[round(x, 6), round(y, 6)] for x, y in ring]
     assert bm.report_key(ring) == bm.footprint_key(written)
     assert bm.report_key(ring) != bm.footprint_key(ring)
+
+
+# ── T29: the shipped height sources on the same truth ───────────────────────
+
+def _source_scene():
+    arr, t, _ = _grid()
+    _paint(arr, 20, 20, 25, 25, 50.0)      # A: tagged tower, source right
+    _paint(arr, 100, 100, 25, 25, 30.0)    # B: untagged, truth 12 m, source 30 m
+    fps = {"A": _ring(20, 20, 25, 25), "B": _ring(100, 100, 25, 25),
+           "C": _ring(160, 160, 20, 20)}   # C: nothing in the source
+    return arr, t, fps
+
+
+def test_source_heights_read_and_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    arr, t, fps = _source_scene()
+    calls = []
+
+    def reader(src, bbox, res):
+        calls.append(src)
+        return (arr, t) if src == "gba" else None          # overture: not covered
+
+    hs = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert hs["gba"]["A"] == pytest.approx(50.0) and hs["gba"]["B"] == pytest.approx(30.0)
+    assert hs["gba"]["C"] is None and all(v is None for v in hs["overture"].values())
+    n = len(calls)
+    again = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert again == hs and len(calls) == n                  # served from the cache
+
+
+def test_failed_source_read_is_not_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    arr, t, fps = _source_scene()
+
+    def reader(src, bbox, res):
+        if src == "overture":
+            raise RuntimeError("parquet host unreachable")
+        return arr, t
+
+    hs = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert hs["gba"]["A"] == pytest.approx(50.0)            # scored this time
+    assert bm.load_sources_cache("Srcville") == {}           # but nothing pinned
+
+
+def test_score_sources_same_buildings():
+    truth = {"A": {"status": "confirmed", "truth_m": 50.0},
+             "B": {"status": "confirmed", "truth_m": 12.0},
+             "C": {"status": "confirmed", "truth_m": 20.0},
+             "D": {"status": "disputed", "truth_m": None}}
+    blds = [{"key": "A", "effective_height_m": 48.0, "height_tag_m": 50.0,
+             "height_source": "osm_tag"},
+            {"key": "B", "effective_height_m": 12.0, "street_view_m": 110.0,
+             "height_source": "default"},
+            {"key": "C", "effective_height_m": 12.0, "street_view_m": 90.0,
+             "height_source": "default"},
+            {"key": "D", "effective_height_m": 30.0, "height_source": "default"}]
+    hs = {"gba": {"A": 50.0, "B": 30.0, "C": None, "D": 25.0}}
+    sc = bm.score_sources(blds, truth, hs)["gba"]
+    assert sc["coverage"] == pytest.approx(2 / 3, abs=1e-3)   # A and B of 3 confirmed
+    assert sc["source"]["overall"]["n"] == 2
+    assert sc["source"]["overall"]["mae_m"] == pytest.approx(9.0)          # (0 + 18) / 2
+    assert sc["published_same"]["overall"]["mae_m"] == pytest.approx(1.0)  # (2 + 0) / 2
+    assert sc["street_view_same"]["overall"]["mae_m"] == pytest.approx(50.0)  # (2 + 98) / 2
+    assert sc["source"]["osm_tag"]["untagged"]["n"] == 1
+
+
+def test_source_ndsm_merged_uses_the_fine_providers(monkeypatch):
+    """``merged`` merges the registered providers fine enough for one building, as the app
+    does; coarse ones (90 m WSF3D) stay out."""
+    from types import SimpleNamespace
+
+    from city2stl.height import HeightResult, service
+
+    asked = []
+
+    def prov(name, value, res_m):
+        def fetch(bbox, dim):
+            asked.append(name)
+            r = np.full(dim, value, np.float32)
+            return HeightResult(r, np.full(dim, 0.6, np.float32), name, res_m)
+        return SimpleNamespace(instance=SimpleNamespace(name=name, covers=lambda b: True,
+                                                        fetch_heights=fetch),
+                               resolution_m=res_m, confidence=0.6)
+
+    monkeypatch.setattr(service, "_REGISTRY", [prov("open_buildings", 20.0, 5.0),
+                                               prov("wsf3d", 99.0, 90.0)])
+    _, _, bbox = _grid(size_m=50)
+    arr, _t = bm.source_ndsm("merged", bbox)
+    assert asked == ["open_buildings"] and np.nanmax(arr) == pytest.approx(20.0)

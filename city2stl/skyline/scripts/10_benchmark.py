@@ -128,7 +128,8 @@ def _newest_report(region: str) -> Path | None:
 
 
 def score_report(heights: Path, region: str | None = None, use_tiles: bool = True,
-                 refresh_truth: bool = False, cached_truth: bool = False) -> dict:
+                 refresh_truth: bool = False, cached_truth: bool = False,
+                 sources: tuple[str, ...] = ()) -> dict:
     name, buildings = bm.load_report(heights)
     region = region or bm.region_key(name)
     provider = bm.REGIONS.get(region)
@@ -187,6 +188,10 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
         scored, _ = bm.scoring_truth(truth, bm.SINGLE_SOURCE, kw["nested"])
         result["single_source"] = bm.score_buildings(
             buildings, scored, pred_field="no_survey_height_m", statuses=("survey_only",))
+    if sources:  # T29: the app's shipped height sources on the same truth
+        hs = bm.source_heights(region, {b["key"]: b["footprint_lonlat"] for b in buildings},
+                               tuple(sources), refresh=refresh_truth)
+        result["sources"] = bm.score_sources(buildings, truth, hs)
     known = bm.score_known(heights, region)
     if known:  # published heights (Cartagena: the only truth; 3D Tiles have no buildings there)
         result["known"] = known
@@ -219,6 +224,26 @@ def print_table(results: list[dict]) -> None:
               f"{_fmt(tall.get('bias_m'), '+10.1f')} "
               f"{_fmt(rel.get('per_view', {}).get('pair_order'), '10.0%')} "
               f"{_fmt(rel.get('city', {}).get('pair_order'), '10.0%')}")
+
+
+def print_sources(results: list[dict]) -> None:
+    """T29: MAE of each shipped source on the confirmed buildings it covers, all and untagged,
+    against the run's published height and Street View on the same buildings."""
+    rows = [(r["region"], src, s) for r in results for src, s in (r.get("sources") or {}).items()]
+    if not rows:
+        return
+    print()
+    print(f"{'source MAE (all / untagged)':28s} {'cover':>6s} {'source':>15s} "
+          f"{'published':>15s} {'street view':>15s}")
+
+    def cell(sc):
+        ut = sc.get("osm_tag", {}).get("untagged", {})
+        return f"{_fmt(sc.get('overall', {}).get('mae_m'), '6.1f')} / {_fmt(ut.get('mae_m'), '6.1f')}"
+
+    for region, src, s in rows:
+        print(f"{region[:18] + ' ' + src:28s} {_fmt(s['coverage'], '6.0%')} "
+              f"{cell(s['source']):>15s} {cell(s['published_same']):>15s} "
+              f"{cell(s['street_view_same']):>15s}")
 
 
 def print_tiers(results: list[dict]) -> None:
@@ -354,6 +379,9 @@ def main() -> int:
                     help="re-measure truth for footprints already in the region's truth cache")
     ap.add_argument("--keep-env", action="store_true",
                     help="don't pin PINNED_FLAGS: run with the shell's SKYLINE_* values")
+    ap.add_argument("--sources", nargs="*", default=[], choices=bm.SHIPPED_SOURCES,
+                    help="also score the app's shipped height sources on the same truth "
+                         "(T29; network reads of Overture and GBA, cached per region)")
     ap.add_argument("--cached-truth", action="store_true",
                     help="score cached truth only: no survey or 3D Tiles reads")
     ap.add_argument("--tables-out", type=Path, default=None,
@@ -379,7 +407,8 @@ def main() -> int:
             continue
         results.append(score_report(heights, region, use_tiles=not args.no_tiles,
                                     refresh_truth=args.refresh_truth,
-                                    cached_truth=args.cached_truth))
+                                    cached_truth=args.cached_truth,
+                                    sources=tuple(args.sources)))
 
     summary = {
         "stamp": stamp, "git": _git_head(),
@@ -396,6 +425,7 @@ def main() -> int:
         ok = [r for r in results if "error" not in r]
         print_table(ok)
         print_tiers(ok)
+        print_sources(ok)
         for r in results:
             if r.get("known"):
                 print_known(r["region"], r["known"])
