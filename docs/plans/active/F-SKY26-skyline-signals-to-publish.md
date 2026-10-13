@@ -510,6 +510,10 @@ Two constraints follow:
     n 30); Cartagena's flags unchanged.
   - Open: the probe fetch for drone seeds in a plain region run (10 images); the five pending spheres need a
     top-down fit; the ownership false flags (owner_farther / owner_above_tag) in the beach cities.
+  - 2026-10-12 later: the false flags were diagnosed (12 of 16 right readings have a wrong OSM tag on F, 3 a wrong tag on
+    the nearer claimant, 1 a low p90) and a soft-tag bound was refused (San Juan 38 %, Fort Lauderdale 35 % still
+    flagged; Honolulu 0 of 19 only); see Rejected hypotheses, building-heights.md. Needs tag-independent height
+    evidence for F.
 
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered

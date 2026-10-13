@@ -1634,6 +1634,56 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-12 — Soft tags: an implausibly low OSM tag as a soft ownership bound (the false flags in San Juan, Fort Lauderdale, Honolulu)
+- **Hypothesis:** the ownership rule flags 26-38 % of right drone readings in the three truth cities
+  (Miami 2.8 %) because an OSM tag far below the footprint's untagged prior (a storey count or a
+  placeholder in `height`: Honolulu 3-15 m on 83-112 m towers) is taken as a hard cap on its own top;
+  making such a tag a soft bound (`tag_soft`: occluder max(tag, p90), own claim max(1.25 x tag, p90 / q99 /
+  open), `hard` False) would release the right readings and keep the catches.
+- **Pre-registered marks** (scratch `ownfix/notes.md`, before any candidate ran): right-flagged <= 10 % per
+  city, wrong-caught >= 50 % per city, Miami unchanged (catch 20 of 28, flag 1 of 36), Cartagena replay
+  `Cartagena_v17_own` (7 towers 202/190/170/188/161/160/156 unchanged, non-PH 1-3-floor used <= 2, 10 of 10
+  tag-correct kept).
+- **Diagnosis** (the 16 right readings flagged in the base rule: San Juan 5 of 13, Fort Lauderdale 6 of 17,
+  Honolulu 5 of 19; `ownfix/diag.py`, same walk as `seed_ownership`, trusted readings, survey
+  p95 truth >= 20 m, wrong = more than 25 % off):
+  - 12: F's own OSM tag far below truth (SJ Plaza Miramar 12.8 vs 73 m; FL b0463 25.6 vs 159, Diplomat 45
+    vs 98; HNL b1263 3, b1262 10, b0972 8, b1135 3, Prince Waikiki 15 vs 83-112 m);
+  - 3: a nearer claimant's tag far above truth (FL b0361 140.8 vs 86 m over b0342 / Beach Club II; b0214
+    108.8 vs 4.8 m over Parker Plaza);
+  - 1: F's p90 too low (SJ b21268, read 34.8, truth 44, p90 29; a nearer correct tag holds 64 % of the columns).
+  - Tag quality (tagged footprints with truth >= 20 m; n / off > 25 % / tag < 0.5 x truth): Miami osm_tag
+    194 / 13 / 1; San Juan osm_levels 203 / 74 / 25; Fort Lauderdale osm_levels 152 / 36 / 11 (all its tags);
+    Honolulu osm_tag 532 / 188 / 173. The cause is wrong tags in the new cities, which Miami lacks.
+  - Survey-truth counterfactual (survey p95 as a hard bound wherever truth exists): right flagged SJ 1 of
+    13, FL 4 of 17 (23.5 %: b0432 / b0463 are right readings whose top a nearer, taller tower claims with
+    its true height: geometry, not a bound), HNL 0 of 19; wrong caught 60 / 81 / 85 %. So even perfect
+    heights leave Fort Lauderdale above 10 %.
+- **Measured** (right flagged / wrong caught; San Juan n 13 / 40, Fort Lauderdale 17 / 16, Honolulu 19 / 20):
+
+  | rule | San Juan | Fort Lauderdale | Honolulu |
+  |---|---|---|---|
+  | base | 5 (38 %) / 30 (75 %) | 6 (35 %) / 10 (62 %) | 5 (26 %) / 19 (95 %) |
+  | soft tag < p10, own claim max(1.25 t, p90) | 5 / 30 | 6 / 8 (50 %) | 3 (16 %) / 19 |
+  | same, below p50 | 5 / 29 | 6 / 8 | 3 / 17 (85 %) |
+  | soft < p10, own claim q99 | 5 / 29 | 6 / 8 | 3 / 19 |
+  | soft < p10, own claim open | 5 (38 %) / 29 (72 %) | 6 (35 %) / 8 (50 %) | 0 (0 %) / 17 (85 %) |
+  | osm_levels tags also soft, own open | not run | 0 / 0 (no hard bound left) | 0 / 14 (70 %) |
+
+  - The prior (trained on untagged footprints) has no tower in its upper tail (q99 79 m on a 112 m tower),
+    so only an open own claim frees Honolulu. San Juan and Fort Lauderdale are unchanged: their wrong tags
+    (12.8 m on 73 m, 25.6 m on 159 m) sit above the footprint's p10, so no prior quantile marks them.
+  - Honolulu alone passes (0 / 19 right flagged, 85 % caught). Miami and the Cartagena replay were not run:
+    the rule already fails in two cities.
+- **Verdict:** refused; `ownership.py` unchanged (the edit was reverted). Marks failed: San Juan 38 % and
+  Fort Lauderdale 35 % right flagged (> 10 %); Fort Lauderdale also falls to 50 % caught.
+  Tags in these cities are wrong too often (and a levels-derived tag is all Fort Lauderdale has) for a
+  tag-based bound to separate a right tower from one behind a low building without independent height
+  evidence, which the rule refuses by design. Cartagena's flags: left as they are (validated on Miami and
+  the 7 towers; its tag quality is unmeasured), and nothing is turned on for the truth cities. A next try
+  needs height evidence independent of the tag (satellite lean / shadow per footprint) as F's own bound.
+- **Source:** scratch `ownfix/` (`notes.md`, `diag.py`, `table.py`, `tagsrc.py`, `<city>_<variant>.json` / `.log`).
+
 ### 2026-10-09 — The own-corner rule: a trusted top shows a vertical edge at its footprint's projected corners
 - **Hypothesis:** a right top shows a sky gap, a non-building label, a MobileSAM instance boundary
   or a depth step at the footprint's projected left or right corner column, at the row its roof
