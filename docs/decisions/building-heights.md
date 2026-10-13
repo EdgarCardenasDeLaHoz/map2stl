@@ -1634,6 +1634,64 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-12 — Coarse pose search for drone Photo Spheres (gravity fixed, cost volume over x/y/z/heading, outline refine from the top 4 minima): fails all three pre-registered marks, not kept
+- **Hypothesis:** a drone sphere's local fit (waterline at the recorded position, +-600 m waterline scan,
+  then `refine_on_outline` +-150 m) fails when the recorded position is the pilot's, 150-250 m from the
+  drone (5 of 15 truth-city spheres, Cartagena near #4 / #18: outline move 171-212 m, misfit 4.6 deg). A
+  LoD-Loc-style search would fix it: pitch fixed from the waterline fit (clamped to +-5 deg of the sea-horizon
+  value), then a cost volume over x, y +-250 m / 10 m, z +-30 m / 10 m, heading +-15 deg / 1 deg scored on
+  the waterline misfit (trimmed mean, pitch fixed) plus LAMBDA x (1 - edge score; MobileSAM instance edges
+  against OSM footprint limbs, no OSM height), then `refine_on_outline` from the top 4 separated minima, the
+  lowest refined misfit winning. Code (`_pano/pose_search.py`, hook `SKYLINE_POSE_SEARCH=1` in
+  `elevated.measure_elevated_seed`) was written and run in the worktree; **not committed**.
+- **Pre-registered marks** (scratch `pose/notes.md`, fixed before any test; LAMBDA chosen once from the
+  known-good cost volumes): perturbation (Cartagena seed_6, Miami seed_4 p8m18, Honolulu d1 / d2; start =
+  known pose moved 50 / 100 / 200 m and turned +-10 deg, 10 trials): recovered within 10 m / 0.5 deg in
+  >= 90 % AND tagged-tower readings within 25 % of the known pose's reading for >= 80 %; the 7 failed
+  spheres reported (gate verdict, tagged within 25 % of tag); no-harm on Cartagena seeds 1 / 4 / 5 / 6:
+  pose within 5 m / 0.3 deg of the saved one, or the tagged within-25 % share improves.
+- **LAMBDA** (grid 0 / 0.5 / 1 / 2 / 4 / 8; criterion fixed before looking: share of volume nodes costing less
+  than the best node within 20 m / +-10 m height / +-2 deg of the known pose, mean over 7 known-good spheres:
+  Cartagena seeds 1 / 4 / 5 / 6, Miami seed_4, Honolulu d1 / d2): means 0.0860 / 0.0855 / 0.0842 / 0.0819 /
+  0.0789 / 0.0774, so 8.0 (the grid's top). Honolulu d1 sits at 0.53 for every LAMBDA: 53 % of the nodes
+  beat the known pose, its waterline misfit there is 20 deg against 2-3 deg 100 m south of it (the waterline
+  and the tower outline disagree by ~100 m), and the edge score at the known pose (0.36) equals the volume's
+  median (0.35) with its heading profile peaking 5 deg off.
+- **Measured** (4 runs in parallel, one core each):
+
+  | test | result | mark |
+  |---|---|---|
+  | perturbation, recovered within 10 m / 0.5 deg | **1 of 99 trials** (Honolulu d2 at 200 m); Cartagena seed_6 stopped at 3 trials per offset | >= 90 %: **fail** |
+  | perturbation, tagged readings within 25 % of the known pose's (median over trials, shared towers) | 0.50 overall (d1 0.50, d2 0.0-0.09, Miami 0.56, seed_6 0.60) | >= 0.80: **fail** |
+  | failed spheres, outline gate | 1 of 7 passes (Sunny Isles d5, at a 11 m camera height); the 6 others still move the camera 184-244 m from the coarse candidate (FL d2 / d5 / d6, near #4 / #18) or fit 2.66 deg (FL d4) | not a mark: 0 of 6 failures cured |
+  | failed spheres, tagged within 25 % of tag | FL d2 4 of 29, d4 2 of 6, d5 1 of 6, d6 0 of 1, Sunny Isles d5 2 of 9, near #4 2 of 6, near #18 0 of 5 | |
+  | no-harm, Cartagena | seed_1 moved 184 m / -15.2 deg (share 0.67 -> 0.20); seed_4 31.6 m / -1.45 deg (0.71 -> 0.67); seed_5 gate rejects (was a fit); seed_6 unchanged (overhead branch, search not used) | **fail** (3 of 4 harmed) |
+
+  Perturbation by sphere (n / recovered / median error m / median error deg, identical at 50 / 100 / 200 m
+  unless noted): Honolulu d1 10 / 0 / 58 / 0.4; Honolulu d2 10 / 0 / 136 / 20.0 (200 m: 1 / 85 / 6.4); Miami
+  seed_4 10 / 0 / 51 / 0.4; Cartagena seed_6 3 / 0 / 42 / 1.8. Runtime per search (coarse volume + 4
+  refinements): Honolulu 335-415 s, Miami 335-355 s, Cartagena seed_6 1,570 s (1,470 s coarse), failed spheres 486-1,265 s
+  (coarse 375-1,132 s).
+- **Cause:**
+  - The search is start-independent (the same pose from all 10 starts in 5 of 12 cells; the median error
+    does not change with the offset except Honolulu d2 at 200 m) but it converges on a pose other than the old path's: the tower-outline
+    misfit is flat and multi-modal. At the known poses it is 0.360 (Honolulu d1), 1.045 (d2), 0.546 (Miami);
+    the search ends at 0.278 (58 m away), 0.049 and 0.562 (51 m away, a tie). Within 10 m / 0.5 deg of a
+    pose the old path settled on is below the cue's resolution, so mark 1 cannot be met by this cue.
+  - Ranking by refined outline misfit rewards degenerate fits: Honolulu d2 0.05 deg at 99 m up (known 49 m;
+    a coarse candidate at 79 m times the 1.25 height factor), FL d2 0.08 at 133 m, near #18 0.05 over 71
+    columns, near #4 0.12 over 88: few tower columns, camera lifted until the towers barely clear 3 deg
+    (the Cartagena seed_7 overfit the 130 m overhead rule exists for).
+  - The coarse cost does not choose: the edge cue is flat in a dense city (Honolulu: 2,600 footprints
+    within 2.5 km, every instance matches some footprint), so the top 4 minima are the waterline's, and
+    the tagged outline decides alone, as in the old path but with more places to overfit.
+  - Cost: 6-21 min a search on one core (4 runs in parallel) against ~2 min for the old fit.
+- **Rejected:** the search as registered. Not tried (would be new hypotheses, to pre-register first):
+  ranking the refined candidates by outline misfit with a minimum column count and the waterline height
+  as a bound; scoring the volume on the outline of all footprints (area >= 600 m2) instead of instance
+  edges; a coarse-to-fine volume (the shore rays cost ~0.1 s a node, 2,601 nodes a search).
+- Scratch: `pose/` (scripts, `results/*.jsonl`, `lambda_pick.txt`).
+
 ### 2026-10-12 — Soft tags: an implausibly low OSM tag as a soft ownership bound (the false flags in San Juan, Fort Lauderdale, Honolulu)
 - **Hypothesis:** the ownership rule flags 26-38 % of right drone readings in the three truth cities
   (Miami 2.8 %) because an OSM tag far below the footprint's untagged prior (a storey count or a
