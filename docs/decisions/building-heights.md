@@ -1634,6 +1634,71 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-14 — The satellite roof-shape GBM (flat vs pitched) does not rank LiDAR plane-fit roof classes: AUC 0.25-0.51 in five cities against a 0.75 mark, not used for panorama heights
+- **Hypothesis (plan section (d), E-D1):** `city2stl/roof_model.py` (checkpoint `models/roof_shape_gbm.joblib`,
+  threshold 0.90; z18 Esri crops + the OSM `building` / `building:levels` / `height` tags, no panorama) separates
+  flat from pitched roofs on footprints that have LiDAR, so a panorama reading could be told "ridge, not eave".
+  Until now it was checked only against OSM tags and the Cartagena share, never against LiDAR.
+- **Pre-registered** (scratch `shape/roof/prereg.txt`, written before any cell was read):
+  - Cells: the cached 1 m survey nDSM inside the footprint eroded 1 m (the survey's own polygon). Check: the
+    cell count equals the stored `survey_cells` for 51 % of San Juan footprints and is within +-2 for 96 %;
+    the cell p50 is within 0.05 m of the stored `roof_m` p50 for 98 %.
+  - Label from a least-squares plane: flat = slope < 5 deg and RMS < 0.5 m; pitched = slope >= 15 deg, or a
+    2-plane k-planes fit with RMS < 0.5 m, < 0.6 x the 1-plane RMS, each plane >= 25 % of the cells and the
+    normals >= 10 deg apart; else ambiguous (excluded, counted).
+  - Footprints: OSM, non-nested (no overlap above 50 % of the smaller footprint: building parts and their
+    parents out), area >= 40 m2, `survey_cells` >= 20. Granada separately (REDIAM 1 m); Cartagena has no LiDAR.
+  - Mark per city with >= 30 pitched labels: AUC >= 0.75 and false-pitched <= 0.05 at the stored 0.90 cut.
+- **Measured** (CPU only, no Google request; 19,925 candidates, 9,527 ambiguous; false-pitched = flat-labelled
+  called pitched, recall = pitched-labelled called pitched; model call = p > 0.90):
+
+  | city | flat / pitched / ambiguous | scored | AUC | false-pitched | recall | pitched share: LiDAR label / model call | accuracy / always-flat |
+  |---|---|---|---|---|---|---|---|
+  | San Juan | 3,552 / 3,093 / 5,531 | 6,645 | **0.421** | 0.034 | 0.028 | 46.5 % / 3.1 % | 0.529 / 0.535 |
+  | Honolulu | 179 / 1,098 / 1,041 | 1,277 | **0.508** | **0.061** | 0.088 | 86.0 % / 8.5 % | 0.208 / 0.140 |
+  | Miami | 64 / 136 / 317 | 199 | **0.248** | 0.031 | 0.044 | 67.8 % / 4.0 % | 0.342 / 0.322 |
+  | Fort Lauderdale | 994 / 648 / 2,488 | 1,640 | **0.473** | 0.028 | 0.070 | 39.5 % / 4.5 % | 0.616 / 0.605 |
+  | Granada | 25 / 609 / 150 | 634 | **0.485** | **0.400** | 0.350 | 96.1 % / 35.2 % | 0.360 / 0.039 |
+
+  (Scored = flat + pitched labels with a model row; 3 footprints had no crop. Granada has only 25 flat labels.)
+  - Every city has >= 30 pitched labels, so every city is scored; none reaches AUC 0.75 (San Juan 95 %
+    bootstrap interval 0.41-0.43). The false-pitched mark holds only where the model almost never says pitched
+    (recall 2.8-8.8 % in the US cities), and there its accuracy is within 0.02 of always-flat except in
+    Honolulu (+0.07, 14 % flat). At p > 0.5 false-pitched is 0.25-0.48 in the four US cities.
+  - Prior shift: the model calls 3-9 % pitched in the four US cities, whose LiDAR pitched share runs 40-86 %;
+    35 % in Granada (label 96 %); 3.9 % in Cartagena (2,907 non-nested footprints >= 40 m2 of the 3,021 in the
+    cached OSM layer; the plan's 6.4 % was another set). The share the model reports does not follow the
+    stock: it is set by the threshold, not by the roofs.
+  - Post-hoc, not a change of verdict: AUC against only the cleaner pitched labels (two-plane fits, or slope
+    15-50 deg with 1-plane RMS < 0.6 m), reported where >= 30 pitched and >= 30 flat: San Juan 0.45-0.48,
+    Honolulu 0.53-0.66, Fort Lauderdale 0.53-0.54.
+- **Cause (6 false-pitched and 6 missed-pitched, random draw with seed 7 from the four US cities, rendered with the
+  LiDAR cells: `shape/roof/eye_false_pitched.png`, `eye_missed_pitched.png`; 162 flat-labelled footprints have p > 0.9):**
+  - False-pitched (6 of 6 are flat by LiDAR: slope 1-3 deg, RMS 0.07-0.46 m): five are San Juan roofs surfaced or
+    painted terracotta / red-brown, the colour the model learned as tile; the sixth, in Fort Lauderdale, looks
+    like a low-pitch tile roof that the label calls flat (RMS 0.46 m, just under the 0.5 cut).
+  - Missed-pitched: only 1 of 6 is a coherent pitched roof (Fort Lauderdale tile roof, one plane at 16 deg,
+    p 0.89, a hair under the cut). The other five reach "pitched" through the slope arm with mixed levels inside
+    the ring (slope 15-67 deg, RMS 0.8-8.2 m): a tower or a taller neighbour's cells in the footprint, or a ring
+    across a tower and its lower roof. The pre-registered slope >= 15 arm is therefore contaminated: it gives
+    2,580 of 3,093 San Juan and 986 of 1,098 Honolulu pitched labels, and only 144 and 54 of those have a 1-plane
+    RMS < 0.6 m. That noise lowers every AUC but does not explain 0.25-0.42 (below chance); the flat labels
+    (slope < 5 deg, RMS < 0.5 m) are clean, and the model still calls 3-6 % of them pitched at 0.90 and 25-48 % at 0.5.
+  - Size of the "ridge, not eave" correction on the cleaner pitched set (two-plane, or one plane at 15-50 deg
+    with RMS < 0.6 m; informational): ridge minus eave (p95 - p5 of the cells) has a median of 2.3-3.0 m for
+    100-300 m2 roofs in San Juan, Honolulu, Miami and Fort Lauderdale (1.8-3.5 m for 300-1000 m2; Granada 3.1 m
+    for 100-300 m2, n = 25), and p95 minus the median is 1.0-1.4 m (Granada 2.3 m). Not applied:
+    the flag that would trigger it is not reliable.
+- **Rejected:** the checkpoint as a flat-vs-pitched flag in LiDAR-truth cities; its per-footprint probability
+  is not published, stored or used on panorama heights (the panorama side keeps assuming flat roofs, as
+  `roof_fit` does now). The mark failed in all five cities. The "Cartagena 6.4 % pitched" symptom check says
+  only that the model rarely answers pitched; it does not say it answers right.
+  - Not tried (new hypotheses, pre-register first): a retrain on LiDAR plane-fit labels from these cities
+    (the label cleaned of the slope-arm contamination, with terracotta-painted flat roofs as negatives); E-D2
+    (a ridge-profile test on column tops) is not run, its mark needs this model to add AUC.
+- Scratch: `shape/roof/` (`prereg.txt`, `step1_cells.py` .. `step7_sens.py`, `labels.py`, `result.json`,
+  `sens.json`, the per-city `cells_*.pkl`, `labels_*.pkl`, `prob_*.pkl`, and the two PNGs).
+
 ### 2026-10-13 — Height steps inside a building (E-C): a two-plateau score from the drone column tops fails its pre-registered mark (AUC 0.52-0.58 in the three survey cities), not built
 - **Hypothesis:** the per-column heights `roof_fit._fit` already computes (kept today only as the 35th
   percentile, median and IQR on `RoofMeasured`) show a podium + tower or a stepped roof as two plateaus; a
