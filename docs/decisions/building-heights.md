@@ -1634,6 +1634,62 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-13 — Height steps inside a building (E-C): a two-plateau score from the drone column tops fails its pre-registered mark (AUC 0.52-0.58 in the three survey cities), not built
+- **Hypothesis:** the per-column heights `roof_fit._fit` already computes (kept today only as the 35th
+  percentile, median and IQR on `RoofMeasured`) show a podium + tower or a stepped roof as two plateaus; a
+  score from them (publish-side use: flag a footprint as stepped, lead to parts) would rank stepped
+  buildings above single-roof ones.
+- **Pre-registered** (plan section (c), scratch `shape/plan.md`; details in `shape/steps/prereg.txt`,
+  written before any AUC was computed):
+  - Rows: the saved drone states' stored `RoofMeasured` readings (San Juan d1/d2, Honolulu d1/d2, Fort
+    Lauderdale d1/d3, Miami martinez / seed_3 sphere / seed_4 sphere), `n_trusted >= 3`, one per footprint
+    (most trusted edges). The column heights come from a capture copy of `_fit` (one extra tuple field); it
+    reproduces every stored `height_m` exactly (1,818 readings, all equal).
+  - Score: 1-D 2-means gap in metres of the column heights (both clusters >= 20 % and >= 3 columns, else 0).
+    IQR reported, not for the mark.
+  - Truth: positive = survey step (`roof_m` p95 - p50 >= 4 m and p95 / p50 >= 1.3, `survey_cells >= 20`) OR in
+    `benchmark.nested_keys`; negative = the other labelled footprints. Miami has no `roof_m`: nested-only
+    positives, so its negatives are unreliable.
+  - Mark: AUC >= 0.70 with >= 30 positives in >= 2 cities; threshold = max F1 on San Juan, applied to the rest.
+- **Measured:**
+
+  | city | n | positives (step / nested only) | AUC gap | AUC IQR | AUC gap, step label only | precision / recall at 1.71 m |
+  |---|---|---|---|---|---|---|
+  | San Juan | 607 | 62 (49 / 13) | **0.576** | 0.591 | 0.542 | 0.129 / 0.726 |
+  | Fort Lauderdale | 285 | 30 (16 / 14) | **0.556** | 0.572 | 0.650 | 0.109 / 0.667 |
+  | Honolulu | 44 | 16 (9 / 7) | 0.525 | 0.511 | 0.540 | 0.385 / 0.625 |
+  | Miami (nested only) | 96 | 11 (0 / 11) | 0.655 | 0.708 | n/a | 0.137 / 0.909 |
+
+  The mark fails: no city reaches 0.70 with >= 30 positives (San Juan and Fort Lauderdale are the only
+  ones with 30 or more). The threshold (1.71 m, F1 0.218 on San Juan) flags 350 of 607 San Juan and 183
+  of 285 Fort Lauderdale buildings: a gap that small is the noise floor, not a step. Spearman of the gap
+  against the survey p95 - p50: 0.12 (San Juan), 0.09 (Fort Lauderdale), 0.04 (Honolulu).
+- **Cause (post-hoc; 6 false positives and 6 missed steps drawn as column-top profiles,
+  `shape/steps/false_positives.png`, `missed_steps.png`):**
+  - The columns are mostly not this building's roof. Only 45 of 607 San Juan, 73 of 285 Fort Lauderdale,
+    18 of 44 Honolulu and 18 of 96 Miami readings are within max(25 %, 2 m) of the survey truth (median
+    |reading / truth - 1| 3.1 in San Juan, 3.3 in Fort Lauderdale). On that right-reading subset the AUC
+    is no better (0.58 San Juan, 0.49 Honolulu, 0.33 Fort Lauderdale; <= 14 positives each).
+  - False positives (6 of 6): the column tops of a 0-34 m building (survey) jump between ~10 m and 70-175 m
+    along the footprint (Fort Lauderdale b0351 175 m vs a 34 m truth, b0377 and b0378 at 125 m on 0-4 m
+    ground; San Juan b20618 / b20352 / b20376 at 70 m on 7-13 m buildings): the column ray passes the
+    footprint and the instance run ends on the tower behind it. A far tower over a low footprint makes a
+    perfect "two plateaus", pose error (1-2 deg is 17-35 m at 1 km) making which columns belong to which
+    footprint unreliable.
+  - Missed steps (6 of 6): a single flat plateau, IQR 0.1-0.8 m, at the wrong height (Honolulu b1263 /
+    b1262 at 135 m on a 112 m tower, nested podium; b1492 at 140 m on a 15 m building; San Juan b19992
+    at 39 m on a 15 m / 7 m step, b19770 at 23 m on a 19 m / 7 m step). The instance is the block or the
+    tower, the lower part is hidden behind it (a far podium behind a near tower, the risk stated in the
+    plan) or merged into one MobileSAM instance, so the profile is flat. The nested ones read the
+    tower's height (the pre-F-DET5 behaviour already noted for nested rows).
+  - Trees were not the failure here: no profile among the 12 is a canopy.
+- **Rejected:** the score as registered. A step score needs the part structure, not the column spread:
+  per-instance column tops with a hidden-part test (the lower roof behind the higher), after pose and
+  ownership are right. Not tried (new hypotheses, pre-register first): the same score only on readings
+  that pass the ownership rule (keeps 7-41 % of the rows, too few positives); the container-versus-part
+  test of the plan (section (c) item 2).
+- Scratch: `shape/steps/` (`extract.py`, `analyze.py`, `diag.py`, `plots.py`, `result.json`, PNGs).
+
 ### 2026-10-12 — Coarse pose search for drone Photo Spheres (gravity fixed, cost volume over x/y/z/heading, outline refine from the top 4 minima): fails all three pre-registered marks, not kept
 - **Hypothesis:** a drone sphere's local fit (waterline at the recorded position, +-600 m waterline scan,
   then `refine_on_outline` +-150 m) fails when the recorded position is the pilot's, 150-250 m from the
