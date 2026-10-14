@@ -1,0 +1,18 @@
+{
+  "name": "granada",
+  "north": 37.19,
+  "south": 37.16,
+  "east": -3.57,
+  "west": -3.625,
+  "max_plausible_height_m": 120,
+  "use_satellite_footprints": false,
+  "use_survey_heights": true,
+  "seed_urls": [],
+  "pending_seed_urls": [],
+  "elevated_seeds": [],
+  "anchor_offsets_deg": {},
+  "negative_seeds": [],
+  "_bbox_note": "2026-10-13: the historic core and its hills: Cathedral (37.1766, -3.5993), Alhambra and Generalife (east edge -3.570), Albaicin, Realejo, Gran Via and Puerta Real. The Cathedral, Alhambra and centre are the three screened areas below. The bbox is a 3.3 x 4.9 km box; widen it only after a first run shows the drone spheres' reach.",
+  "_truth_note": "Survey truth, single source, not yet read: REDIAM MDHN 1 m height above ground (PNOA LiDAR 2020-21), provider `rediam_mdhn` (city2stl/height/providers/rediam_mdhn.py, registered in providers/survey.py, ahead of CNIG's 2.5 m MDSn). About a quarter of the window over the Cathedral is void (its own roofs), docs/reference/survey-sources.md. `use_survey_heights` is on because the reader exists; it publishes only from a cached runs/survey/granada.json, which does not exist yet, so nothing is published until the survey is read. NOT YET DONE: add `granada: rediam_mdhn` to benchmark.REGIONS (the benchmark and truth refresh score only listed regions), then 19_refresh_survey_truth.",
+  "_streetview_note": "2026-10-13 free metadata probe (no images), 136 requests: Cathedral 6x6 grid at 60 m (radius 40 m), 36 panos, 11 non-Google (user) spheres; Alhambra 6x6 at 80 m (radius 50 m), 36 panos, 19 user; centre (Puerta Real) 8x8 at 100 m (radius 60 m), 64 panos, 15 user. Dates 2008-11 to 2026-08. No author name says drone or aerial; metadata has no altitude, so a drone cannot be told from a rooftop or walking sphere without an image. No seed is set: seeds need a screened sphere."
+}
