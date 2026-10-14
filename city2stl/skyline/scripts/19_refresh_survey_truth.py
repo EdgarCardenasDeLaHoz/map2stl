@@ -81,6 +81,12 @@ TRUTH_AREAS = {
     "honolulu": {
         "waikiki": (21.2640, 21.2950, -157.8480, -157.8150),      # + Ala Moana's east edge
     },
+    # Granada (REDIAM 1 m COG read by window, 2026-10-13): the three screened areas, union ~1.7 x 2.3 km.
+    "granada": {
+        "cathedral": (37.1725, 37.1810, -3.6045, -3.5940),
+        "alhambra": (37.1735, 37.1810, -3.5935, -3.5780),
+        "centre": (37.1660, 37.1810, -3.6075, -3.5940),           # Puerta Real, Gran Via, Realejo
+    },
 }
 #: The note every survey-only truth record carries.
 SINGLE_SOURCE_NOTE = "single-source survey truth (no Google 3D Tiles: monthly cap)"
@@ -367,7 +373,10 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
                 meta[f["key6"]] = {**f, "area": area}
     polys = {k: bm._erode(bm._polygon(m["ring6"]), bm.ERODE_M) for k, m in meta.items()}
     parts = {k: (bm.survey_part(provider, p) if not p.is_empty else None) for k, p in polys.items()}
-    tiles = bm.tiles_for({k: p for k, p in polys.items() if parts[k]},
+    # only EPT has per-footprint projects (no project = not covered); the COG / raster providers
+    # (REDIAM, CNIG, ...) read any non-empty footprint, so their part is None by design
+    readable = {k for k, p in polys.items() if not p.is_empty and (parts[k] or provider != "usgs_3dep_ept")}
+    tiles = bm.tiles_for({k: p for k, p in polys.items() if k in readable},
                          part=lambda p: bm.survey_part(provider, p))
     pub = _published(region)
 
@@ -395,7 +404,7 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
         # each skips what the other has read (survey_footprint_heights re-checks the cache)
         sel = paid[:max_tiles][i_sh::n_sh][::-1]
     plan_out = {"region": region, "areas": order, "footprints": len(meta),
-                "with_project": sum(1 for v in parts.values() if v),
+                "with_project": len(readable),
                 "projects": dict(Counter(v for v in parts.values())),
                 "tiles": len(tiles), "tiles_on_disk": len(free), "tiles_to_read": len(paid),
                 "selected_new": len(paid[:max_tiles][i_sh::n_sh]), "shard": f"{i_sh}/{n_sh}",

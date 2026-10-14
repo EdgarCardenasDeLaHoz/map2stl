@@ -121,6 +121,8 @@ REGIONS = {
     "san_juan": "usgs_3dep_ept",
     "fort_lauderdale": "usgs_3dep_ept",
     "honolulu": "usgs_3dep_ept",
+    # Andalucia: REDIAM 1 m LiDAR height (2020-21), a COG read by window (2026-10-13).
+    "granada": "rediam_mdhn",
 }
 
 

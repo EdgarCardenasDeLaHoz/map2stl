@@ -5,6 +5,36 @@ overrides: which endpoints work, how they are read, and what they can and cannot
 Endpoint catalogue: [../reference/survey-sources.md](../reference/survey-sources.md). Related:
 [building-heights.md](building-heights.md), [roofs-landmarks.md](roofs-landmarks.md).
 
+### 2026-10-13 — Granada is a survey-only truth city: REDIAM 1 m read by window over three screened areas
+- **Decision:** `benchmark.REGIONS["granada"] = "rediam_mdhn"`, `TRUTH_AREAS["granada"]` (cathedral,
+  alhambra, centre; union ~1.7 x 2.3 km) in `scripts/19_refresh_survey_truth.py`, and
+  `--new-truth` run for it: 20 tiles of 620 m read from the REDIAM COG through `/vsicurl/` range
+  reads (<= 105 MB received, system-wide counter; the 284 GB mosaic is never fetched). 13,132
+  survey-only truth records (p95 over the footprint, flights 2020-21) of 17,043 footprints in the
+  areas; 3,911 are void (no cells). Also fixed: `new_truth` dropped every footprint of a provider
+  without per-footprint projects (only EPT has them), so it would have read nothing for CNIG,
+  REDIAM, IGN or CUZK.
+- **Why (first look at OSM tags, truth records with a tag, all of them / not nested):**
+  - Tags exist for 98.6 % of the 39,636 OSM footprints in the bbox (13,051 of 13,132 truth
+    records), almost all levels x 3.2 m (6.4, 9.6, 12.8, 16, 19.2) or a flat 10 / 12 m on
+    the Alhambra towers: coverage is not quality.
+  - Survey height bands: < 15 m 10,018; 15-40 m 3,112; 40-100 m 2; > 100 m 0 (max 40.4 m).
+  - Tag within 25 % of the survey: < 15 m 1,584 of 9,949 (16 %; not nested 620 of 5,743, 11 %);
+    15-40 m 1,609 of 3,100 (52 %; not nested 621 of 1,414, 44 %). Tag minus survey: median +5.4 m.
+  - Nested (`nested_keys`, over all footprints): 19,478 of 39,636; 5,907 of the 13,132 truth
+    records. Stale: 0 (29 OSM `start_date`s in the bbox, 13 truth records predate the survey, none
+    postdate it; `readings_2x` needs image readings, none yet).
+  - Sanity: Cathedral outline (8,341 m2, tag 45 m) is void, as `survey-sources.md` says; its small
+    parts read 37-40 m, tags 40 m. The 81 m tower is not read (no record above 40.4 m). Alhambra:
+    Torre de la Vela 29.3 m, Homenaje 23.4 m, Alcazaba 22.4 m (p95), Palacio de Carlos V 22.5 m,
+    against a 10 m tag; the REDIAM flight is 2020-21.
+- **Rejected:** reading the whole bbox (3.3 x 4.9 km) now; the three areas are what the drone
+  spheres reach.
+- **Limits:** no height above 40 m means the tall bands have no truth here; the void roofs keep
+  the Cathedral itself unscored; a taller reading needs a second source.
+- **Supersedes / superseded by:** —
+- **Source:** `runs/benchmark/truth/granada.json`, session 2026-10-13.
+
 ### 2026-10-09 — The EPT project read is the newest by flight year, from a measured table, the name, then the work-unit suffix
 - **Decision:** `city2stl/height/providers/lidar_3dep_ept_laspy.py::_project_year` ranks a project
   by `PROJECT_YEARS` (flight year measured from one node's GpsTime), else the latest year in its
