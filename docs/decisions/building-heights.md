@@ -1634,6 +1634,46 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-14 - A pre-capture OSM filter (drop alleys and narrow streets, keep viewpoints and open sight lines) fails its marks: it drops 8-16 % of requests, not 40 %, and loses 12.5-19 % of the readings that matter
+- **Hypothesis (user, 2026-10-14):** "alleys and narrow streets could be filtered upfront". A pure-OSM, metadata-free predicate
+  `keep = class not in (alley, narrow) and (viewpoint or a tall footprint visible within 300 m)` would save images without
+  losing trusted readings. Classes (precedence viewpoint > alley > narrow > street), thresholds and the pass marks were
+  written before any number was computed (scratch `cap/prereg.txt`): alley = nearest way (<= 60 m) is `highway=service`,
+  footway / path / pedestrian / steps / cycleway / track, or under 5 m wide; narrow = width (tag, else class estimate:
+  residential 7 m) under 8 m, or footprints within 12 m on both sides; viewpoint = bridge / pier / embankment way, ground
+  >= 15 m above the median of a 300 m ring, or within 30 m of water or the coastline (or on the sea side); openness = a
+  footprint tagged >= 30 m (or >= 9 levels) reached by a sight line over the other footprints (tagged height, else 10 m).
+  **Marks:** drops >= 40 % of images; loses <= 10 % of the trusted readings within max(25 %, 2 m) of the survey (Miami, San
+  Juan, Honolulu, Fort Lauderdale; nested footprints out); in Cartagena loses <= 10 % of corroborated + trusted readings.
+- **Measured** (cached run files and Overpass ways, no Google request; 47 capture locations, 1,093 images; image counts =
+  12 spin views per street seed, 15 headings x pitch rows per sphere; Cartagena seeds 1/4/5/6 assumed 30, not logged):
+
+  | test | images | dropped | value lost | mark |
+  |---|---|---|---|---|
+  | truth cities (30 locations) | 723 | 117 (**16 %**) | trusted truth-agreeing 4 of 32 (**12.5 %**) | >= 40 % / <= 10 %: **fail both** |
+  | Cartagena published seeds (17) | 370 | 30 (**8 %**) | corroborated + trusted 34 of 177 (**19 %**; 8.5 % when the three unconfigured near spheres' 223 trusted readings are counted) | **fail** |
+
+  Confusion (location has >= 1 trusted truth-agreeing reading, or in Cartagena a corroborated / trusted one): positive kept 11 (360
+  images), positive dropped 2 (75), negative kept 28 (586), negative dropped 6 (72).
+- **Yield by class** (truth cities / Cartagena): viewpoint 23 locations, 606 images, 279 trusted, 28 truth-agreeing / 16, 340,
+  337 trusted, 29 corroborated; ordinary street 4, 48 images, 0 trusted / 0; alley or narrow 3, 69 images, 145 trusted, 4
+  truth-agreeing / 1, 30 images, 28 trusted, 6 corroborated. Street seeds are never `trusted()` and never corroborate
+  (`tiers.INDEPENDENT`): their 372 images across all cities gave 0 trusted, 0 corroborated readings, 74 of 546 within 25 % of
+  truth. Spheres cost about 14 images per trusted truth-agreeing reading (390 images, 28) in viewpoint class.
+- **Cause:**
+  - The planners already choose viewpoints: auto standoffs carry a x2 water bonus and drone candidates are ranked over water,
+    so 38 of 47 locations are waterfront / sea-side / pier and the filter has little left to drop.
+  - The two valuable locations it drops are high drone spheres whose recorded position sits on land above a service lane
+    (San Juan d1, 145 trusted, 4 truth-agreeing; Cartagena seed_6, 28 trusted, 6 corroborated; viewed: both are 100 m+ aerial
+    views). An OSM class of the ground position says nothing about a camera that is in the air.
+- **Candidate screens** (not a mark): of 44 uncaptured drone / probable Cartagena candidates (near + more lists, deduplicated by
+  pano), the filter drops 8 (6 footways / service lanes, 1 residential, 1 tertiary), saving 240-360 of 1,320-1,980 images
+  (18 %); the 37 of the request count is not recoverable from the files, this is the nearest set. Granada: 37 of 45 user panos
+  are footway / pedestrian classes, but Granada has no yield data, so the 82 % cannot be called saving.
+- **Rejected:** the filter as registered; no module, flag or planner wiring was added. Not tried (new hypotheses, to pre-register):
+  an elevation-aware class for aerial spheres, or cheap 1-image screening before any 30-45 image sphere (already the practice).
+- Scratch: `cap/` (`prereg.txt`, `capture_filter.py` prototype, `classified.json`, `analyze.py`).
+
 ### 2026-10-14 — The satellite roof-shape GBM (flat vs pitched) does not rank LiDAR plane-fit roof classes: AUC 0.25-0.51 in five cities against a 0.75 mark, not used for panorama heights
 - **Hypothesis (plan section (d), E-D1):** `city2stl/roof_model.py` (checkpoint `models/roof_shape_gbm.joblib`,
   threshold 0.90; z18 Esri crops + the OSM `building` / `building:levels` / `height` tags, no panorama) separates
