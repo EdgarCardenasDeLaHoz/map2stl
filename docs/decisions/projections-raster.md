@@ -2,6 +2,30 @@
 
 Raster orientation, map-projection order and area measurement. Related: [architecture.md](architecture.md) (row 0 = north), [terrain-dem.md](terrain-dem.md) (project once).
 
+### 2026-10-13 — Longest side after projection
+- **Decision:** `dim` is the longest side of the DEM **after** map projection, for every projection.
+  One rule in `geo2stl/projections.py`: `projected_shape` is the exact output grid,
+  `source_dim` / `source_shape` the plate-carrée grid to sample so the projection only shrinks, and
+  `project_coordinates(target_dim=dim)` (through `project_grid`, `project_water_arrays`,
+  `project_rgb_image`) forces the output onto `projected_shape`. The DEM route
+  (`app/server/routers/terrain.py::get_terrain_dem`), every aligned layer route (water mask, ESA,
+  satellite, hydrology, trails, borders), `app/server/routers/cities.py::get_city_raster`,
+  `app/server/routers/composite.py::compute_composite_dem` and the export fallback
+  `app/server/core/export_params.py::resolve_dem` sample at `source_dim` and project with
+  `target_dim`, `none` included. Caches: `app/server/core/dem_cache.py::DEM_CACHE_SCHEMA_VERSION`
+  4 with the sampling size `sd` in the key; layer caches key on the sampling size;
+  `COMPOSITE_CACHE_VERSION` 7; hydrology print cache v2.
+- **Why:** user decision 2026-10-13. SanFranciso (dim 600, cosine, h5_local) came out 474 × 428:
+  the raw grid was 600 on the longitude side and cosine then narrowed it by ~0.79, so a 1 mm/px
+  print was 474 mm, not 600. After: 600 × 541 (sampled at 759 px). With `target_dim`, layers
+  sampled at any size land on the identical grid (`tests/test_projection_target_dim.py`).
+- **Rejected:** upsampling the projected grid back to `dim` — interpolates every cell twice;
+  stretching only the narrowed axis back to `dim` — the composite once did this (Apply to DEM widened
+  the model by 1/cos(lat)).
+- **Supersedes / superseded by:** refines [terrain-dem.md](terrain-dem.md) "Rasterize at the
+  pre-projection size, project once" (the pre-projection size is now `source_shape`, larger than `dim`).
+- **Source:** `tests/test_projection_target_dim.py`.
+
 ### 2026-10-02 — Gall is x = λ/√2 and sinusoidal fills its widest row; shapes are tested against textbook maths
 - **Decision:** `geo2stl/projections.py` Gall stereographic uses x = λ/√2 (`_X_SCALE`, passed to
   `_project_cylindrical_y`), and sinusoidal samples lon = centre + x·half_width·widest_cos/cos(lat), so

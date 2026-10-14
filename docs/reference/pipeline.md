@@ -62,10 +62,15 @@ browser: ───────────────> GET  /api/export/downloa
 | Client request; snapshots what it asked for | `app/client/static/js/modules/dem/dem-main.js::loadDEM` → `appState.lastDemRequest` |
 | Route (GET or POST; client sends GET) | `app/server/routers/terrain.py::get_terrain_dem` |
 | Source dispatch (OpenTopography / local tiles / HDF5) | `geo2stl/dem.py::fetch_dem` |
+| Depth scale + water subtraction, same for every source | `geo2stl/dem.py::apply_water_and_depth` (mask: `water_fraction_for_dem`) |
 | Raw array cached under the one DEM key | `app/server/core/dem_cache.py::dem_cache_key` |
 | Projection, applied after the cache on every request | `geo2stl/projections.py` ([projections.md](projections.md)) |
 | Projected grid stored; `dem_id` returned | `app/server/core/dem_store.py::DemStore` |
 
+- Water subtraction is on by default. The mask is ESA WorldCover (needs Earth Engine or a
+  cached image); without it only the sea (≤ 0 m, touching the edge) is lowered, the response's
+  `source_note` says so, and that DEM is not cached —
+  [terrain-dem](../decisions/terrain-dem.md).
 - `dem_id` names the exact grid the user saw (after projection and clipping); nothing is
   re-derived at export time.
 - Handles live in memory, spill to disk, expire after an hour and do not survive a restart;

@@ -56,4 +56,14 @@ describe('_createPreviewGate', () => {
         expect(gate.isDuplicate('a', true)).toBe(false);
         expect(gate.isDuplicate('b', false)).toBe(true);
     });
+
+    it('resends a request whose preview was cleared while in flight', () => {
+        const ticket = gate.begin('a');
+        gate.reset();                      // clearViewerModel
+        expect(gate.isDuplicate('a', false)).toBe(false);
+        const again = gate.begin('a');
+        gate.settle(ticket, false);        // the cleared one returns late: ignored
+        gate.settle(again, true);
+        expect(gate.isDuplicate('a', true)).toBe(true);
+    });
 });

@@ -198,12 +198,25 @@ async def get_city_raster(req: CityRasterRequest):
         }
 
     clip_valid_region = bool(req.clip_valid_region)
+    from geo2stl.projections import project_grid, source_dim
 
-    # Note: Cache key does NOT include projection or clip_valid_region.
+    # req.dim is the longest side after projection (user decision 2026-10-13):
+    # rasterise at the plate-carree size that projects to it, then project onto
+    # the DEM's exact grid with target_dim.
+    sdim = source_dim(req.dim, (req.north, req.south, req.east, req.west),
+                      req.projection, req.maintain_dimensions)
+
+    def _project(grid):
+        return project_grid(
+            grid, req.north, req.south, req.east, req.west,
+            req.projection, clip_valid_region, categorical=False,
+            maintain_dimensions=req.maintain_dimensions, target_dim=req.dim)
+
+    # Note: Cache key holds the sampling size, not projection or clip_valid_region.
     # Raw city raster is cached once per bbox; projection/clipping applied on fetch.
     cache_key = hashlib.md5(
         f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
-        f"_dim{req.dim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
+        f"_dim{sdim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
     ).hexdigest()
 
     # Cache check
@@ -217,14 +230,7 @@ async def get_city_raster(req: CityRasterRequest):
                 raw_h, raw_w)
 
             # Projection/clipping is always applied fresh from raw cached raster.
-            if req.projection != "none":
-                from geo2stl.projections import project_grid
-                grid = project_grid(
-                    grid,
-                    req.north, req.south, req.east, req.west,
-                    req.projection, clip_valid_region, categorical=False,
-                    maintain_dimensions=req.maintain_dimensions,
-                )
+            grid = _project(grid)
 
             cached_result = _sanitize_raster_result({
                 "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
@@ -259,7 +265,7 @@ async def get_city_raster(req: CityRasterRequest):
     try:
         result = await run_sync(
             _rasterize_city_data,
-            req.north, req.south, req.east, req.west, req.dim,
+            req.north, req.south, req.east, req.west, sdim,
             buildings, roads, waterways,
             req.building_scale, req.road_depression_m, req.water_depression_m,
         )
@@ -284,24 +290,19 @@ async def get_city_raster(req: CityRasterRequest):
         logger.debug(f"City raster cache write failed: {e}")
 
     # Apply map projection (all raster layers use the same pipeline)
-    if req.projection != "none":
-        from geo2stl.projections import project_grid
-
-        grid = np.array(result["values"], dtype=np.float32).reshape(
-            result["height"], result["width"])
-        grid = project_grid(grid, req.north, req.south, req.east, req.west,
-                            req.projection, clip_valid_region, categorical=False,
-                            maintain_dimensions=req.maintain_dimensions)
-        h, w = grid.shape
-        result = {
-            "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
-            "width": w,
-            "height": h,
-            "vmin": float(np.nanmin(grid)),
-            "vmax": float(np.nanmax(grid)),
-            "bbox": {"north": req.north, "south": req.south,
-                     "east": req.east, "west": req.west},
-        }
+    grid = np.array(result["values"], dtype=np.float32).reshape(
+        result["height"], result["width"])
+    grid = _project(grid)
+    h, w = grid.shape
+    result = {
+        "values": np.nan_to_num(grid, nan=0.0).flatten().tolist(),
+        "width": w,
+        "height": h,
+        "vmin": float(np.nanmin(grid)),
+        "vmax": float(np.nanmax(grid)),
+        "bbox": {"north": req.north, "south": req.south,
+                 "east": req.east, "west": req.west},
+    }
 
     result = _sanitize_raster_result(result)
 

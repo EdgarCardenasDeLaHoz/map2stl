@@ -32,8 +32,6 @@ from starlette.background import BackgroundTask
 from app.server.core.export_params import (
     ExportContext,
     _parse_export_params,
-    check_dem_grid,
-    resolve_dem,
 )
 from app.server.core.export_tasks import ExportTask
 
@@ -735,41 +733,38 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
 
 
 def generate_crosssection(data: dict):
-    """Generate a cross-section STL along a lat or lon cut line. Returns a FastAPI FileResponse."""
+    """Generate a cross-section STL along a lat or lon cut line. Returns a FastAPI FileResponse.
+
+    The profile is cut from the same terrain heightfield the model export builds
+    (:func:`_prepare_dem_array`: same DEM resolution, median filter, sea-level cap
+    and ``z_mode`` / exaggeration / model height / base), so the slab lines up
+    with the printed model. It used to min-max normalise the cut line itself to
+    ``model_height``, which was "fit" mode on one row whatever the model used.
+    """
     from fastapi.responses import FileResponse, JSONResponse
-
-    dem_values = data.get('dem_values', [])
-    height = data.get('height', 0)
-    width = data.get('width', 0)
-
-    # Settings-only mode: resolve DEM from cache
-    if not dem_values:
-        resolved = resolve_dem(data)
-        if resolved is not None:
-            dem_values, height, width = resolved
 
     north = float(data.get('north', 0))
     south = float(data.get('south', 0))
     east = float(data.get('east', 0))
     west = float(data.get('west', 0))
-    cut_axis = data.get('cut_axis', 'lat')
-    cut_value = float(data.get('cut_value', (north + south) / 2))
-    model_height = float(data.get('model_height', 20))
-    base_height = float(data.get('base_height', 3))
-    exaggeration = float(data.get('exaggeration', 1.0))
-    thickness_mm = float(data.get('thickness_mm', 5))
-    mm_per_pixel = float(data.get('mm_per_pixel', 1.0))
-    name = data.get('name', 'crosssection')
-
-    if not dem_values or not height or not width:
-        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
-    check_dem_grid(dem_values, height, width)   # ValueError -> 400 in the router
     if north <= south or east <= west:
         return JSONResponse(content={"error": "Invalid bbox for cross-section"},
                             status_code=400)
+    # Without a bbox, choose_scale falls back to "fit"; the flat edges are the bbox.
+    if not data.get('bbox'):
+        data = {**data, 'bbox': {'north': north, 'south': south, 'east': east, 'west': west}}
+    p = _parse_export_params(data)   # ValueError (bad grid) -> 400 in the router
+    if not p.dem_values or not p.height or not p.width:
+        return JSONResponse(content={"error": "Missing DEM data"}, status_code=400)
 
-    im = np.array(dem_values, dtype=np.float32).reshape(height, width)
+    cut_axis = data.get('cut_axis', 'lat')
+    cut_value = float(data.get('cut_value', (north + south) / 2))
+    thickness_mm = float(data.get('thickness_mm', 5))
+    mm_per_pixel = p.mm_per_pixel
+    name = data.get('name', 'crosssection')
 
+    im, _, _, _ = _prepare_dem_array(p)   # top surface in mm, base included
+    height, width = im.shape
     if cut_axis == 'lat':
         row = int(np.clip((north - cut_value) / (north - south) * height, 0, height - 1))
         profile = im[row, :]
@@ -778,17 +773,6 @@ def generate_crosssection(data: dict):
         col = int(np.clip((cut_value - west) / (east - west) * width, 0, width - 1))
         profile = im[:, col]
         label_axis = f"lon{cut_value:.4f}"
-
-    p_min = float(np.nanmin(profile))
-    p_max = float(np.nanmax(profile))
-    # Exaggeration after the normalisation, as in _prepare_dem_array; applied
-    # before it, a min-max normalise cancels it exactly.
-    profile = np.nan_to_num(profile, nan=p_min)
-    if p_max > p_min:
-        profile = (profile - p_min) / (p_max - p_min) * model_height * exaggeration
-    else:
-        profile = np.zeros_like(profile)
-    profile = profile + base_height
 
     # N rows of a grid span N-1 pixels, so the slab is thickness/mm_per_pixel
     # pixels plus one row. This rounded thickness_mm itself, which ignored the
@@ -800,7 +784,7 @@ def generate_crosssection(data: dict):
     temp_path, _ = _repair_and_export(vertices, faces, '.stl')
 
     fname = f"{name}_cross_{label_axis}.stl"
-    logger.info(f"Cross-section STL: {len(profile)} profile points, {thickness_px}mm slab")
+    logger.info(f"Cross-section STL: {len(profile)} profile points, {thickness_px}-row slab")
 
     return FileResponse(
         temp_path,

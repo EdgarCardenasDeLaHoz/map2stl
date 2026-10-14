@@ -465,8 +465,9 @@ class TestDEMLocalNormalization:
         assert 'dem_source != "local"' not in source, (
             "DEM endpoint still has the old dem_source != 'local' guard "
             "that skips projection for local sources")
-        # Should contain the uniform projection block
-        assert 'projection != "none"' in source
+        # Every source and every projection (even 'none') lands on the exact
+        # projected grid: dim is the longest side after projection.
+        assert "target_dim=dim" in source
 
 
 # ===================================================================

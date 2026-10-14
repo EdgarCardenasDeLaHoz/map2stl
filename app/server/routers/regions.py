@@ -373,7 +373,7 @@ async def get_region_landmarks(name: str):
 
 @router.put("/api/regions/{name}/landmarks/{osm_id:path}")
 async def save_region_landmark(name: str, osm_id: str, request: Request):
-    """Store one override: body ``{"kind": "osm"|"mesh"|"ndsm", ...}`` (city2stl.landmarks)."""
+    """Store one override: body ``{"kind": "osm"|"mesh"|"ndsm"|"height", ...}`` (city2stl.landmarks)."""
     from app.server.core.landmarks import save_region_override
     from city2stl.landmarks import LandmarkError
     try:

@@ -13,6 +13,8 @@
  *     rescaleDEM(newVmin, newVmax)               — reads window.appState.lastDemData/currentDemBbox
  *     resetRescale()                             — reads window.appState.lastDemData
  *
+ * Projection maths: projectedFrac from ./graticule.js (shared with the Edit map's grid).
+ *
  * Key external dependencies:
  *   window.renderDEMCanvas  — defined in app.js (writes closure lastDemData), exposed on window
  *   window.appState         — shared state proxy (currentDemBbox, lastDemData)
@@ -23,6 +25,8 @@
  *   updateStackedLayers()   — global from stacked-layers.js
  *   window.showToast()             — global from app.js file-top scope
  */
+
+import { projectedFrac } from './graticule.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Gridlines overlay
@@ -61,63 +65,14 @@ function drawGridlinesOverlay(containerId = 'demImage') {
     const projection = document.getElementById('paramProjection')?.value || 'none';
     const toRad = d => d * Math.PI / 180;
 
-    // --- Per-projection geo -> normalized-fraction mapping ------------------
-    // These MUST match the server-side transforms in geo2stl/projections.py
-    // (maintain_dimensions=True) so the graticule aligns with the reprojected
-    // DEM raster and the curvature of the lines shows the true distortion.
-    const mercY = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
-    const mercN = mercY(Math.min(85, north));
-    const mercS = mercY(Math.max(-85, south));
-    const mercRange = (mercN - mercS) || 1;
-
-    // cosine / equidistant share a factor: each row's width scales by
-    // cos(lat)/mean(cos(lat over the column)), centred.
-    const latSamplesForAvg = [];
-    for (let k = 0; k <= 64; k++) latSamplesForAvg.push(Math.cos(toRad(north - (k / 64) * latRange)));
-    const avgCos = latSamplesForAvg.reduce((a, b) => a + b, 0) / latSamplesForAvg.length || 1;
-
-    // lambert equal-area: y = sin(lat)
-    const lY = l => Math.sin(toRad(l));
-    const lN = lY(north), lS = lY(south);
-    const lRange = (lN - lS) || 1;
-
-    // Generic cylindrical y = f(lat) for Miller / Gall (match geo2stl exactly).
-    const clampLat = l => Math.max(-89.9, Math.min(89.9, l));
-    const millerY = l => 1.25 * Math.log(Math.tan(Math.PI / 4 + 0.4 * toRad(clampLat(l))));
-    const gallY = l => (1 + Math.SQRT2 / 2) * Math.tan(toRad(clampLat(l)) / 2);
-    const milN = millerY(north), milRange = (milN - millerY(south)) || 1;
-    const galN = gallY(north), galRange = (galN - gallY(south)) || 1;
-
-    const centerLon = (east + west) / 2;
-
-    // Returns {xFrac, yFrac} in [0,1] (or null if the point projects outside
-    // the raster, e.g. sinusoidal wings). Mirrors the server exactly.
-    function geoToFrac(lat, lon) {
-        const linX = (lon - west) / lonRange;
-        const linY = (north - lat) / latRange;
-        switch (projection) {
-            case 'mercator':
-                return { xFrac: linX, yFrac: (mercN - mercY(lat)) / mercRange };
-            case 'lambert':
-                return { xFrac: linX, yFrac: (lN - lY(lat)) / lRange };
-            case 'miller':
-                return { xFrac: linX, yFrac: (milN - millerY(lat)) / milRange };
-            case 'gall':
-                return { xFrac: linX, yFrac: (galN - gallY(lat)) / galRange };
-            case 'cosine':
-            case 'equidistant': {
-                const scale = Math.cos(toRad(lat)) / avgCos;
-                const xFrac = 0.5 + (linX - 0.5) * scale;
-                return { xFrac, yFrac: linY };
-            }
-            case 'sinusoidal': {
-                const xFrac = 0.5 + ((lon - centerLon) / lonRange) * Math.cos(toRad(lat));
-                return { xFrac, yFrac: linY };
-            }
-            default: // none
-                return { xFrac: linX, yFrac: linY };
-        }
-    }
+    // Geo -> raster fraction, shared with the Edit map's true grid (modules/dem/graticule.js),
+    // which mirrors geo2stl/projections.py, so the lines bend exactly as the raster does.
+    const maintainDimensions = document.getElementById('paramMaintainDimensions')?.checked ?? false;
+    const toFrac = projectedFrac(currentDemBbox, projection, maintainDimensions);
+    const geoToFrac = (lat, lon) => {
+        const f = toFrac(lat, lon);
+        return { xFrac: f.x, yFrac: f.y };
+    };
 
     let overlay = container.querySelector('.dem-gridlines-overlay');
     if (!overlay) {

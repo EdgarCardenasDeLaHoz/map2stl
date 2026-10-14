@@ -6,6 +6,8 @@ Uses a small 5×5 synthetic DEM to avoid heavy computation.
 
 import time
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Shared DEM fixture
 # ---------------------------------------------------------------------------
@@ -210,3 +212,58 @@ class TestExportGridCheck:
                 "north": 1.0, "south": 0.0, "east": 1.0, "west": 0.0}
         r = client.post("/api/export/crosssection", json=body)
         assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /api/export/crosssection
+# ---------------------------------------------------------------------------
+
+class TestCrossSection:
+    """The slab is cut from the model's own heightfield (same z_mode and mm/px)."""
+
+    _BODY = {**_EXPORT_BODY, "median_size": 0, "mm_per_pixel": 2.0, "thickness_mm": 4.0,
+             "north": 0.01, "south": 0.0, "east": 0.01, "west": 0.0,
+             "cut_axis": "lat", "cut_value": 0.005}
+
+    def _slab(self, client, **over):
+        import io
+
+        import trimesh
+        r = client.post("/api/export/crosssection", json={**self._BODY, **over})
+        assert r.status_code == 200, r.text
+        return trimesh.load(io.BytesIO(r.content), file_type="stl")
+
+    def _model_row(self, **over):
+        from app.server.core.export import _prepare_dem_array
+        from app.server.core.export_params import ExportContext
+        body = {**self._BODY, **over}
+        body["bbox"] = {k: body[k] for k in ("north", "south", "east", "west")}
+        im, *_ = _prepare_dem_array(ExportContext.from_request(body))
+        return im[2, :]   # cut_value 0.005 is the middle row of 5
+
+    def test_fit_mode_uses_the_whole_model_range(self, client):
+        # The middle row spans 10..14 m of a 0..24 m DEM: it must not be stretched
+        # to the full model height (the old per-row normalise made it 2..12 mm).
+        mesh = self._slab(client, z_mode="fit")
+        row = self._model_row(z_mode="fit")
+        assert mesh.bounds[1][2] == pytest.approx(row.max(), abs=1e-3)
+        assert mesh.bounds[1][2] < 2.0 + 10.0 - 1.0
+
+    def test_true_scale_matches_the_model(self, client):
+        mesh = self._slab(client, z_mode="true", exaggeration=3.0)
+        row = self._model_row(z_mode="true", exaggeration=3.0)
+        assert mesh.bounds[1][2] == pytest.approx(row.max(), abs=1e-3)
+
+    def test_mm_per_pixel_scales_the_length(self, client):
+        mesh = self._slab(client, z_mode="fit")
+        assert mesh.extents[0] == pytest.approx((_W - 1) * 2.0, abs=1e-3)
+
+    def test_default_base_is_5_mm(self, client):
+        body = {k: v for k, v in self._BODY.items() if k != "base_height"}
+        r = client.post("/api/export/crosssection", json={**body, "z_mode": "fit"})
+        import io
+
+        import trimesh
+        mesh = trimesh.load(io.BytesIO(r.content), file_type="stl")
+        assert mesh.bounds[1][2] == pytest.approx(self._model_row(z_mode="fit", base_height=5).max(),
+                                                  abs=1e-3)

@@ -60,6 +60,8 @@ function _onDemWorkerMessage({ data }) {
     const pending = _demWorkerPending.get(gen);
     _demWorkerPending.delete(gen);
     if (!pending) return;  // stale — discard
+    // Painted (or failed): a projection preview may hand over to this canvas now.
+    delete pending.canvas.dataset.pending;
 
     if (type === 'error') {
         console.warn('[dem-render-worker] error:', message);
@@ -466,6 +468,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         // buffer — the original `flat` may alias lastDemData.values.
         const flatValues = new Float32Array(flat);
         _demWorkerPending.set(gen, { canvas, ctx });
+        canvas.dataset.pending = '1';   // blank until the worker answers (projection-preview.js)
         worker.postMessage(
             { gen, values: flatValues, width, height, lut: lutCopy, vmin: min, vmax: max },
             [flatValues.buffer, lutCopy.buffer],

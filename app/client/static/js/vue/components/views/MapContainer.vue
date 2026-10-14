@@ -43,7 +43,7 @@
           <span id="terrainOpacityValueExplore" class="map-settings-opacity-value">70%</span>
         </div>
         <div class="map-settings-row">
-          <label><input type="checkbox" id="showGridlinesExplore"> Grid Lines</label>
+          <label><input type="checkbox" id="showGridlinesExplore" checked> Grid Lines</label>
         </div>
         <div class="map-settings-row">
           <label><input type="checkbox" id="showLabelsExplore"> Map Labels</label>

@@ -12,7 +12,9 @@ import trimesh
 from city2stl.city_model import (
     DEFAULT_LAYERS,
     build_city_model,
+    building_cover,
     choose_scale,
+    drop_building_copies,
     resolve_layers,
 )
 
@@ -323,6 +325,97 @@ class TestBuildingParts:
         high = b.vertices[b.vertices[:, 2] > ground + 30 * z]
         assert np.ptp(high[:, 0]) < 0.5 * np.ptp(b.vertices[:, 0])
         assert m.report["merged"]["watertight"]
+
+
+    def test_church_copy_does_not_cover_the_parts(self):
+        """The churches layer's copy of the outline is dropped; the parts stay visible."""
+        flat = np.full((120, 150), 100.0)
+        outline = self._rect(-3.5910, 37.1800, -3.5890, 37.1806)
+        nave = {"geometry": outline, "properties": {"height_m": 45}}
+        body = {"geometry": self._rect(-3.5910, 37.1800, -3.5895, 37.1806),
+                "properties": {"height_m": 20, "building:part": "yes"}}
+        tower = {"geometry": self._rect(-3.5895, 37.1801, -3.5890, 37.1805),
+                 "properties": {"height_m": 45, "building:part": "yes"}}
+        copy = {"geometry": outline, "properties": {"height_m": 45, "amenity": "place_of_worship"}}
+        m = build_city_model(flat, BBOX, {"buildings": _fc(nave, body, tower),
+                                          "churches": _fc(copy)})
+        assert m.report["layers"]["churches"]["building_copies_dropped"] == 1
+        assert "churches" not in m.parts
+        z = m.scale.z_mm_per_m
+        ground = m.merged.vertices[:, 2].min() + m.scale.base_mm
+        high = m.merged.vertices[m.merged.vertices[:, 2] > ground + 30 * z]
+        assert np.ptp(high[:, 0]) < 0.5 * np.ptp(m.parts["buildings"].vertices[:, 0])
+
+    def test_drop_building_copies_keeps_what_buildings_lack(self):
+        building = {"geometry": self._rect(0, 0, 10, 10), "properties": {}}
+        cover = building_cover([building])
+        inside = {"geometry": self._rect(1, 1, 9, 9)}
+        half_out = {"geometry": self._rect(8, 0, 18, 10)}          # 20 % inside
+        elsewhere = {"geometry": self._rect(50, 50, 60, 60)}
+        line = {"geometry": {"type": "LineString", "coordinates": [[1, 1], [9, 9]]}}
+        kept, dropped = drop_building_copies([inside, half_out, elsewhere, line], cover)
+        assert dropped == 1 and kept == [half_out, elsewhere, line]
+        assert drop_building_copies([inside], None) == ([inside], 0)
+
+
+class TestWallRings:
+    """Wall and fortification polygons print as their outline ring, in pieces that
+    follow the ground (user, 2026-10-14: "Outline ring only"; Granada's Alhambra
+    printed as one slab over 84 of its 85 buildings)."""
+
+    SLOPE = np.tile(100 + 1.5 * np.arange(150.0), (120, 1))   # 225 m of rise west -> east
+
+    @staticmethod
+    def _top_near(mesh, x, y, r):
+        v = mesh.vertices
+        near = (np.abs(v[:, 0] - x) < r) & (np.abs(v[:, 1] - y) < r)
+        return v[near, 2].max() if near.any() else -np.inf
+
+    @pytest.fixture(scope="class")
+    def model(self):
+        precinct = {"geometry": _square(-3.5915, 37.181, d=0.0035),     # ~620 m x 780 m
+                    "properties": {"height_m": 12, "name": "Precinct"}}
+        hall = {"geometry": _square(-3.5915, 37.181), "properties": {"height_m": 10}}
+        keep = {"geometry": _square(-3.600, 37.175, d=0.0003), "properties": {"height_m": 20}}
+        return build_city_model(self.SLOPE, BBOX, {"fortifications": _fc(precinct),
+                                                   "buildings": _fc(hall),
+                                                   "towers": _fc(keep)})
+
+    def test_polygon_prints_as_its_outline_ring(self, model):
+        f = model.parts["fortifications"]
+        (x0, y0, _), (x1, y1, _) = f.bounds
+        width = DEFAULT_LAYERS["fortifications"].min_width_mm     # 4 m is under it here
+        inner = ((f.vertices[:, 0] > x0 + width + 0.05) & (f.vertices[:, 0] < x1 - width - 0.05)
+                 & (f.vertices[:, 1] > y0 + width + 0.05) & (f.vertices[:, 1] < y1 - width - 0.05))
+        assert not inner.any()                       # nothing over the open ground inside
+        assert model.report["layers"]["fortifications"]["pieces"] > 1
+        assert model.report["merged"]["watertight"]
+
+    def test_building_inside_stands_above_the_ring(self, model):
+        b = model.parts["buildings"]
+        cx, cy = b.vertices[:, :2].mean(axis=0)
+        top = b.bounds[1, 2]
+        # The hall's roof is part of the merged print, not swallowed by a slab.
+        assert self._top_near(model.merged, cx, cy, 3.0) == pytest.approx(top, abs=1e-3)
+
+    def test_ring_top_follows_the_slope(self, model):
+        f = model.parts["fortifications"]
+        z = model.scale.z_mm_per_m
+        (x0, _, _), (x1, _, _) = f.bounds
+        quarter = (x1 - x0) / 4
+        west = f.vertices[f.vertices[:, 0] < x0 + quarter, 2].max()
+        east = f.vertices[f.vertices[:, 0] > x1 - quarter, 2].max()
+        rise = self.SLOPE[0, -1] - self.SLOPE[0, 0]
+        across_m = rise * (x1 - x0) / (self.SLOPE.shape[1] - 1) / model.scale.mm_per_px
+        # One flat top would make both equal; pieces step down the slope with it.
+        assert east - west > 0.5 * across_m * z
+
+    def test_tower_polygons_stay_filled(self, model):
+        t = model.parts["towers"]
+        (x0, y0, _), (x1, y1, _) = t.bounds
+        top_area = (x1 - x0) * (y1 - y0)
+        assert t.volume > 0.8 * top_area * 20 * model.scale.z_mm_per_m
+        assert "pieces" not in model.report["layers"]["towers"]
 
 
 class TestWater:

@@ -258,10 +258,22 @@ function _bedMm() {
     return [bed.w, bed.h];
 }
 
+/**
+ * A numeric field value, or `fallback` when it is not a number (or, with
+ * `positive`, not above zero). `parseFloat(x) || fallback` also replaced a
+ * legitimate 0: a 0 mm clearance was exported as 0.3 mm.
+ */
+function _numOr(raw, fallback, positive = false) {
+    const v = parseFloat(raw);
+    return Number.isFinite(v) && (!positive || v > 0) ? v : fallback;
+}
+
 /** Knob, engraving and layout options shared by both puzzle routes. */
 function _puzzleOptions() {
-    const num = (id, fallback) => parseFloat(document.getElementById(id)?.value) || fallback;
+    const num = (id, fallback) => _numOr(document.getElementById(id)?.value, fallback);
     return {
+        // 0 is valid for all three: a 0 knob size means "scale to the piece"
+        // (app/server/core/puzzle.py), a 0 clearance a press fit.
         knob_width_mm: num('splitKnobWidth', 20),
         knob_depth_mm: num('splitKnobDepth', 8),
         knob_shape: document.getElementById('splitKnobShape')?.value || 'classic',
@@ -271,6 +283,7 @@ function _puzzleOptions() {
 
 /** Request fields of the terrain puzzle (flat names, app/server/core/export.py:puzzle_spec). */
 function _puzzleExtra() {
+    // A 0 x N grid is not a puzzle, so 0 falls back here too.
     const cols = parseInt(document.getElementById('splitCols')?.value, 10) || 3;
     const rows = parseInt(document.getElementById('splitRows')?.value, 10) || 3;
     return {
@@ -308,7 +321,7 @@ function _cityExtra() {
     if (extra.layers.buildings?.enabled !== false && landmarks) extra.landmark_overrides = landmarks;
     if (document.getElementById('cityPuzzleEnabled')?.checked) {
         extra.puzzle = {
-            piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,
+            piece_mm: _numOr(document.getElementById('cityPieceMm')?.value, 200, true),
             ..._puzzleOptions(),
             engrave: document.getElementById('puzzleEngrave')?.checked ?? true,
             layout: document.getElementById('puzzleLayout')?.checked ?? false,
@@ -488,26 +501,27 @@ function downloadCrossSection() {
     const cutAxis = document.getElementById('crossSectionAxis')?.value || 'lat';
     const cutValue = parseFloat(document.getElementById('crossSectionValue')?.value);
     if (isNaN(cutValue)) { window.showToast('Enter a cut coordinate first', 'warning'); return; }
-    const thickness = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
+    const thickness = _numOr(document.getElementById('crossSectionThickness')?.value, 5, true);
     const statusEl = document.getElementById('crossSectionStatus');
     if (statusEl) statusEl.textContent = 'Generating…';
 
     const name = _regionName();
-    const md = window.appState.generatedModelData;
 
-    const ds = _demSettings();
+    // The same body as the model export (DEM settings + build fields: mm_per_pixel,
+    // z_mode, exaggeration, model/base height, median, sea-level cap), so the server
+    // cuts the slab from the heightfield the model was built from. It used to send
+    // three heights and no mm/px or vertical mode: the slab came out at 1 mm/px in
+    // Fit mode whatever the model used.
+    const params = _exportParams();
     fetch('/api/export/crosssection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            ...ds,
-            north: ds.bbox.north, south: ds.bbox.south,
-            east: ds.bbox.east, west: ds.bbox.west,
+            ...params,
+            north: params.bbox.north, south: params.bbox.south,
+            east: params.bbox.east, west: params.bbox.west,
             cut_axis: cutAxis,
             cut_value: cutValue,
-            model_height: md.modelHeight,
-            base_height: md.baseHeight,
-            exaggeration: md.exaggeration,
             thickness_mm: thickness,
             name
         })

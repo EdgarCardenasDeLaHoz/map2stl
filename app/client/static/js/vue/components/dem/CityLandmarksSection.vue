@@ -1,6 +1,6 @@
 <template>
   <CollapsibleSection id="cityLandmarksSection" title="🏛 Landmarks" sub="landmarks" :start-open="false"
-                      header-title="Notable buildings of the loaded city data: build them from OSM parts, a surveyed nDSM, or an uploaded mesh (F-LANDMARK)">
+                      header-title="Notable buildings of the loaded city data: build them from OSM parts, a known height, a surveyed nDSM, or an uploaded mesh (F-LANDMARK)">
     <div class="lm-head">
       <button id="findLandmarksBtn" class="btn btn-secondary btn-sm" :disabled="!!busy" @click="loadList"
               title="List places of worship, town halls, castles, attractions and the tallest buildings of the loaded city buildings">
@@ -45,10 +45,28 @@
 
       <div class="lm-kinds" role="radiogroup" aria-label="Landmark source">
         <label><input v-model="draft.kind" type="radio" value="osm" name="lmKind"> OSM parts</label>
+        <label title="OSM shape and parts, scaled so the top is at a height you enter">
+          <input v-model="draft.kind" type="radio" value="height" name="lmKind"> Height</label>
         <label :title="ndsmAvailable ? '' : 'No surveyed nDSM covers this building'">
           <input v-model="draft.kind" type="radio" value="ndsm" name="lmKind" :disabled="!ndsmAvailable"> nDSM</label>
         <label><input v-model="draft.kind" type="radio" value="mesh" name="lmKind"> Uploaded mesh</label>
       </div>
+
+      <template v-if="draft.kind === 'height'">
+        <div class="param-group lm-row">
+          <label for="lmHeight">Height (m)</label>
+          <input id="lmHeight" v-model.number="draft.height_m" type="number" min="1" :max="MAX_HEIGHT_M - 1" step="0.5"
+                 class="ctrl-input-sm lm-num" :placeholder="String(selected.height_m ?? '')"
+                 title="Top of the building above the ground; roofs and parts keep their proportions">
+        </div>
+        <div class="param-group lm-row">
+          <label for="lmHeightSource">Source</label>
+          <input id="lmHeightSource" v-model="draft.source" type="text" maxlength="200"
+                 class="ctrl-input-sm" placeholder="optional note, e.g. a link">
+        </div>
+        <div v-if="draft.height_m != null && !validHeight(draft.height_m)" class="lm-warn">
+          Height must be above 0 and below {{ MAX_HEIGHT_M }} m.</div>
+      </template>
 
       <template v-if="draft.kind === 'ndsm'">
         <div class="param-group lm-row">
@@ -105,8 +123,9 @@
  * Lists notable buildings of appState.osmCityData (POST /api/cities/landmarks:
  * places of worship, town halls, castles, attractions + the tallest N), with part
  * count, roof shapes, height and height source. Per landmark the source can be
- * OSM parts (default), a surveyed nDSM (provider list from the same call) or an
- * uploaded mesh (POST /api/layers/mesh/upload); "Preview" builds that landmark
+ * OSM parts (default), OSM parts scaled to a known height, a surveyed nDSM
+ * (provider list from the same call) or an uploaded mesh (POST
+ * /api/layers/mesh/upload); "Preview" builds that landmark
  * alone (POST /api/cities/landmarks/preview) into a small three.js view, "Save"
  * stores the override for the region (PUT /api/regions/{name}/landmarks/{osm_id})
  * and appState.cityLandmarkOverrides, which the City Model build sends as
@@ -117,7 +136,7 @@ import CollapsibleSection from '../shared/CollapsibleSection.vue';
 import { useAppStore } from '../../stores/app';
 import { buildingsWithOverrides } from '../../../modules/layers/building-heights.js';
 import {
-  CATEGORY_LABELS, draftFromSpec, meshBounds, overrideLabel, specFromDraft,
+  CATEGORY_LABELS, MAX_HEIGHT_M, draftFromSpec, meshBounds, overrideLabel, specFromDraft, validHeight,
 } from '../../../modules/layers/landmark-overrides.js';
 
 const store = useAppStore();
@@ -140,7 +159,8 @@ const features = computed<any[]>(() => (store as any).osmCityData?.buildings?.fe
 const hasBuildings = computed(() => features.value.length > 0);
 const overrides = computed<Record<string, any>>(() => (store as any).cityLandmarkOverrides || {});
 const ndsmAvailable = computed(() => sources.value.some((s) => s.available));
-const draftReady = computed(() => draft.value.kind !== 'mesh' || !!draft.value.upload_id);
+const draftReady = computed(() => (draft.value.kind === 'mesh' ? !!draft.value.upload_id
+  : draft.value.kind === 'height' ? validHeight(draft.value.height_m) : true));
 
 function isOverridden(it: any) {
   const k = it?.osm_id && overrides.value[it.osm_id]?.kind;
@@ -233,8 +253,10 @@ async function preview() {
   if (error) { errorMsg.value = error; return; }
   const rep = data.report?.landmarks?.[selected.value.osm_id];
   const size = (data.size_mm || []).map((v: number) => v.toFixed(0)).join(' × ');
-  previewInfo.value = (rep ? (rep.status === 'applied'
-    ? `${rep.kind} applied (${rep.source || rep.kind}, ${rep.replaced_features} OSM feature(s) replaced)`
+  const applied = (r: any) => (r.kind === 'height'
+    ? `height applied (${r.osm_height_m} m → ${r.height_m} m, ${r.scaled_features} OSM feature(s) scaled)`
+    : `${r.kind} applied (${r.source || r.kind}, ${r.replaced_features} OSM feature(s) replaced)`);
+  previewInfo.value = (rep ? (rep.status === 'applied' ? applied(rep)
     : `${rep.kind} not applied: ${rep.reason}`) : 'OSM tags and parts')
     + ` · ${size} mm at ${data.mm_per_m} mm/m · ${data.faces.length / 3} triangles`
     + (data.report?.watertight ? '' : ' · NOT watertight');

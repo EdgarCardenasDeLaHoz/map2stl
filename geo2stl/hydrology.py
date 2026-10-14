@@ -590,13 +590,25 @@ _RIVERS_MEMO_MAX = 3
 _RIVERS_LOCK = threading.Lock()
 
 
+class HydroRiversUnavailable(RuntimeError):
+    """A HydroRIVERS region could not be built or read: a failure, not "no rivers"."""
+
+
 def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
-    """Concatenated bbox reads of the regions' parquet files, or None when empty."""
+    """Concatenated bbox reads of the regions' parquet files, or None when empty.
+
+    Raises :class:`HydroRiversUnavailable` when a region's parquet cannot be built
+    or read. Returning None there made a broken install (pyarrow 26 against
+    numpy 1.26) look like a box without rivers, and every cache froze that
+    (Europa, 2026-10-14); raised, the composite skips the layer and retries.
+    """
     import geopandas as gpd
 
     gdfs = []
+    failed = []
     for region in regions:
         if _ensure_region_parquet(region) is None:
+            failed.append(region)
             continue
         pq = _region_parquet_path(region, order3plus=use_o3)
         if not pq.exists():
@@ -613,7 +625,11 @@ def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
         except Exception as e:
             logger.error(
                 "HydroRIVERS parquet read failed for '%s': %s", region, e)
+            failed.append(region)
 
+    if failed:
+        raise HydroRiversUnavailable(
+            f"HydroRIVERS region(s) {', '.join(failed)} unavailable (see the server log)")
     if not gdfs:
         return None
 

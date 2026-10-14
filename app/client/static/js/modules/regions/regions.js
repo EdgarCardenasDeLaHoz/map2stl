@@ -193,9 +193,19 @@ async function selectCoordinate(index, opts = {}) {
     window.clearLayerDisplays();
     // Clear city overlay so auto-load triggers for the new region
     if (typeof window.clearCityOverlay === 'function') window.clearCityOverlay();
-    // An imported mesh is registered against the previous region's bbox.
+    // An imported mesh is registered against the previous region's bbox, and so
+    // are the control point pairs picked for it.
     window.clearMeshLayer?.();
+    window.clearMeshPointPairs?.();
     window.clearBorders?.();
+    // The 3D viewer keeps the previous mesh until a new preview replaces it, and
+    // the dragged puzzle cuts come back on any region of the same size.
+    window.clearViewerModel?.();
+    // A city fetch task of the old region otherwise keeps its progress on screen
+    // and keeps polling into appState.cityFetch; aborting it also cancels the
+    // server-side task (over-size regions return before loadCityData clears it).
+    window.cancelCityFetch?.();
+    window.appState.cityFetch = null;
 
     // Highlight in sidebar list
     document.querySelectorAll('.coordinate-item').forEach(item => {
@@ -215,8 +225,9 @@ async function selectCoordinate(index, opts = {}) {
         _setEl('paramWaterScale', rp.water_scale ?? 0.05);
         _setChk('paramSubtractWater', rp.subtract_water !== false);
         _setEl('waterResolution', rp.dim ?? 600);
-        _setEl('exportModelHeight', rp.height ?? 10);
-        _setEl('exportBaseHeight', rp.base ?? 2);
+        _setEl('exportModelHeight', rp.height ?? 20);
+        _setEl('exportBaseHeight', rp.base ?? 5);
+        _setEl('mmPerPixel', 1.0);
         if (window.appState?.demParams) {
             window.appState.demParams.depthScale = rp.depth_scale ?? 0.5;
             window.appState.demParams.waterScale = rp.water_scale ?? 0.05;

@@ -27,6 +27,14 @@ What is deliberately *not* in the key
 ``projection`` and ``clip_valid_region`` are applied per request, after the
 cache read, so the raw grid is cached once per bbox and toggling a projection
 is free. Do not add them.
+
+What the projection *does* change is the size the raw grid is sampled at:
+``dim`` is the longest side after projection (user decision 2026-10-13), so the
+raw grid is :func:`geo2stl.projections.source_dim` on its longest side (759 px
+for a 600 px cosine San Francisco). The key therefore stores that sampling size
+(``sd``), not ``dim``: two projections that sample the same raw grid share an
+entry, and a request can never be served a grid sampled for another size.
+Pass ``projection`` in ``settings`` for that reason.
 """
 
 from __future__ import annotations
@@ -38,7 +46,12 @@ logger = logging.getLogger(__name__)
 
 # Bump when the *meaning* of a cached entry changes, so stale entries written
 # under the old interpretation are ignored rather than misread.
-DEM_CACHE_SCHEMA_VERSION = 3
+# v4 (2026-10-13): key holds the source sampling size, and every source path
+# subtracts water (before, h5_local and OpenTopography grids ignored it).
+# v5 (2026-10-14): h5_local fills tiles missing from the store from a fallback
+# source (geo2stl.dem::_fetch_h5_with_fallback); v4 h5_local entries held them as
+# a flat 0 (Amazon: 51 of 63 tiles).
+DEM_CACHE_SCHEMA_VERSION = 5
 
 # The canonical default for every field in the key. Both the writer
 # (routers/terrain.py) and the reader (core/export_params.py) resolve missing
@@ -104,11 +117,16 @@ def dem_cache_key(north: float, south: float, east: float, west: float,
     """Return the disk-cache key for a DEM at ``bbox`` with ``settings``.
 
     This is the only place the key is built. ``settings`` may be partial; it is
-    passed through :func:`normalize_dem_settings` first.
+    passed through :func:`normalize_dem_settings` first. ``settings["projection"]``
+    (default ``"none"``) is read only to work out the sampling size ``sd``.
     """
     from app.server.core.cache import make_cache_key
+    from geo2stl.projections import source_dim
 
     norm = normalize_dem_settings(settings)
+    projection = str((settings or {}).get("projection") or "none")
     payload = {"v": DEM_CACHE_SCHEMA_VERSION}
     payload.update({_KEY_ABBREV[name]: norm[name] for name in DEM_SETTING_DEFAULTS})
+    payload["sd"] = source_dim(norm["dim"], (north, south, east, west), projection,
+                               norm["maintain_dimensions"])
     return make_cache_key("dem", north, south, east, west, payload)

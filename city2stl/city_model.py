@@ -21,7 +21,10 @@ share stay exactly coincident and merge cleanly). Both tolerances are far below 
 
 Extruded layers (buildings, walls, towers, ...) sit on the highest terrain point
 under their footprint and carry a skirt down to the lowest, so nothing floats on
-a slope and nothing is buried. Surface layers (roads, green, rail, trails) are
+a slope and nothing is buried. Walls and fortifications (``RING_LAYERS``) print a
+polygon as its outline ring and are cut into ``WALL_PIECE_MM`` pieces first
+(``split_on_ground``), so their top follows the ground instead of standing at the
+highest point of a hillside. Surface layers (roads, green, rail, trails) are
 slabs that follow the terrain, raised or engraved. Water is cut flat.
 
 Outputs: ``merged`` (one watertight solid) and ``parts`` (terrain plus one
@@ -42,6 +45,7 @@ from typing import Literal
 import manifold3d as mf
 import numpy as np
 import shapely
+import shapely.geometry
 import trimesh
 from numpy2stl.core.extrude import close_surface, orient_ccw, prism, prisms
 from numpy2stl.core.heightfield import tin_solid
@@ -170,6 +174,16 @@ DEFAULT_LAYERS: dict[str, LayerStyle] = {
 # Earlier layers win where layers overlap in the multi-part output.
 LAYER_PRIORITY = ["buildings", "fortifications", "walls", "towers", "churches",
                   "waterways", "roads", "railways", "trails", "green"]
+
+# Layers whose *polygons* print as their outline ring (exterior and interior rings
+# buffered by the layer's line width), not as a filled area: a castle precinct or a
+# walled enclosure mapped as an area is a wall around open ground. Filled, Granada's
+# Alhambra (a 10 ha fortification polygon) became one slab over 93 of its 94
+# buildings (user, 2026-10-14: "Outline ring only"). Towers stay filled: solid.
+# These layers' footprints (rings and buffered lines alike) are also extruded in
+# WALL_PIECE_MM pieces (split_on_ground), each on the ground under it.
+RING_LAYERS = ("walls", "fortifications")
+WALL_PIECE_MM = 2.0   # grid cell a wall is cut into, so its top steps with the ground
 
 # OSM waterway class -> typical channel width (m) when the feature has no width tag.
 _WATERWAY_WIDTH_M = {"river": 20.0, "canal": 12.0, "stream": 4.0, "drain": 2.0, "ditch": 1.5}
@@ -383,6 +397,14 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                      terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
 
+    Lines are buffered by their width (:func:`_line_width_m`). Polygons in
+    ``RING_LAYERS`` (walls, fortifications) become their outline ring: every
+    exterior and interior ring buffered by the same width, centred on the
+    outline, so they print like a line wall drawn around the area (a polygon
+    narrower than the width comes out filled). From there both follow the line
+    path; :func:`build_layer` extrudes them in ground-following pieces
+    (:func:`split_on_ground`).
+
     Features narrower than ``style.min_width_mm`` at model scale are widened to it
     (a 2 m trail at 1:3500 is 0.6 mm: below what a 0.4 mm nozzle lays down).
     Extruded footprints (buildings) are not, and none is dropped for its size: they
@@ -401,12 +423,23 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     geoms = terrain.project(geoms)
     type_id = shapely.get_type_id(geoms)
     lines = (type_id == 1) | (type_id == 5)
-    if lines.any():
+    rings = ((type_id == 3) | (type_id == 6)) if name in RING_LAYERS else np.zeros_like(lines)
+    if lines.any() or rings.any():
+        banded = lines | rings
         width = terrain.m_to_mm([_line_width_m(name, props[i], style)
-                                 for i in np.flatnonzero(lines)])
+                                 for i in np.flatnonzero(banded)])
         counts["widened"] += int((width < style.min_width_mm).sum())
         half = np.maximum(width, style.min_width_mm) / 2
-        geoms[lines] = shapely.buffer(geoms[lines], half, cap_style="flat", join_style="mitre")
+        is_line = lines[banded]
+        geoms[lines] = shapely.buffer(geoms[lines], half[is_line], cap_style="flat",
+                                      join_style="mitre")
+        if rings.any():
+            # Outline band: the polygon grown by half the width minus it shrunk by
+            # as much (mitre joins, as the lines; holes get their own band).
+            area = shapely.make_valid(geoms[rings])
+            h = half[~is_line]
+            geoms[rings] = shapely.difference(shapely.buffer(area, h, join_style="mitre"),
+                                              shapely.buffer(area, -h, join_style="mitre"))
     geoms = shapely.make_valid(geoms)
     areas = (~lines) & (shapely.get_type_id(geoms) >= 3) & ~shapely.is_empty(geoms)
     if areas.any() and style.mode != "extrude":
@@ -478,6 +511,39 @@ def _roofed(poly: Polygon, props: dict, z_floor: float, ground_hi: float,
     # Keep the building if a roof cannot be closed: flat at mid-roof height.
     m = prism(poly, z_floor, top - roof_mm / 2)
     return [m] if m is not None else []
+
+
+def split_on_ground(polys: list[Polygon], cell_mm: float = WALL_PIECE_MM
+                    ) -> tuple[list[Polygon], np.ndarray]:
+    """Footprints cut by a ``cell_mm`` grid (origin 0, 0): (pieces, owner index).
+
+    For ``RING_LAYERS``: extruded whole, a wall's top is the highest ground under
+    the whole wall plus its height, so a wall running down a slope stands that
+    slope's relief too tall at its foot (the Alhambra's outline ring: 52 m where
+    it should be 12). Each piece is extruded on the ground under it instead, so the
+    top steps with the terrain (at most ``cell_mm`` x the slope between pieces).
+    Pieces of neighbouring footprints share the grid's cut lines.
+    """
+    if not polys:
+        return [], np.zeros(0, np.int64)
+    arr = np.asarray(polys, dtype=object)
+    b = shapely.bounds(arr)
+    i0 = np.floor(b[:, 0] / cell_mm).astype(np.int64)
+    j0 = np.floor(b[:, 1] / cell_mm).astype(np.int64)
+    ni = np.maximum(np.ceil(b[:, 2] / cell_mm).astype(np.int64) - i0, 1)
+    nj = np.maximum(np.ceil(b[:, 3] / cell_mm).astype(np.int64) - j0, 1)
+    cnt = ni * nj
+    k = np.repeat(np.arange(len(arr)), cnt)
+    r = np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+    ci, cj = i0[k] + r // nj[k], j0[k] + r % nj[k]
+    cells = shapely.box(ci * cell_mm, cj * cell_mm, (ci + 1) * cell_mm, (cj + 1) * cell_mm)
+    shapely.prepare(arr)
+    hit = shapely.intersects(arr[k], cells)
+    k, cells = k[hit], cells[hit]
+    cut = shapely.make_valid(shapely.set_precision(shapely.intersection(arr[k], cells), SNAP_MM))
+    parts, sub = shapely.get_parts(cut, return_index=True)
+    ok = (shapely.get_type_id(parts) == 3) & (shapely.area(parts) > 0)
+    return list(parts[ok]), k[sub[ok]]
 
 
 def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi: np.ndarray,
@@ -890,7 +956,10 @@ def terrain_tolerance(scale: ModelScale) -> float:
 
 
 def _polygon_constants() -> dict:
-    return {"simplify": SIMPLIFY_TOL_MM, "snap": SNAP_MM, "min_footprint": MIN_FOOTPRINT_MM2}
+    # wall_piece_mm is read by build_layer, not feature_polygons: it is here so
+    # that the solid key (built on this one) changes with it.
+    return {"simplify": SIMPLIFY_TOL_MM, "snap": SNAP_MM, "min_footprint": MIN_FOOTPRINT_MM2,
+            "ring_layers": list(RING_LAYERS), "wall_piece_mm": WALL_PIECE_MM}
 
 
 def _polygons_key(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
@@ -953,12 +1022,16 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
         polys, props, _, _ = assemble_parts(polys, props)
         arr = np.asarray(polys, dtype=object)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
-        lo, hi = terrain.ranges_under(polys)
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
         cap = (style.max_slenderness * _widths(arr)
                if style.max_slenderness > 0 else np.full(len(polys), np.inf))
         height = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
         out["clamped"] = int((height - base > cap).sum())
+        if name in RING_LAYERS:   # as build_layer: ground-following pieces
+            polys, owner = split_on_ground(polys)
+            arr = np.asarray(polys, dtype=object)
+            base, cap, height = base[owner], cap[owner], height[owner]
+        lo, hi = terrain.ranges_under(polys)
         # As in _roofed: never above base + cap, never thinner than min_height_mm.
         total = np.maximum(np.minimum(height, base + cap), style.min_height_mm)
         out["tallest_mm"] = round(float((hi - lo + total).max()), 2)
@@ -985,6 +1058,9 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
     (e.g. from :func:`layer_polygons`' cache).
     Extrude layers merge flat roofs printing at the same layer
     (:func:`merge_flat_roofs`; ``merged_from`` / ``merged_into`` in the counts).
+    ``RING_LAYERS`` (walls, fortifications) are extruded in ground-following
+    pieces (:func:`split_on_ground`; ``pieces`` in the counts), each keeping its
+    wall's height and slenderness cap.
     """
     polys, props, counts = polygons if polygons is not None else         feature_polygons(name, features, style, terrain)
     stats = {"features": len(features), "polygons": len(polys), **counts}
@@ -997,7 +1073,6 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
                 stats["landmark_replaced"] = n_before - len(polys)
         polys, props, stats["parts"], stats["outlines_replaced"] = assemble_parts(polys, props)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
-        lo, hi = terrain.ranges_under(polys)
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
         cap = (style.max_slenderness * _widths(np.asarray(polys, dtype=object))
                if style.max_slenderness > 0 and polys else np.full(len(polys), np.inf))
@@ -1005,6 +1080,13 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         # stands on its tower, not on the ground.
         want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m - base
         stats["clamped"] = int((want > cap).sum())
+        if name in RING_LAYERS:
+            # Pieces keep the whole wall's cap: a sliver cut at a cell corner is
+            # not a slender solid of its own.
+            polys, owner = split_on_ground(polys)
+            props, base, cap = [props[k] for k in owner], base[owner], cap[owner]
+            stats["pieces"] = len(polys)
+        lo, hi = terrain.ranges_under(polys)
         merged_solids, merged, mstats = merge_flat_roofs(
             polys, props, lo, hi, base, cap, z_per_m, style, terrain.rect)
         stats.update(mstats)
@@ -1246,6 +1328,65 @@ def build_city_model(
                             trail_context=trail_context)
 
 
+#: Layers whose OSM query also returns features the buildings layer already has
+#: (a cathedral is ``building=cathedral`` and ``amenity=place_of_worship``).
+BUILDING_COPY_LAYERS = ("churches", "towers", "fortifications")
+
+
+def _polygons(feats: list[dict]) -> tuple[list[int], np.ndarray]:
+    """Indices and valid shapely geometries of the polygonal features (others skipped)."""
+    idx, geoms = [], []
+    for i, f in enumerate(feats):
+        g = (f or {}).get("geometry") or {}
+        if g.get("type") not in ("Polygon", "MultiPolygon"):
+            continue
+        try:
+            geoms.append(shapely.geometry.shape(g))
+        except (ValueError, TypeError, AttributeError):
+            continue
+        idx.append(i)
+    arr = shapely.make_valid(np.asarray(geoms, dtype=object)) if geoms else np.empty(0, object)
+    keep = ~shapely.is_empty(arr) & (shapely.area(arr) > 0) if len(arr) else np.zeros(0, bool)
+    return [i for i, k in zip(idx, keep, strict=True) if k], arr[keep]
+
+
+def building_cover(building_feats: list[dict]) -> shapely.STRtree | None:
+    """Spatial index of the buildings layer's footprints for :func:`drop_building_copies`."""
+    _, geoms = _polygons(building_feats)
+    return shapely.STRtree(geoms) if len(geoms) else None
+
+
+def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tuple[list[dict], int]:
+    """Drop the polygons in ``feats`` that lie at least ``REPLACE_OVERLAP`` inside buildings.
+
+    The ``churches``, ``towers`` and ``fortifications`` queries return the same
+    outlines the buildings layer has, but with only a name and no ``building:part``
+    data. Extruded on their own they become one flat block at the outline's height
+    that swallows the building's parts (Granada Cathedral: a 45 m slab over 41
+    parts of 16.5 to 50 m). The buildings layer draws those footprints properly,
+    so these layers keep only what it lacks. Lines and points are kept. Same rule
+    as ``city2stl.landmarks.LandmarkPlan.take``. ``cover`` comes from
+    :func:`building_cover`. Returns the kept features and how many were dropped.
+    """
+    from city2stl.landmarks import REPLACE_OVERLAP
+
+    if cover is None or not feats:
+        return feats, 0
+    idx, geoms = _polygons(feats)
+    drop = set()
+    for i, g in zip(idx, geoms, strict=True):
+        hits = cover.query(g, predicate="intersects")
+        if not len(hits):
+            continue
+        try:
+            inside = shapely.area(shapely.intersection(g, shapely.union_all(cover.geometries[hits])))
+        except shapely.errors.GEOSException:
+            continue
+        if inside >= REPLACE_OVERLAP * g.area:
+            drop.add(i)
+    return [f for i, f in enumerate(feats) if i not in drop], len(drop)
+
+
 def build_on_terrain(
     z_mm: np.ndarray,
     bbox: dict | None,
@@ -1321,6 +1462,9 @@ def build_on_terrain(
     cuts: dict[str, mf.Manifold] = {}
     layer_keys: dict[str, str] = {}
     plan = LandmarkPlan(landmark_overrides) if landmark_overrides else None
+    building_feats = (layers_geojson.get("buildings") or {}).get("features") or []
+    buildings_on = bool(building_feats) and getattr(styles.get("buildings"), "enabled", False)
+    cover = None  # built on first use: indexing a city's footprints takes seconds
     for name in LAYER_PRIORITY + [n for n in styles if n not in LAYER_PRIORITY]:
         style = styles.get(name)
         feats = (layers_geojson.get(name) or {}).get("features") or []
@@ -1328,11 +1472,21 @@ def build_on_terrain(
             continue
         if not bbox:
             raise ValueError(f"layer {name!r} needs the model's bbox to place its features")
+        copies = 0
+        if name in BUILDING_COPY_LAYERS and buildings_on:
+            if cover is None:
+                cover = building_cover(building_feats)
+            feats, copies = drop_building_copies(feats, cover)
+            if not feats:
+                report["layers"][name] = {"mode": style.mode, "building_copies_dropped": copies}
+                continue
         t0 = time.perf_counter()
         u, rep, layer_keys[name] = _layer_solid(name, feats, style, terrain, plan,
                                                 terrain_digest, cache)
         rep["seconds"]["total"] = round(time.perf_counter() - t0, 2)
         report["layers"][name] = {"mode": style.mode, **rep}
+        if copies:
+            report["layers"][name]["building_copies_dropped"] = copies
         if name == "trails" and trail_stats:
             report["layers"][name].update(trail_stats)
         if u is not None:

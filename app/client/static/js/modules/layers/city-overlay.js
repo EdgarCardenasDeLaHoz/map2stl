@@ -348,6 +348,9 @@ window.loadCityData = async function loadCityData() {
             signal,
             onStatus: (st) => {
                 if (_cityDataAbortController?.signal !== signal) return;   // superseded
+                // runCityFetch reports the cancelled task once more after an abort;
+                // that must not put the old region's progress back on screen.
+                if (signal.aborted) return;
                 window.appState.cityFetch = st;
                 if (statusEl && st.status === 'running') {
                     statusEl.textContent = `Fetching from OpenStreetMap… ${summarizeCityFetch(st)}`;

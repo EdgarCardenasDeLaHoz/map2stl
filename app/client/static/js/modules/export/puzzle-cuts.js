@@ -59,3 +59,108 @@ export function isCustom(edges) {
 export function roundEdges(edges) {
     return edges.map(e => Math.round(e * 10) / 10);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jigsaw outline (the shape the server actually cuts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The knob outlines numpy2stl offers (applications/puzzle.py KNOB_SHAPES). */
+export const KNOB_SHAPES = ['classic', 'dovetail', 'rectangular'];
+
+/**
+ * Tongue outline in the edge frame, as `[[u, v], ...]` from the root at
+ * v < 0 round to the root at v > 0: `u` runs 0..`depth` away from the cut,
+ * `v` across it. `halfWidth` is half the widest part.
+ *
+ * Same three shapes as numpy2stl's `_tongue`: `classic` is a rounded head
+ * (an ellipse 0.9 * depth by the full width) on a neck half as wide,
+ * `dovetail` widens from 0.6x at the cut to the full width at the tip,
+ * `rectangular` is a plain tab.
+ */
+export function tonguePath(shape, halfWidth, depth, segments = 16) {
+    const k2 = halfWidth;
+    const d = depth;
+    if (shape === 'rectangular') return [[0, -k2], [d, -k2], [d, k2], [0, k2]];
+    if (shape === 'dovetail') return [[0, -0.6 * k2], [d, -k2], [d, k2], [0, 0.6 * k2]];
+    if (shape !== 'classic') throw new Error(`unknown knob shape ${shape}`);
+    // Neck out to u = 0.55 d at half width, then the head's ellipse from the
+    // point where it leaves the neck (-150°) round the tip to +150°.
+    const pts = [[0, -0.5 * k2]];
+    const t0 = -Math.PI * 5 / 6;
+    const n = Math.max(4, Math.round(segments));
+    for (let i = 0; i <= n; i++) {
+        const t = t0 + (2 * Math.PI * 5 / 6) * (i / n);
+        pts.push([0.55 * d + 0.45 * d * Math.cos(t), k2 * Math.sin(t)]);
+    }
+    pts.push([0, 0.5 * k2]);
+    return pts;
+}
+
+/**
+ * True when the server would accept this knob on pieces `pieceW` × `pieceH` mm
+ * (numpy2stl `jigsaw_outlines`: depth + width / 2 + 2 * clearance < min / 2).
+ */
+export function knobFits(knobWidth, knobDepth, clearance, pieceW, pieceH) {
+    const k2 = knobWidth / 2;
+    return Math.min(k2, knobDepth) > 0
+        && knobDepth + k2 + 2 * clearance < Math.min(pieceW, pieceH) / 2;
+}
+
+/**
+ * One cut as a model-mm polyline: the shared edge from `lo` to `hi` with the
+ * tongue crossing it at `centre`.
+ *
+ * `axis` 0 is a vertical cut at x = `at` (`lo`/`hi` are y), axis 1 a horizontal
+ * cut at y = `at` (`lo`/`hi` are x); `sign` is the direction the tongue points
+ * along that axis. A zero-size knob gives the straight edge.
+ */
+export function cutPolyline({ axis, at, lo, hi, centre, sign, shape = 'classic',
+    halfWidth = 0, depth = 0, segments = 16 }) {
+    const frame = axis === 0
+        ? ([u, v]) => [at + sign * u, centre + v]
+        : ([u, v]) => [centre + v, at + sign * u];
+    if (Math.min(halfWidth, depth) <= 0) return [frame([0, lo - centre]), frame([0, hi - centre])];
+    return [frame([0, lo - centre]),
+        ...tonguePath(shape, halfWidth, depth, segments).map(frame),
+        frame([0, hi - centre])];
+}
+
+/**
+ * Every interior cut of the grid as a model-mm polyline, following the
+ * server's checkerboard tongue direction (numpy2stl `jigsaw_outlines`):
+ * vertical cuts point +x in even rows and -x in odd rows, horizontal cuts
+ * +y in even columns and -y in odd columns.
+ *
+ * `{ polylines, knobs }` — `knobs` is false when the knob does not fit the
+ * smallest piece (or is zero), in which case the cuts are straight lines, as
+ * the server would refuse the knob anyway.
+ */
+export function jigsawCuts(colEdges, rowEdges, { shape = 'classic', knobWidth = 0,
+    knobDepth = 0, clearance = 0, segments = 16 } = {}) {
+    const cols = colEdges.length - 1;
+    const rows = rowEdges.length - 1;
+    const minSpan = (e) => e.slice(1).reduce((m, v, i) => Math.min(m, v - e[i]), Infinity);
+    const knobs = KNOB_SHAPES.includes(shape)
+        && knobFits(knobWidth, knobDepth, clearance, minSpan(colEdges), minSpan(rowEdges));
+    const knob = knobs ? { shape, halfWidth: knobWidth / 2, depth: knobDepth, segments } : {};
+    const polylines = [];
+    for (let r = 0; r < rows; r++) {
+        const yc = (rowEdges[r] + rowEdges[r + 1]) / 2;
+        for (let q = 0; q < cols - 1; q++) {
+            polylines.push(cutPolyline({
+                axis: 0, at: colEdges[q + 1], lo: rowEdges[r], hi: rowEdges[r + 1],
+                centre: yc, sign: r % 2 === 0 ? 1 : -1, ...knob,
+            }));
+        }
+    }
+    for (let q = 0; q < cols; q++) {
+        const xc = (colEdges[q] + colEdges[q + 1]) / 2;
+        for (let r = 0; r < rows - 1; r++) {
+            polylines.push(cutPolyline({
+                axis: 1, at: rowEdges[r + 1], lo: colEdges[q], hi: colEdges[q + 1],
+                centre: xc, sign: q % 2 === 0 ? 1 : -1, ...knob,
+            }));
+        }
+    }
+    return { polylines, knobs };
+}

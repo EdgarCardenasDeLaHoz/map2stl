@@ -47,7 +47,7 @@ let demOverlayLayer = null;
 let demOverlayLoading = false;
 let terrainOverlayLayer = null;
 let mapGridLayer = null;
-let mapGridEnabled = false;
+let mapGridEnabled = true;  // every grid starts on (2026-10-14)
 let _drawControl = null;
 
 // Color palette for different bounding boxes (distinct, easy to tell apart)
@@ -505,8 +505,9 @@ function initMap() {
             north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
     });
 
-    // Initialize map grid
+    // Initialize map grid (on by default, like the Edit map's grids)
     initMapGrid();
+    toggleMapGrid(mapGridEnabled);
 }
 window.initMap = initMap;
 

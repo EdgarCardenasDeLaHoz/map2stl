@@ -271,6 +271,9 @@ async function _fetchCityRaster(demW, demH) {
         north: bbox.north, south: bbox.south,
         east: bbox.east, west: bbox.west,
         width: reqW, height: reqH,
+        // The DEM's dim (longest side after projection): the server projects
+        // onto exactly the DEM's grid instead of the legacy projected size.
+        dim: Math.max(demW, demH),
         projection,
         maintain_dimensions: maintainDimensions,
         detail,

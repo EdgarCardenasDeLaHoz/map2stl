@@ -9,18 +9,27 @@
  * Public API (all on window):
  *   haversineDiagKm(N, S, E, W)                — bbox diagonal in km
  *   updatePuzzlePreview()                       — draw puzzle cut lines in viewer
- *   window.setViewerAutoRotate(val)             — set auto-rotate flag from app.js
- *   window.resetViewerCamera()                  — fit camera to current mesh
+ *   window.setViewerAutoRotate(val)             — orbit the camera around the model
+ *   window.resetViewerCamera()                  — fit camera to everything shown
  *   window.rebuildViewerColors(cmap)            — recolor mesh from a colormap name
- *   window.setViewerNormals(bool)               — toggle normals-debug material
+ *   window.setViewerNormals(bool)               — toggle normals-debug material (every mesh)
+ *   window.setViewerWireframe(bool)             — toggle wireframe (every mesh)
+ *   window.refreshCityLayers()                  — City model layer edited: quick view now,
+ *                                                 finished model rebuilt after 1.5 s
  *   window.updateBedOutline()                   — redraw the printer-bed outline
  *   window.puzzleEdgesFor(cols, rows)           — dragged cut positions {col_edges_mm,
  *                                                 row_edges_mm} for that grid, or null
  *   window.resetPuzzleEdges()                   — back to the even split
+ *   window.clearViewerModel()                   — drop the previous region's mesh,
+ *                                                 overlays, HUD and dragged cuts
  *
  * Puzzle cut lines (updatePuzzlePreview) are drawn at appState.puzzleEdges when
- * they belong to the current grid, else evenly; a plain left drag near a line
- * moves that cut (modules/export/puzzle-cuts.js) and fires 'puzzle-edges-changed'.
+ * they belong to the current grid, else evenly, with the jigsaw knobs the
+ * export sends (modules/export/puzzle-cuts.js jigsawCuts); a plain left drag
+ * near a line moves that cut and fires 'puzzle-edges-changed'.
+ *
+ * The HUD (#viewerHud, top left) holds the mesh stats and the printer bed's
+ * size and fit warning, so nothing is written over the model itself.
  *
  * State exposed on window.appState:
  *   window.appState.terrainMesh  — current terrain mesh (or null)
@@ -36,10 +45,10 @@
 
 import { parseBedSize, piecesNeeded } from './print-scale.js';
 import { buildingPrisms, demGroundMm } from './city-quickview.js';
-import { parseModelParts, partColor, toViewerFrame } from './city-fullmodel.js';
+import { parseModelParts, partColor, staleParts, toViewerFrame } from './city-fullmodel.js';
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import {
-    evenEdges, gridKey, isCustom, minPieceMm, moveEdge, nearestEdge, roundEdges,
+    evenEdges, gridKey, isCustom, jigsawCuts, minPieceMm, moveEdge, nearestEdge, roundEdges,
 } from './puzzle-cuts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -52,13 +61,21 @@ let modelRenderer = null;
 let terrainMesh   = null;
 let cityQuickMesh = null;      // buildings on the preview until the City Model replaces them
 let cityFullGroup = null;      // the finished City Model's parts (city-fullmodel.js)
-// The background City Model build: its request key, state and finished parts file.
-const _full = { key: '', state: 'idle', buffer: null, timer: null, frame: null,
-                pendingKey: '', pendingStatus: '', run: null };
+// The background City Model build: its request key and layers, state ('idle' |
+// 'scheduled' | 'running' | 'done' | 'error'), finished parts file, the preview
+// status line its progress is appended to, and the display frame of its preview.
+const _full = { key: '', layers: {}, state: 'idle', buffer: null, timer: null, frame: null,
+                status: '', run: null };
+// What a City model layer edit needs from the last good preview (refreshCityLayers):
+// the few fields of its data and its status line for a given quick-view count.
+let _lastPreview = null;
 let viewerAutoRotate = false;
 let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
-let _resizeHandler = null;      // reference for cleanup on re-init
+let _wireframeActive = false;   // Wireframe checkbox, applied to every displayed mesh
+let _satToken = 0;              // latest satellite drape request (_applySatelliteTexture)
+let _resizeObserver = null;     // reference for cleanup on re-init
+let _loopId = 0;                // the render loop that is current; a re-init starts a new one
 // Latest mesh scale info, set by _buildMeshFromPreview, read by _updateSceneOverlays
 let geometry_scale_for_overlays = { scale: 1, cols: 0, rows: 0, totalHeightMm: 0 };
 
@@ -92,9 +109,9 @@ function initModelViewer() {
         modelRenderer.dispose();
         modelRenderer = null;
     }
-    if (_resizeHandler) {
-        window.removeEventListener('resize', _resizeHandler);
-        _resizeHandler = null;
+    if (_resizeObserver) {
+        _resizeObserver.disconnect();
+        _resizeObserver = null;
     }
 
     container.innerHTML = '';
@@ -145,23 +162,31 @@ function initModelViewer() {
     container.appendChild(hud);
 
     _setupOrbitControls();
+    // The checkbox may have been ticked before the first preview built the viewer.
+    if (document.getElementById('viewerWireframe')?.checked) _wireframeActive = true;
 
-    _resizeHandler = () => {
-        if (!container.offsetParent) return;
+    // Watches the container rather than the window: a window resize while the
+    // Extrude view was hidden used to be ignored, leaving the canvas at the old
+    // size when the view came back. A hidden container reports 0×0 and is sized
+    // again when it is shown.
+    _resizeObserver = new ResizeObserver(() => {
         const w = container.clientWidth, h = container.clientHeight;
+        if (!w || !h) return;
         modelCamera.aspect = w / h;
         modelCamera.updateProjectionMatrix();
         modelRenderer.setSize(w, h);
         needsRender = true;
-    };
-    window.addEventListener('resize', _resizeHandler);
+    });
+    _resizeObserver.observe(container);
 
+    const loop = ++_loopId;
     (function animate() {
+        if (loop !== _loopId) return;
         requestAnimationFrame(animate);
-        if (viewerAutoRotate && terrainMesh) {
-            terrainMesh.rotation.y += 0.005;
-            needsRender = true;
-        }
+        // Nothing to draw while the Extrude view or the browser tab is hidden; a
+        // change made meanwhile stays pending in needsRender until it is shown.
+        if (document.hidden || !container.isConnected || container.offsetParent === null) return;
+        if (viewerAutoRotate && !_isDragging && !_cutDrag) _orbitBy(0.005, 0);
         if (needsRender) {
             modelRenderer.render(modelScene, modelCamera);
             needsRender = false;
@@ -249,10 +274,15 @@ function _setupOrbitControls() {
 }
 
 function _orbitRotate(dx, dy) {
+    _orbitBy(dx * 0.012, dy * 0.012);
+}
+
+/** Turn the camera about orbitTarget: dTheta around the vertical, dPhi towards the top (radians). */
+function _orbitBy(dTheta, dPhi) {
     _rotOffset.copy(modelCamera.position).sub(orbitTarget);
     _rotSph.setFromVector3(_rotOffset);
-    _rotSph.theta -= dx * 0.012;
-    _rotSph.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, _rotSph.phi - dy * 0.012));
+    _rotSph.theta -= dTheta;
+    _rotSph.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, _rotSph.phi - dPhi));
     _rotOffset.setFromSpherical(_rotSph);
     modelCamera.position.copy(orbitTarget).add(_rotOffset);
     modelCamera.lookAt(orbitTarget);
@@ -276,9 +306,19 @@ function _orbitPan(dx, dy) {
 // Camera fit
 // ─────────────────────────────────────────────────────────────────────────────
 
-function _fitCameraToMesh(mesh) {
-    if (!mesh || !modelCamera) return;
-    const box     = new THREE.Box3().setFromObject(mesh);
+/** Bounds of every displayed model mesh: the terrain or the finished model, and the buildings. */
+function _visibleBounds() {
+    const box = new THREE.Box3();
+    // Box3.setFromObject counts hidden children too (the preview terrain under the
+    // finished model, a disabled layer's part), so only the visible meshes go in.
+    for (const root of [terrainMesh, cityQuickMesh, cityFullGroup]) {
+        root?.traverseVisible(o => { if (o.isMesh) box.expandByObject(o); });
+    }
+    return box;
+}
+
+function _fitCamera(box) {
+    if (!modelCamera || box.isEmpty()) return;
     const center  = box.getCenter(new THREE.Vector3());
     const size    = box.getSize(new THREE.Vector3());
     const maxDim  = Math.max(size.x, size.y, size.z);
@@ -295,7 +335,7 @@ function _fitCameraToMesh(mesh) {
 }
 
 function resetViewerCamera() {
-    if (terrainMesh) _fitCameraToMesh(terrainMesh);
+    _fitCamera(_visibleBounds());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,17 +464,11 @@ function _updateSceneOverlays(data) {
         zLabel.position.set(-viewW / 2 - 5, -1, 0);
         horizGroup.add(zLabel);
     }
-    const cellLabel = _makeTextSprite(`grid ${Math.round(cellMm)} mm`, { fontSize: 16, color: '#cccccc' });
-    cellLabel.position.set(viewW / 2 - 8, -1, -viewD / 2 - 6);
-    horizGroup.add(cellLabel);
-
-    const r = window.appState?.currentRegion;
-    if (r && typeof haversineDiagKm === 'function') {
-        const diagKm = haversineDiagKm(r.north, r.south, r.east, r.west);
-        const label = _makeTextSprite(`${diagKm.toFixed(1)} km diag`, { fontSize: 16, color: '#cccccc' });
-        label.position.set(viewW / 2 - 12, -1, viewD / 2 + 10);
-        horizGroup.add(label);
-    }
+    // The grid's cell size is a HUD line, not a sprite: as a sprite it sat over
+    // the model itself from most camera angles. The km diagonal is already a HUD
+    // line (_updateHud), so it has no sprite either.
+    _hudGrid = `grid ${Math.round(cellMm)} mm`;
+    _renderHud();
     if (horizGroup.children.length > 0) modelScene.add(horizGroup);
 
     updateBedOutline();
@@ -454,7 +488,7 @@ function updateBedOutline() {
         modelScene.remove(old);
     }
     const g = geometry_scale_for_overlays;
-    if (!terrainMesh || !g.widthMm) { needsRender = true; return; }
+    if (!terrainMesh || !g.widthMm) { _hudBed = null; _renderHud(); needsRender = true; return; }
 
     const bed = parseBedSize(
         document.getElementById('bedSizeSelect')?.value,
@@ -475,10 +509,9 @@ function updateBedOutline() {
         new THREE.Vector3(-hw, y, -hd),
     ]);
     group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color })));
-    const label = _makeTextSprite(`bed ${bed.w}×${bed.h} mm${fits ? '' : ' — model larger'}`,
-        { fontSize: 16, color: fits ? '#8cc8f0' : '#f0a060' });
-    label.position.set(-hw + 12, y, -hd - 4);
-    group.add(label);
+    // The bed's size and the fit warning read in the HUD, off the model.
+    _hudBed = { text: `bed ${bed.w}×${bed.h} mm${fits ? '' : ' — model larger'}`, fits };
+    _renderHud();
     modelScene.add(group);
     needsRender = true;
 }
@@ -508,7 +541,7 @@ function _num(id, fallback, { positive = false, int = false } = {}) {
 function _readBuildParams() {
     const checked = (id) => document.getElementById(id)?.checked || false;
     return {
-        model_height:     _num('exportModelHeight', 30, { positive: true }),
+        model_height:     _num('exportModelHeight', 20, { positive: true }),
         base_height:      _num('exportBaseHeight', 5),
         exaggeration:     _num('exportExaggeration', 1.0, { positive: true }),
         mm_per_pixel:     _num('mmPerPixel', 1.0, { positive: true }),
@@ -554,6 +587,10 @@ function _createPreviewGate() {
         settle(ticket, ok) {
             if (ticket === last) last.state = ok ? 'done' : 'failed';
         },
+        /** Forget the last request (the viewer was cleared): an identical one is sent again. */
+        reset() {
+            last = null;
+        },
     };
 }
 
@@ -595,13 +632,15 @@ async function previewModelIn3D() {
     const hadModel = !!window.appState.generatedModelData;
     try {
         const { data, error: previewErr } = await window.api.export.preview(body);
-        if (seq !== _previewSeq) return;          // superseded by a newer rebuild
+        if (seq !== _previewSeq) {                // superseded by a newer rebuild or a clear
+            _previewGate.settle(ticket, false);
+            return;
+        }
         if (previewErr) throw new Error(previewErr);
 
         const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
         _replaceMesh(_buildMeshFromPreview(data, cmap));
         if (cmap === 'satellite') _applySatelliteTexture();
-        _fitCameraToMesh(terrainMesh);
         _updateHud(data);
         _updateSceneOverlays(data);
         const quick = _updateCityQuickView(data);
@@ -626,14 +665,20 @@ async function previewModelIn3D() {
         window._setExportButtonsEnabled?.(true);
         window.updatePrintDimensions?.();     // peak height from this preview's z_max
         window.appState._updateWorkflowStepper?.();
-        if (statusEl) {
-            const warn = data.composite_error ? `  ⚠ composite failed, raw DEM shown` : '';
-            statusEl.textContent = `Preview: ${ldd.width}×${ldd.height}, `
-                + `${data.face_count.toLocaleString()} faces, `
-                + `${(data.z_max ?? 0).toFixed(1)} mm tall`
-                + (quick ? `, ${quick.toLocaleString()} buildings (quick view)` : '') + warn;
-        }
-        _scheduleFullModel(data, statusEl?.textContent || '');
+        const w = ldd.width, h = ldd.height;
+        const warn = data.composite_error ? `  ⚠ composite failed, raw DEM shown` : '';
+        const statusFor = (n) => `Preview: ${w}×${h}, `
+            + `${data.face_count.toLocaleString()} faces, `
+            + `${(data.z_max ?? 0).toFixed(1)} mm tall`
+            + (n ? `, ${n.toLocaleString()} buildings (quick view)` : '') + warn;
+        // Only what the quick view and the City Model frame read: the vertices are large.
+        _lastPreview = {
+            data: { scale: data.scale, cols: data.cols, rows: data.rows, mm_per_pixel: data.mm_per_pixel },
+            statusFor,
+        };
+        if (statusEl) statusEl.textContent = statusFor(quick);
+        _scheduleFullModel(_lastPreview.data, statusFor(quick));
+        resetViewerCamera();
         if (data.composite_error) {
             window.showToast('Server composite failed - preview shows the raw DEM: '
                 + data.composite_error, 'error', 8000);
@@ -649,6 +694,10 @@ async function previewModelIn3D() {
         // succeeds.
         window.appState.generatedModelData = null;
         window.appState.modelPreviewState = 'error';
+        // The background City Model belongs to the last good preview: stop it, or
+        // its poll writes over the error below and its result is drawn anyway.
+        _lastPreview = null;
+        _cancelFullModel();
         window._setExportButtonsEnabled?.(false);
         window.appState._updateWorkflowStepper?.();
         if (statusEl) statusEl.textContent = '❌ ' + e.message;
@@ -769,33 +818,69 @@ function _isCityBox() {
 function _removeCityFull() {
     if (!cityFullGroup) return;
     modelScene.remove(cityFullGroup);
-    cityFullGroup.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+    cityFullGroup.traverse(o => { if (o.isMesh) _disposeMesh(o); });
     cityFullGroup = null;
+    if (terrainMesh) terrainMesh.visible = true;   // hidden while the model's own terrain was shown
     needsRender = true;
 }
 
+/** Back to the preview terrain and the quick view when a shown finished model goes stale. */
+function _fallBackToQuickView() {
+    if (!cityFullGroup) return;
+    _removeCityFull();
+    if (_lastPreview) _full.status = _lastPreview.statusFor(_updateCityQuickView(_lastPreview.data));
+}
+
+/** Append to the preview's status line; a building or failed preview owns the line instead. */
 function _setStatusSuffix(base, suffix) {
+    if (window.appState?.modelPreviewState !== 'ready') return;
     const el = document.getElementById('modelStatus');
     if (el) el.textContent = base + (suffix ? ` · ${suffix}` : '');
+}
+
+/** Drop the background City Model build: a running poll returns on its next tick. */
+function _cancelFullModel() {
+    clearTimeout(_full.timer);
+    Object.assign(_full, { key: '', layers: {}, state: 'idle', buffer: null, timer: null,
+        status: '', run: null });
+}
+
+/** The City Model request the Download button would send now, or null outside a city box. */
+function _fullModelRequest() {
+    if (!_isCityBox() || typeof window.cityExportBody !== 'function') return null;
+    const body = window.cityExportBody();
+    return { key: JSON.stringify(body), layers: body.layers || {} };
 }
 
 /**
  * After a city preview, build the finished City Model in the background (the same
  * request the Download button sends, so the download then hits the model cache) and
- * show its parts in place of the quick view. Waits 1.5 s for the settings to settle;
- * a newer request supersedes an older one (the server task still runs to its end).
+ * show its parts in place of the quick view. Waits 1.5 s for the settings to settle.
+ *
+ * A new request takes over at once, not when its timer fires: the older build's
+ * poll stops and its result is dropped, so it can never be drawn in the new
+ * preview's frame (the server task still runs to its end). `keepShown` (a layer
+ * edit, same preview) leaves the shown model up until the new one arrives.
  */
-function _scheduleFullModel(data, baseStatus) {
+function _scheduleFullModel(data, baseStatus, { keepShown = false, req = _fullModelRequest() } = {}) {
     clearTimeout(_full.timer);
-    _removeCityFull();
-    if (!_isCityBox() || typeof window.cityExportBody !== 'function') return;
+    _full.timer = null;
+    if (!keepShown) _removeCityFull();
+    if (!req) { _cancelFullModel(); _removeCityFull(); return; }
     const { scale, xOffset, zOffset } = geometry_scale_for_overlays;
     _full.frame = { scale, xOffset, zOffset, rows: data.rows, mmPerPx: data.mm_per_pixel ?? 1 };
-    const key = JSON.stringify(window.cityExportBody());
-    if (key === _full.key && _full.buffer) { _showCityFull(baseStatus); return; }
-    if (key === _full.key && _full.state === 'running') return;
-    Object.assign(_full, { pendingKey: key, pendingStatus: baseStatus });
-    _full.timer = setTimeout(() => { _full.timer = null; _full.run = _runFullModel(key, baseStatus); }, 1500);
+    _full.status = baseStatus;
+    const shown = cityFullGroup?.userData;
+    if (shown?.key === req.key) {
+        // A layer edit undone before its rebuild ran: the shown model is current again.
+        Object.assign(_full, { key: req.key, layers: req.layers, state: 'done', buffer: shown.buffer, run: null });
+        _setStatusSuffix(_withoutQuickView(baseStatus), _fullModelLabel(shown.faces));
+        return;
+    }
+    if (req.key === _full.key && _full.buffer) { _showCityFull(); return; }
+    if (req.key === _full.key && _full.state === 'running') return;
+    Object.assign(_full, { key: req.key, layers: req.layers, state: 'scheduled', buffer: null, run: null });
+    _full.timer = setTimeout(() => { _full.timer = null; _full.run = _runFullModel(req.key); }, 1500);
 }
 
 /**
@@ -805,16 +890,17 @@ function _scheduleFullModel(data, baseStatus) {
  * identical builds at once took 320 s).
  */
 window.cityFullModelRun = function cityFullModelRun(key) {
-    if (_full.timer && _full.pendingKey === key) {
+    if (_full.timer && _full.key === key) {
         clearTimeout(_full.timer);
         _full.timer = null;
-        _full.run = _runFullModel(key, _full.pendingStatus);
+        _full.run = _runFullModel(key);
     }
     return _full.key === key && _full.state === 'running' ? _full.run : null;
 };
 
-async function _runFullModel(key, baseStatus) {
-    Object.assign(_full, { key, state: 'running', buffer: null });
+async function _runFullModel(key) {
+    if (_full.key !== key) return;
+    _full.state = 'running';
     try {
         const start = await fetch('/api/export/start', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key,
@@ -823,55 +909,118 @@ async function _runFullModel(key, baseStatus) {
         const { task_id: id } = await start.json();
         for (;;) {
             await new Promise(r => setTimeout(r, 1000));
-            if (_full.key !== key) return;                     // superseded
+            if (_full.key !== key) return;                     // superseded or cancelled
             const st = await fetch(`/api/export/status/${id}`).then(r => (r.ok ? r.json() : null));
+            if (_full.key !== key) return;
             if (!st) throw new Error('the build task is gone');
             if (st.status === 'error') throw new Error(st.message);
             if (st.status === 'complete') break;
-            _setStatusSuffix(baseStatus, `finished model ${st.progress}%: ${st.message}`);
+            _setStatusSuffix(_full.status, `finished model ${st.progress}%: ${st.message}`);
         }
         const res = await fetch(`/api/export/model-parts/${id}`);
         if (!res.ok) throw new Error(`parts HTTP ${res.status}`);
         const buffer = await res.arrayBuffer();
         if (_full.key !== key) return;
         Object.assign(_full, { state: 'done', buffer });
-        _showCityFull(baseStatus);
+        _showCityFull();
     } catch (e) {
         if (_full.key !== key) return;
         _full.state = 'error';
         console.warn('[preview] finished model failed:', e);
-        _setStatusSuffix(baseStatus, `finished model failed: ${e.message}`);
+        _fallBackToQuickView();
+        _setStatusSuffix(_full.status, `finished model failed: ${e.message}`);
     }
 }
 
-/** Replace the quick view with the finished model's parts (all but the terrain). */
-function _showCityFull(baseStatus) {
-    _removeCityFull();
+const _withoutQuickView = (status) => status.replace(/, [\d,]+ buildings \(quick view\)/, '');
+const _fullModelLabel = (faces) => `finished model as printed (${faces.toLocaleString()} faces)`;
+
+/**
+ * Replace the quick view and the preview terrain with the finished model's parts
+ * (_full.buffer, in _full.frame). Only over a good preview: a building or failed
+ * one has no frame to put them in. A part file that cannot be drawn leaves the
+ * preview as it is and says so in the status line; it never fails the preview.
+ */
+function _showCityFull() {
+    if (window.appState?.modelPreviewState !== 'ready' || !_full.buffer || !modelScene) return;
     const buildingsColor = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
+    const cmap = document.getElementById('viewerColormap')?.value || 'terrain';
     const group = new THREE.Group();
     let faces = 0;
-    // parse a copy: toViewerFrame works in place and the buffer is shown again later
-    for (const part of parseModelParts(_full.buffer.slice(0))) {
-        if (part.name === 'terrain') continue;
-        toViewerFrame(part, _full.frame);
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
-        g.setIndex(new THREE.BufferAttribute(part.indices, 1));
-        g.computeVertexNormals();
-        group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: partColor(part.name, buildingsColor) })));
-        faces += part.indices.length / 3;
+    try {
+        // parse a copy: toViewerFrame works in place and the buffer is shown again later
+        for (const part of parseModelParts(_full.buffer.slice(0))) {
+            toViewerFrame(part, _full.frame);
+            // flatShading: the parts are welded solids, so a roof vertex is shared
+            // with the walls under it; averaged normals smear that corner and make a
+            // block of prisms read as torn, tilted shards.
+            const mesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({
+                color: partColor(part.name, buildingsColor), flatShading: true }));
+            mesh.name = part.name;                 // the layer's own name, for recolouring
+            group.add(mesh);                       // before filling it, so a failure still frees it
+            const g = mesh.geometry;
+            g.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
+            g.setIndex(new THREE.BufferAttribute(part.indices, 1));
+            g.computeVertexNormals();
+            if (part.name === 'terrain') {
+                // The model's own terrain, not the preview mesh: every other part's
+                // walls run from below the ground up (city_model.build_layer), and
+                // against the preview terrain, which the layers are not cut into,
+                // that buried wall showed. (The "hollow outline" look itself was
+                // toViewerFrame turning every part inside out; fixed there.)
+                // Flat-shaded like the rest: the solid is welded, so smooth normals
+                // would round its vertical sides into the ground.
+                mesh.material.vertexColors = true;
+                g.setAttribute('color', new THREE.BufferAttribute(_heightColors(part.positions, cmap), 3));
+            }
+            _applyViewMode(mesh);
+            faces += part.indices.length / 3;
+        }
+    } catch (e) {
+        group.traverse(o => { if (o.isMesh) _disposeMesh(o); });
+        console.warn('[preview] finished model could not be drawn:', e);
+        _fallBackToQuickView();
+        _setStatusSuffix(_full.status, `finished model could not be drawn: ${e.message}`);
+        return;
     }
-    if (cityQuickMesh) {
-        modelScene.remove(cityQuickMesh);
-        cityQuickMesh.geometry.dispose();
-        cityQuickMesh.material.dispose();
-        cityQuickMesh = null;
-    }
+    _removeCityFull();
+    _removeCityQuick();
+    // The preview terrain is the same ground, one stage earlier: drawn together
+    // they z-fight. Kept when the parts bring no ground of their own. Restored by
+    // _removeCityFull.
+    if (terrainMesh && group.getObjectByName('terrain')) terrainMesh.visible = false;
+    // What refreshCityLayers compares a layer edit against, and restores on undo.
+    group.userData = { key: _full.key, layers: _full.layers, buffer: _full.buffer, faces };
     cityFullGroup = group;
     modelScene.add(group);
     needsRender = true;
-    _setStatusSuffix(baseStatus.replace(/, [\d,]+ buildings \(quick view\)/, ''),
-        `finished model as printed (${faces.toLocaleString()} faces)`);
+    _setStatusSuffix(_withoutQuickView(_full.status), _fullModelLabel(faces));
+}
+
+/**
+ * A City model layer was edited (ModelContainer.vue's cityLayer_* controls). The
+ * quick-view buildings follow the Buildings row at once; on a shown finished model,
+ * the parts of layers now off are hidden at once and changed buildings give way
+ * to the quick view. The finished model itself is rebuilt after the usual 1.5 s,
+ * since the layers are part of its request (export-handlers.js::cityExportBody).
+ */
+function refreshCityLayers() {
+    const last = _lastPreview;
+    if (!last || !modelScene || window.appState?.modelPreviewState !== 'ready') return;
+    const req = _fullModelRequest();
+    let quick = 0;
+    if (cityFullGroup) {
+        const hide = staleParts(cityFullGroup.userData.layers, req?.layers);
+        for (const m of cityFullGroup.children) m.visible = !hide.has(m.name);
+        if (hide.has('buildings')) quick = _updateCityQuickView(last.data);
+        else _removeCityQuick();
+        needsRender = true;
+    } else {
+        quick = _updateCityQuickView(last.data);
+    }
+    const base = last.statusFor(quick);
+    _setStatusSuffix(base, cityFullGroup ? 'finished model updates for the layer change' : '');
+    _scheduleFullModel(last.data, base, { keepShown: true, req });
 }
 
 /**
@@ -879,12 +1028,7 @@ function _showCityFull(baseStatus) {
  * Buildings layer on and loaded; removed otherwise. Returns the building count.
  */
 function _updateCityQuickView(data) {
-    if (cityQuickMesh) {
-        modelScene.remove(cityQuickMesh);
-        cityQuickMesh.geometry.dispose();
-        cityQuickMesh.material.dispose();
-        cityQuickMesh = null;
-    }
+    _removeCityQuick();
     const st = window.appState;
     const bbox = st?.currentDemBbox || st?.selectedRegion;
     let feats = st?.osmCityData?.buildings?.features;
@@ -918,29 +1062,78 @@ function _updateCityQuickView(data) {
     geometry.setIndex(new THREE.BufferAttribute(g.indices, 1));
     geometry.computeVertexNormals();
     const color = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
-    cityQuickMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide }));
+    // flatShading for the same reason as the finished parts: extruded footprints
+    // share roof and wall vertices, and smooth normals round their edges away.
+    cityQuickMesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+        color, side: THREE.DoubleSide, flatShading: true }));
+    _applyViewMode(cityQuickMesh);
     modelScene.add(cityQuickMesh);
     needsRender = true;
     console.info(`[preview] ${g.count} buildings (quick view) in ${Math.round(performance.now() - t0)} ms`);
     return g.count;
 }
 
+function _removeCityQuick() {
+    if (!cityQuickMesh) return;
+    modelScene.remove(cityQuickMesh);
+    _disposeMesh(cityQuickMesh);
+    cityQuickMesh = null;
+    needsRender = true;
+}
+
+/**
+ * Drop everything the previous region left in the viewer: the terrain mesh,
+ * the city meshes, the overlays, the HUD and the dragged puzzle cuts, and
+ * supersede a preview that is still building.
+ *
+ * Called when the selected region changes (modules/regions/regions.js), so the
+ * old box is never on screen beside the new region's settings.
+ */
+function clearViewerModel() {
+    _previewSeq++;
+    // The superseded preview's mesh will never be shown, so the same body must
+    // not be skipped as a duplicate when this region is selected again.
+    _previewGate.reset();
+    _lastPreview = null;
+    window.appState.puzzleEdges = null;
+    window.appState.modelPreviewState = 'idle';
+    _hudMeshLines = [];
+    _hudBed = null;
+    _hudGrid = '';
+    _renderHud();
+    const status = document.getElementById('modelStatus');
+    if (status) status.textContent = '';
+    // A background City Model build of the old region polls /api/export/status and
+    // writes its progress into #modelStatus; clearing the key supersedes it (the
+    // poll returns on its next tick) and cancels one that is only scheduled.
+    _cancelFullModel();
+    if (!modelScene) return;
+    _removeCityFull();
+    _removeCityQuick();
+    if (terrainMesh) {
+        modelScene.remove(terrainMesh);
+        _disposeMesh(terrainMesh);
+        terrainMesh = null;
+        window.appState.terrainMesh = null;
+    }
+    ['groundGrid', 'axesHelper', 'vertScale', 'horizScale', 'bedOutline', 'puzzleCuts']
+        .forEach(name => {
+            const old = modelScene.getObjectByName(name);
+            if (!old) return;
+            old.traverse(c => { c.geometry?.dispose(); c.material?.map?.dispose(); c.material?.dispose(); });
+            modelScene.remove(old);
+        });
+    geometry_scale_for_overlays = { scale: 1, cols: 0, rows: 0, totalHeightMm: 0 };
+    needsRender = true;
+}
+
 function _replaceMesh(newMesh) {
     if (terrainMesh) {
         modelScene.remove(terrainMesh);
-        terrainMesh.geometry.dispose();
-        // In normals mode the saved original material also needs disposal
-        if (terrainMesh._savedMaterial) terrainMesh._savedMaterial.dispose();
-        (terrainMesh._savedMaterial || terrainMesh.material).map?.dispose();
-        terrainMesh.material.dispose();
+        _disposeMesh(terrainMesh);
     }
     terrainMesh = newMesh;
-    terrainMesh.material.wireframe = document.getElementById('viewerWireframe')?.checked ?? false;
-    // Re-apply normals mode to the new mesh if it was active
-    if (_normalsActive) {
-        terrainMesh._savedMaterial = terrainMesh.material;
-        terrainMesh.material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
-    }
+    _applyViewMode(terrainMesh);
     modelScene.add(terrainMesh);
     window.appState.terrainMesh = terrainMesh;
     needsRender = true;
@@ -951,48 +1144,82 @@ function _replaceMesh(newMesh) {
 // Color helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Return [r,g,b] in 0–1 range for elevation t in [0,1] using colormap cmap. */
+/** How far the 3D view pulls a colormap towards grey, and how much it darkens it. */
+const TERRAIN_DESAT = 0.4, TERRAIN_DIM = 0.85;
+
+/** Return [r,g,b] in 0–1 range for elevation t in [0,1] using colormap cmap.
+ *
+ * The map's colormaps are made for a flat image; lit in 3D and seen beside the
+ * city's own parts, their greens read as neon and swamp the model. The 3D view
+ * therefore desaturates and darkens them. The Edit map still uses them raw
+ * (`mapElevationToColor`).
+ */
 function _elevColor(t, cmap) {
     if (cmap === 'none') return [0.55, 0.55, 0.55];
     // dem-loader.js is always loaded before this file
-    return window.mapElevationToColor(t, cmap);
+    const rgb = window.mapElevationToColor(t, cmap);
+    const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    return rgb.map(c => (c + (lum - c) * TERRAIN_DESAT) * TERRAIN_DIM);
+}
+
+/** Per-vertex colours for a part, by its own height range, in colormap `cmap`.
+ *
+ * Used for the finished model's terrain part (`_showCityFull`), which arrives as
+ * bare geometry: the preview mesh's colours are per DEM pixel and cannot be
+ * reused for it. Satellite falls back to the terrain ramp, as the preview does.
+ *
+ * @param {Float32Array} positions viewer-frame xyz triples (y up)
+ * @returns {Float32Array} one rgb triple per vertex
+ */
+function _heightColors(positions, cmap) {
+    const n = positions.length / 3;
+    let yMin = Infinity, yMax = -Infinity;
+    for (let i = 0; i < n; i++) {
+        const y = positions[i * 3 + 1];
+        if (y < yMin) yMin = y;
+        if (y > yMax) yMax = y;
+    }
+    const range = Math.max(yMax - yMin, 1e-6);
+    const ramp = cmap === 'satellite' ? 'terrain' : cmap;
+    const colors = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        const rgb = _elevColor((positions[i * 3 + 1] - yMin) / range, ramp);
+        colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
+    }
+    return colors;
 }
 
 /** Recolor the current mesh with a new colormap (no server round-trip). */
 function _rebuildColors(cmap) {
+    _satToken++;                 // a satellite drape still fetching was for the previous choice
+    // The finished model's terrain part is the ground on screen while it is shown,
+    // and it has no satellite UVs, so it takes the colour ramp either way.
+    const fullTerrain = cityFullGroup?.getObjectByName('terrain');
+    if (fullTerrain) {
+        const g = fullTerrain.geometry;
+        g.setAttribute('color', new THREE.BufferAttribute(
+            _heightColors(g.attributes.position.array, cmap), 3));
+        const mat = _realMaterial(fullTerrain);
+        mat.vertexColors = true;
+        mat.color.set(0xffffff);
+        mat.needsUpdate = true;
+        needsRender = true;
+    }
     if (!terrainMesh) return;
     if (cmap === 'satellite') { _applySatelliteTexture(); return; }
-    const mat = terrainMesh._savedMaterial || terrainMesh.material;
+    // The mesh's own material, also while Normals shows its stand-in: after
+    // Satellite it has no vertex colours, so turning Normals off would otherwise
+    // bring back untextured terrain.
+    const mat = _realMaterial(terrainMesh);
     if (mat.map) { mat.map.dispose(); mat.map = null; }
     const geo    = terrainMesh.geometry;
-    const posArr = geo.attributes.position.array;
-    const n      = posArr.length / 3;
-
-    let yMin = Infinity, yMax = -Infinity;
-    for (let i = 0; i < n; i++) {
-        const y = posArr[i * 3 + 1];
-        if (y < yMin) yMin = y;
-        if (y > yMax) yMax = y;
-    }
-    const yRange = Math.max(yMax - yMin, 1);
-
-    const colors = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-        const rgb = _elevColor((posArr[i * 3 + 1] - yMin) / yRange, cmap);
-        colors[i * 3] = rgb[0]; colors[i * 3 + 1] = rgb[1]; colors[i * 3 + 2] = rgb[2];
-    }
-    _paintWater(colors, terrainMesh.userData.water?.idx, terrainMesh.userData.water?.pct);
-
-    if (cmap === 'none') {
-        terrainMesh.material.vertexColors = false;
-        terrainMesh.material.color.set(0x8fbc8f);
-    } else {
-        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        geo.attributes.color.needsUpdate = true;
-        terrainMesh.material.vertexColors = true;
-        terrainMesh.material.color.set(0xffffff);
-    }
-    terrainMesh.material.needsUpdate = true;
+    const colors = _heightColors(geo.attributes.position.array, cmap);
+    // As _buildMeshFromPreview: 'none' is the plain grey, without the water tint.
+    if (cmap !== 'none') _paintWater(colors, terrainMesh.userData.water?.idx, terrainMesh.userData.water?.pct);
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    mat.vertexColors = true;
+    mat.color.set(0xffffff);
+    mat.needsUpdate = true;
     needsRender = true;
 }
 
@@ -1012,6 +1239,7 @@ function _sameBbox(a, b) {
 async function _applySatelliteTexture() {
     const mesh = terrainMesh;
     if (!mesh) return;
+    const token = ++_satToken;
     const st = window.appState || {};
     // At least the DEM grid's resolution (texture detail is free), at most 2048 px.
     const grid = st.generatedModelData ? Math.max(st.generatedModelData.width, st.generatedModelData.height) : 1024;
@@ -1021,13 +1249,17 @@ async function _applySatelliteTexture() {
         try { await window.loadSatelliteRGBImage?.({ dim: want }); } catch (_) { /* toast shown there */ }
     }
     const canvas = window.appState?.satImgSourceCanvas;
-    if (mesh !== terrainMesh) return;            // rebuilt while fetching: the new mesh re-drapes
+    // Dropped unless it is still the latest request, for the same mesh (a rebuild
+    // re-drapes its own) and with Satellite still chosen: a colormap picked while
+    // the image loaded must not be painted over.
+    if (token !== _satToken || mesh !== terrainMesh) return;
+    if ((document.getElementById('viewerColormap')?.value ?? 'satellite') !== 'satellite') return;
     if (!canvas) {
         window.showToast?.('No satellite image for this region - showing the terrain colormap.', 'warning');
         _rebuildColors('terrain');
         return;
     }
-    const mat = mesh._savedMaterial || mesh.material;
+    const mat = _realMaterial(mesh);
     mat.map?.dispose();
     const tex = new THREE.CanvasTexture(canvas);
     tex.anisotropy = modelRenderer?.capabilities?.getMaxAnisotropy?.() || 1;
@@ -1039,21 +1271,60 @@ async function _applySatelliteTexture() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Normals-debug material toggle
+// View modes: Normals and Wireframe, on every displayed mesh
 // ─────────────────────────────────────────────────────────────────────────────
 
-function setViewerNormals(active) {
-    _normalsActive = active;
-    if (!terrainMesh) return;
-    if (active && !(terrainMesh.material instanceof THREE.MeshNormalMaterial)) {
-        terrainMesh._savedMaterial = terrainMesh.material;
-        terrainMesh.material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
-    } else if (!active && terrainMesh._savedMaterial) {
-        terrainMesh.material.dispose();
-        terrainMesh.material = terrainMesh._savedMaterial;
-        delete terrainMesh._savedMaterial;
+/** The mesh's own material, also while Normals shows a MeshNormalMaterial in its place. */
+function _realMaterial(mesh) {
+    return mesh._savedMaterial || mesh.material;
+}
+
+/** Every model mesh in the scene: terrain, quick-view buildings, finished-model parts. */
+function _displayedMeshes() {
+    const meshes = [terrainMesh, cityQuickMesh].filter(Boolean);
+    cityFullGroup?.traverse(o => { if (o.isMesh) meshes.push(o); });
+    return meshes;
+}
+
+/** Free a mesh's geometry, its own material and texture, and the Normals stand-in. */
+function _disposeMesh(mesh) {
+    mesh.geometry?.dispose();
+    const real = _realMaterial(mesh);
+    real.map?.dispose();
+    real.dispose();
+    if (mesh.material !== real) mesh.material.dispose();
+}
+
+/**
+ * Bring one mesh in line with the Normals and Wireframe toggles. Called for every
+ * mesh when a toggle changes and for each mesh as it is created, so the city parts
+ * and a rebuilt terrain follow them too. Wireframe is set on both materials, so it
+ * survives Normals being turned off.
+ */
+function _applyViewMode(mesh) {
+    if (_normalsActive && !mesh._savedMaterial) {
+        mesh._savedMaterial = mesh.material;
+        mesh.material = new THREE.MeshNormalMaterial({
+            side: mesh.material.side, flatShading: mesh.material.flatShading });
+    } else if (!_normalsActive && mesh._savedMaterial) {
+        mesh.material.dispose();
+        mesh.material = mesh._savedMaterial;
+        delete mesh._savedMaterial;
     }
-    terrainMesh.material.needsUpdate = true;
+    mesh.material.wireframe = _wireframeActive;
+    _realMaterial(mesh).wireframe = _wireframeActive;
+    mesh.material.needsUpdate = true;
+}
+
+function setViewerNormals(active) {
+    _normalsActive = !!active;
+    _displayedMeshes().forEach(_applyViewMode);
+    needsRender = true;
+}
+
+function setViewerWireframe(on) {
+    _wireframeActive = !!on;
+    _displayedMeshes().forEach(_applyViewMode);
     needsRender = true;
 }
 
@@ -1061,15 +1332,36 @@ function setViewerNormals(active) {
 // HUD
 // ─────────────────────────────────────────────────────────────────────────────
 
-function _updateHud(data) {
+let _hudMeshLines = [];     // mesh stats, from the last preview
+let _hudBed = null;         // { text, fits } from updateBedOutline
+let _hudGrid = '';          // ground-grid cell size, from _updateSceneOverlays
+
+/** Draw the HUD from its parts: mesh stats, the ground grid, the printer bed line. */
+function _renderHud() {
     const hud = document.getElementById('viewerHud');
     if (!hud) return;
+    hud.textContent = _hudMeshLines.join('\n');
+    // Both used to be sprites in the scene, over the model.
+    if (_hudGrid) {
+        const line = document.createElement('div');
+        line.textContent = _hudGrid;
+        line.style.color = '#9a9a9a';
+        hud.appendChild(line);
+    }
+    if (!_hudBed) return;
+    const line = document.createElement('div');
+    line.textContent = _hudBed.text;
+    if (!_hudBed.fits) line.style.color = '#f0a060';
+    hud.appendChild(line);
+}
+
+function _updateHud(data) {
     const pv = data.preview;
-    const lines = [`${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`
+    _hudMeshLines = [`${data.face_count.toLocaleString()} faces  |  ${data.cols}×${data.rows} pts`
         + (pv?.adaptive ? `  |  adaptive ±${pv.max_error_mm} mm${pv.stride > 1 ? `, every ${pv.stride} px` : ''}` : '')];
     const r = window.appState?.selectedRegion;
-    if (r) lines.push(`~${haversineDiagKm(r.north, r.south, r.east, r.west).toFixed(1)} km diagonal`);
-    hud.textContent = lines.join('\n');
+    if (r) _hudMeshLines.push(`~${haversineDiagKm(r.north, r.south, r.east, r.west).toFixed(1)} km diagonal`);
+    _renderHud();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1098,12 +1390,19 @@ function _puzzleGrid() {
     const key = gridKey(cols, rows, g.modelWidthMm, g.modelDepthMm);
     const saved = window.appState?.puzzleEdges;
     const own = saved && saved.key === key;
+    // The knob both export routes send (export-handlers.js::_puzzleOptions), so
+    // the drawn cut is the one the server cuts.
+    const knob = {
+        shape: document.getElementById('splitKnobShape')?.value || 'classic',
+        knobWidth: num('splitKnobWidth', 20),
+        knobDepth: num('splitKnobDepth', 8),
+        clearance: _num('splitClearance', 0.3),
+    };
     return {
-        cols, rows, key,
+        cols, rows, key, knob,
         colEdges: own ? saved.cols : evenEdges(g.modelWidthMm, cols),
         rowEdges: own ? saved.rows : evenEdges(g.modelDepthMm, rows),
-        minGap: minPieceMm(num('splitKnobWidth', 20), num('splitKnobDepth', 8),
-            _num('splitClearance', 0.3)),
+        minGap: minPieceMm(knob.knobWidth, knob.knobDepth, knob.clearance),
     };
 }
 
@@ -1133,18 +1432,30 @@ function updatePuzzlePreview() {
     const S = g.scale || 1;
     const dx = (xMm) => xMm * S - g.xOffset;
     const dz = (yMm) => (g.modelDepthMm - yMm) * S - g.zOffset;
-    const x0 = dx(0), x1 = dx(g.modelWidthMm), zS = dz(0), zN = dz(g.modelDepthMm);
+    const zS = dz(0);
+    // The real cut, knobs and all, so the preview shows the pieces that come
+    // out of the printer; straight lines when the knob does not fit.
+    const { polylines, knobs } = jigsawCuts(grid.colEdges, grid.rowEdges, grid.knob);
     const verts = [];
-    for (let i = 1; i < grid.cols; i++) { const x = dx(grid.colEdges[i]); verts.push(x, 0, zS, x, 0, zN); }
-    for (let j = 1; j < grid.rows; j++) { const z = dz(grid.rowEdges[j]); verts.push(x0, 0, z, x1, 0, z); }
+    for (const line of polylines) {
+        for (let i = 1; i < line.length; i++) {
+            verts.push(dx(line[i - 1][0]), 0, dz(line[i - 1][1]), dx(line[i][0]), 0, dz(line[i][1]));
+        }
+    }
     const group = new THREE.Group();
     group.name = 'puzzleCuts';
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    group.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false })));
+    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false }));
+    // Drawn after the model: without depth testing, an opaque mesh drawn later paints over
+    // the lines, and three.js orders equal renderOrders by material id, so the finished
+    // City Model's parts (built after the cuts) hid them until the next redraw.
+    lines.renderOrder = 1;
+    group.add(lines);
     if (grid.cols * grid.rows > 1) {
         const custom = isCustom(grid.colEdges) || isCustom(grid.rowEdges);
-        const label = _makeTextSprite(`${grid.cols}×${grid.rows}${custom ? ' custom' : ''} · drag cuts`,
+        const label = _makeTextSprite(`${grid.cols}×${grid.rows}${custom ? ' custom' : ''}`
+            + `${knobs ? '' : ' · knob too big for these pieces'} · drag cuts`,
             { fontSize: 15, color: '#ff9999' });
         label.scale.multiplyScalar(0.6);
         label.position.set(0, 0, zS + 6);
@@ -1248,8 +1559,15 @@ window.CITY_MAX_DIAG_KM = 10;
 // config.MAX_BBOX_DIAGONAL_KM_COARSE server-side.
 window.CITY_COARSE_MAX_DIAG_KM = 25;
 
+/**
+ * Auto-rotate orbits the camera, as OrbitControls.autoRotate would (the page loads
+ * three.js core only, so the viewer's own orbit code does it): turning the scene's
+ * objects instead left every part but the terrain, the cut lines and the bed
+ * outline standing still.
+ */
 function setViewerAutoRotate(val) {
-    viewerAutoRotate = val;
+    viewerAutoRotate = !!val;
+    needsRender = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1263,9 +1581,12 @@ window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
+window.setViewerWireframe   = setViewerWireframe;
+window.refreshCityLayers    = refreshCityLayers;
 window.updateBedOutline     = updateBedOutline;
 window.puzzleEdgesFor       = puzzleEdgesFor;
 window.resetPuzzleEdges     = resetPuzzleEdges;
+window.clearViewerModel     = clearViewerModel;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-rebuild wiring

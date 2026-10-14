@@ -190,6 +190,19 @@ def fetch_water_mask_images(north, south, east, west, sat_scale, water_dataset):
     return img, jrc_img, elevation_raw
 
 
+def esa_water(esa: np.ndarray) -> np.ndarray:
+    """Open water in an ESA WorldCover class grid: class 80 plus class 0, its no-data.
+
+    WorldCover maps land only, so its class-80 water covers just the coastal strip
+    of the tiles that touch land; the open sea lies outside every tile and comes
+    back as 0. Class 80 alone left a 20-40 px blue band along every coast with
+    hollow seas (Europa, 2026-10-14). Same rule as
+    :func:`geo2stl.hydrology.water_surface_mask` and :func:`geo2stl.dem.water_fraction_for_dem`.
+    """
+    esa = np.asarray(esa)
+    return (esa == 80) | (esa == 0)
+
+
 def fetch_water_mask(
     north: float, south: float, east: float, west: float,
     sat_scale: int, dataset: str
@@ -254,7 +267,7 @@ def fetch_water_mask(
                                   interpolation=_cv2.INTER_LINEAR)
         water_mask = (jrc_img > 50).astype(np.float32)
     else:
-        water_mask = (img == 80).astype(np.float32)
+        water_mask = esa_water(img).astype(np.float32)
 
     # SRTM bathymetry augmentation -- only for larger regions (> 30 km diagonal)
     # to avoid misclassifying low-lying coastal land at city scale.

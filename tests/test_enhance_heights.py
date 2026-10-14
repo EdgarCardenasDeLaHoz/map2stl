@@ -434,6 +434,48 @@ class TestReduceBuildingsRoofTags:
         assert any(s == "pyramidal" for s in shapes)
 
 
+class TestReduceBuildingsKeepsLandmarks:
+    """Named, historic and tower buildings are not dissolved into a touching
+    neighbour of the same height (Granada: 26 Nasrid halls and towers became
+    "Palacio de Carlos V"; user, 2026-10-14: "Keep named separate")."""
+
+    @staticmethod
+    def _row(**tags):
+        """Three touching 10 m buildings in a row; ``tags`` go on the last one."""
+        import geopandas as gpd
+        from shapely.geometry import box
+
+        cols = {"geometry": [box(i * 0.001, 0, (i + 1) * 0.001, 0.001) for i in range(3)],
+                "height_m": [10.0] * 3, "height_source": ["default"] * 3,
+                "osm_id": ["way/0", "way/1", "way/2"]}
+        cols.update({k: [None, None, v] for k, v in tags.items()})
+        return gpd.GeoDataFrame(cols, crs="EPSG:4326")
+
+    def test_unnamed_neighbours_still_merge(self):
+        from city2stl.heights import _reduce_buildings
+
+        assert len(_reduce_buildings(self._row())) == 1
+
+    @pytest.mark.parametrize("tags", [{"name": "Torre de Comares"}, {"historic": "castle"},
+                                      {"tower:type": "defensive"}, {"man_made": "tower"},
+                                      {"building": "tower"}])
+    def test_landmark_keeps_its_own_footprint(self, tags):
+        from city2stl.heights import _reduce_buildings
+
+        out = _reduce_buildings(self._row(**tags))
+        # the two plain ones still merge (under the larger's id); the landmark stays
+        assert len(out) == 2 and "way/2" in set(out["osm_id"])
+        key, val = next(iter(tags.items()))
+        if key in out.columns:   # tower:type / man_made are read, not kept
+            assert out.loc[out["osm_id"] == "way/2", key].item() == val
+
+    def test_blank_and_nan_tags_do_not_count(self):
+        from city2stl.heights import keeps_own_footprint
+
+        assert not keeps_own_footprint({"name": float("nan"), "historic": " ", "building": "yes"})
+        assert not keeps_own_footprint({})
+
+
 class TestEnhanceHeightsRouter:
     # Uses the shared ``client`` fixture from tests/conftest.py (temp DB/cache).
 

@@ -2991,6 +2991,12 @@
             z-index: 10;
         }
 
+        /* Map layers the Layers rail puts above the buildings (stacked-layers.js) */
+        .layer-top-overlay {
+            z-index: 11;
+            pointer-events: none;
+        }
+
         /* Top-left: the bottom-left corner holds .model-overlay (status + scale). */
         .hud-overlay {
             position: absolute;
@@ -3121,6 +3127,7 @@
 
         /* Grid overlay canvas — non-interactive, exempt from zoom */
         .layer-grid-overlay {
+            z-index: 12;   /* above the buildings and .layer-top-overlay */
             pointer-events: none;
             transform: none !important;
         }
@@ -3319,3 +3326,18 @@
 }
 .leaflet-tooltip.nr-size-tag.muted { background: #3a3a3c; }
 .leaflet-tooltip.nr-size-tag::before { display: none; }
+
+/* Edit map status pill: "Preview · loading layers…" while a new projection's layers load
+   (#projectionPreviewStatus, DemContainer.vue). Above the grid canvas (z-index 12). */
+.map-status-pill {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 13;
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+    background: rgba(28, 28, 30, 0.88); color: #f5f5f7; border: 1px solid #3a3a3c;
+    font-size: 12px; font-weight: 500; white-space: nowrap; pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.map-status-pill.hidden { display: none; }
+.map-status-spin {
+    width: 11px; height: 11px; border-radius: 50%; flex: none;
+    border: 2px solid #48484a; border-top-color: #0a84ff; animation: spin 0.8s linear infinite;
+}

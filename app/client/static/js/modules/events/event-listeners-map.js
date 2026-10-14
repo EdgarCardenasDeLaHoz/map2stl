@@ -8,6 +8,10 @@
  *   window._setupMapAndDemListeners()
  *   window._setupBboxListeners()
  */
+import {
+    endProjectionPreview, isProjectionPreviewActive, markPreviewDemLanded, releaseProjectionPreview,
+    startProjectionPreview,
+} from '../dem/projection-preview.js';
 
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     // New-region flow (modules/map/new-region.js): draw mode with a live size label.
@@ -80,58 +84,121 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         _syncClipToggleState();
 
         let _projChangeTimer = null;
+        // Every pick gets a number; only the newest pick's responses may finish the reload
+        // (an older pick's DEM is aborted by loadDEM, its other layers are never requested).
+        let _projPick = 0;
+        // Which layers the reload must re-fetch, read once when a reload starts: a pick made
+        // while one is running finds them cleared by loadDEM's clearLayerCache.
+        let _reloadLayers = null;
+
+        /** Raster size of the DEM the preview was taken from (its longest side). */
+        let _previewDim = 0;
+
+        /** Re-draw the loaded layers in the newly picked projection, at once. */
+        const _previewPick = () => {
+            const st = window.appState;
+            let from = null, bbox = null;
+            if (!isProjectionPreviewActive()) {
+                // The loaded layers are in the projection the DEM was fetched with.
+                const dem = st.lastDemData;
+                const req = st.lastDemRequest;
+                if (!dem || !req?.dem) return false;
+                _previewDim = Math.max(dem.width || 0, dem.height || 0) || req.dem.dim;
+                bbox = st.currentDemBbox || req.bbox;
+                from = { projection: req.dem.projection || 'none', maintainDimensions: !!req.dem.maintain_dimensions };
+            }
+            // A pick made while a preview shows re-warps the same loaded pixels (bbox/from ignored).
+            const ok = startProjectionPreview({
+                bbox, from, to: window.getProjectionParams(), dim: _previewDim,
+                sources: window.getLayerSourceCanvases?.(),
+            });
+            // The module shows the "Preview · loading layers…" pill (DemContainer.vue).
+            if (ok) window.updateStackedLayers?.();
+            return ok;
+        };
+
+        /** Re-fetch every loaded layer in the picked projection; the preview stands in meanwhile. */
+        const _reloadForProjection = async (pick) => {
+            if (!_reloadLayers) {
+                const st = window.appState;
+                if (!st.lastDemData) return;  // nothing loaded yet
+                // Snapshot which layers were loaded BEFORE loadDEM runs, because
+                // loadDEM calls clearLayerCache() which nulls lastWaterMaskData,
+                // satImgSourceCanvas, and layerBboxes — making the conditions below
+                // evaluate to false if checked after the await.
+                _reloadLayers = {
+                    water: !!st.lastWaterMaskData,
+                    landCover: !!st.layerBboxes?.landCover,
+                    sat: !!st.satImgSourceCanvas,
+                    // satEsaLoaded tracks the GEE/ESA overlay from loadSatelliteImage
+                    // (auto-loaded on region select). Cleared by clearLayerCache.
+                    satEsa: !!st.satEsaLoaded,
+                    // cityRasterSourceCanvas (cleared by clearLayerCache) rather than
+                    // osmCityData (not cleared): re-fetch only when the raster was loaded.
+                    city: !!st.cityRasterSourceCanvas,
+                    cityPolygons: !!st.osmCityData,
+                };
+            }
+            const had = _reloadLayers;
+            // Layers that reload on their own after the DEM (Rivers & lakes, Borders, Trails)
+            // keep their preview until they land: release, not end.
+            const finish = (failed) => {
+                _reloadLayers = null;
+                if (failed) endProjectionPreview();
+                else releaseProjectionPreview(window.getLayerSourceCanvases?.());
+                window.updateStackedLayers?.();
+            };
+
+            window.showToast?.('Projection changed — re-fetching layers…', 'info');
+
+            // Re-fetch DEM with new projection param (includes water if subtract_water).
+            // Its synchronous start clears the layer cache and the stack, so redraw the preview.
+            const demLoad = window.loadDEM?.();
+            if (isProjectionPreviewActive()) window.updateStackedLayers?.();
+            await demLoad;
+            if (pick !== _projPick) return;           // a newer pick owns the map now
+            if (!window.appState.lastDemData) { finish(true); return; }   // failed or cancelled
+            markPreviewDemLanded(window.getLayerSourceCanvases?.());
+            window.updateStackedLayers?.();
+
+            // Re-fetch other layers that were already loaded
+            const tasks = [];
+            if (had.water) tasks.push(window.loadWaterMask?.());
+            if (had.landCover) tasks.push(window.loadEsaLandCover?.());
+            if (had.sat) tasks.push(window.loadSatelliteRGBImage?.());
+            if (had.satEsa) tasks.push(window.loadSatelliteImage?.());
+            if (had.city) tasks.push(window.loadCityRaster?.());
+            if (tasks.length) await Promise.allSettled(tasks);
+            if (pick !== _projPick) return;
+
+            // City polygon overlays are frontend-rendered; force cache invalidation + redraw
+            // so projection changes are reflected immediately even without refetch.
+            if (had.cityPolygons) {
+                window._invalidateCityCache?.();
+                window.renderCityOverlay?.();
+                window.renderCityOnDEM?.();
+            }
+            finish();
+
+            requestAnimationFrame(() => window.updatePrintDimensions?.());
+        };
+
         projSelect.addEventListener('change', () => {
             // Update description immediately — zero cost
             const desc = document.getElementById('projectionDescription');
             if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
             _syncClipToggleState();
 
+            // Show the new shape now: the loaded layers warped in the browser
+            // (modules/dem/projection-preview.js). The server's layers replace them as they land.
+            const pick = ++_projPick;
+            _previewPick();
+
             // Debounce 80ms so rapid clicks don't fire multiple fetches.
-            // Projection is now applied server-side: re-fetch every loaded layer
+            // Projection is applied server-side: re-fetch every loaded layer
             // so all canvases arrive pre-projected and aligned.
             clearTimeout(_projChangeTimer);
-            _projChangeTimer = setTimeout(async () => {
-                if (!window.appState.lastDemData) return;  // nothing loaded yet
-
-                // Snapshot which layers were loaded BEFORE loadDEM runs, because
-                // loadDEM calls clearLayerCache() which nulls lastWaterMaskData,
-                // satImgSourceCanvas, and layerBboxes — making the conditions below
-                // evaluate to false if checked after the await.
-                const hadWater = !!window.appState.lastWaterMaskData;
-                const hadLandCover = !!window.appState.layerBboxes?.landCover;
-                const hadSat = !!window.appState.satImgSourceCanvas;
-                // satEsaLoaded tracks the GEE/ESA overlay from loadSatelliteImage
-                // (auto-loaded on region select). Cleared by clearLayerCache.
-                const hadSatEsa = !!window.appState.satEsaLoaded;
-                // Check cityRasterSourceCanvas (cleared by clearLayerCache) rather than
-                // osmCityData (not cleared) so we only re-fetch when the raster was loaded.
-                const hadCity = !!window.appState.cityRasterSourceCanvas;
-                const hadCityPolygons = !!window.appState.osmCityData;
-
-                window.showToast?.('Projection changed — re-fetching layers…', 'info');
-
-                // Re-fetch DEM with new projection param (includes water if subtract_water)
-                await window.loadDEM?.();
-
-                // Re-fetch other layers that were already loaded
-                const tasks = [];
-                if (hadWater) tasks.push(window.loadWaterMask?.());
-                if (hadLandCover) tasks.push(window.loadEsaLandCover?.());
-                if (hadSat) tasks.push(window.loadSatelliteRGBImage?.());
-                if (hadSatEsa) tasks.push(window.loadSatelliteImage?.());
-                if (hadCity) tasks.push(window.loadCityRaster?.());
-                if (tasks.length) await Promise.all(tasks);
-
-                // City polygon overlays are frontend-rendered; force cache invalidation + redraw
-                // so projection changes are reflected immediately even without refetch.
-                if (hadCityPolygons) {
-                    window._invalidateCityCache?.();
-                    window.renderCityOverlay?.();
-                    window.renderCityOnDEM?.();
-                }
-
-                requestAnimationFrame(() => window.updatePrintDimensions?.());
-            }, 80);
+            _projChangeTimer = setTimeout(() => _reloadForProjection(pick), 80);
         });
     }
 
@@ -324,6 +391,10 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('showPixelGrid')?.addEventListener('change', _refreshGridlines);
     document.getElementById('pixelGridSpacing')?.addEventListener('input', _refreshGridlines);
     document.getElementById('pixelGridColor')?.addEventListener('input', _refreshGridlines);
+
+    // True grid (real meridians and parallels through the projection, Edit map only).
+    document.getElementById('showRealGrid')?.addEventListener('change', _refreshGridlines);
+    document.getElementById('realGridColor')?.addEventListener('input', _refreshGridlines);
 
     document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
         const val = e.target.value;

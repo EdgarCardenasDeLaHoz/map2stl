@@ -19,8 +19,8 @@
 
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid #333;">
       <div style="display:grid;grid-template-columns:auto 1fr 32px;gap:4px 6px;align-items:center;">
-        <label class="check-label" style="white-space:nowrap;" title="Show lat/lon gridlines overlay">
-          <input type="checkbox" id="showGridlines" checked aria-label="Show DEM gridlines"> 📐 Gridlines
+        <label class="check-label" style="white-space:nowrap;" title="Straight lat/lon lines with degree labels on the edges">
+          <input type="checkbox" id="showGridlines" checked aria-label="Show DEM gridlines"> 📐 Straight grid
         </label>
         <select id="gridlineCount" title="Grid line density" aria-label="Grid line density"
                 style="width:100%;background:#404040;color:#ccc;border:1px solid #555;padding:3px;border-radius:3px;font-size:11px;">
@@ -54,10 +54,21 @@
           <option value="100">100 km</option>
         </select>
       </div>
+      <!-- True grid: real meridians and parallels drawn through the region's projection
+           (stacked-layers.js drawLayerGrid, modules/dem/graticule.js). Where it parts from the
+           straight grid is the projection's distortion. -->
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #333;">
+        <label class="check-label" style="white-space:nowrap;" title="Real latitude and longitude lines, drawn through the same projection as the height map. Where they part from the straight grid is the projection's distortion.">
+          <input type="checkbox" id="showRealGrid" checked aria-label="Show the true latitude and longitude grid"> 🌐 True grid
+        </label>
+        <span style="font-size:11px;color:#999;">real lat/lon, bent by the projection</span>
+        <input type="color" id="realGridColor" value="#ffd60a" title="True grid colour (default amber)"
+               style="width:28px;height:22px;padding:0;border:1px solid #555;border-radius:3px;background:#404040;cursor:pointer;">
+      </div>
       <!-- Pixel grid: independent red grid in DEM pixel space (shows raster dims) -->
       <div style="display:grid;grid-template-columns:auto 1fr auto;gap:4px 6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #333;">
         <label class="check-label" style="white-space:nowrap;" title="Overlay a grid in DEM pixel space (independent of the geographic grid). Shows the raster's pixel dimensions.">
-          <input type="checkbox" id="showPixelGrid" aria-label="Show pixel grid"> 🟥 Pixel grid
+          <input type="checkbox" id="showPixelGrid" checked aria-label="Show pixel grid"> 🟥 Pixel grid
         </label>
         <div style="display:flex;align-items:center;gap:4px;">
           <span style="font-size:11px;color:#ccc;white-space:nowrap;">every</span>

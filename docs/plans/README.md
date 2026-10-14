@@ -1,6 +1,6 @@
 # Roadmap — map2stl
 
-_Last updated: 2026-09-29._ The one place for "what's next".
+_Last updated: 2026-10-14._ The one place for "what's next".
 
 - One line per open item, grouped by area; the plan link holds the detail.
 - Bugs and debt live in [../issues.md](../issues.md); unreviewed ideas in [../proposals.md](../proposals.md).
@@ -27,6 +27,14 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 | [F-EDITPANEL](active/F-EDITPANEL-fetch-view-composite.md) | Edit right panel: selected layer only, Fetch / View / Composite / Canvas, one control per setting, resolution follows Detail | build to the approved mockup |
 | [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
 | [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | planned | truth per footprint (survey + 3D Tiles), then the scorer |
+| [F-COARSEBLD](active/F-COARSEBLD-coarse-building-layer.md) | planned (proposal pending) | block polygons from OSM landuse + roads, then the GHS-BUILT raster lookup |
+| [F-VIEW-SATPARTS](active/F-VIEW-SATPARTS-satellite-on-model-parts.md) | planned (proposal pending) | planar UVs in `toViewerFrame`, then share the quick-view satellite texture |
+| [F-PLINTH](active/F-PLINTH-building-plinths-on-slopes.md) | planned (proposal pending) | flatten DEM cells under footprints before the terrain TIN; heights from the pad |
+| [F-WATERSURF](active/F-WATERSURF-flat-water-surface.md) | planned (proposal pending) | shallower lake cut, then level river pieces, then the sea polygon |
+| [F-VIEW-AO](active/F-VIEW-AO-ambient-occlusion.md) | planned (proposal pending) | PNG mockup of the switch, then the horizon-AO bake in a worker |
+| [F-CITYTREES](active/F-CITYTREES-trees-in-the-city-model.md) | planned (proposal pending) | fetch `natural=tree` / `tree_row`, then crowns, then woods; measure faces |
+| [F-BRIDGES](active/F-BRIDGES-bridges-and-tunnels.md) | planned (proposal pending) | keep the tags and drop tunnels (can ship alone), then decks and piers |
+| [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | planned (proposal pending); PNG mockups ready for approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -70,6 +78,23 @@ _Last updated: 2026-09-29._ The one place for "what's next".
 - **Courtyard roofs**: a pitched roof on a footprint with an inner ring comes out flat at
   mid-roof height, as does an unknown `roof:shape`.
   [F-LANDMARK](active/F-LANDMARK-roofs-and-building-parts.md)
+- **Realistic City Model (user-chosen 2026-10-14)**, in this order, by value for effort:
+  1. [F-VIEW-SATPARTS](active/F-VIEW-SATPARTS-satellite-on-model-parts.md) (Small): satellite
+     image on the finished model's terrain, roads and green. Reuses the existing quick-view
+     drape; view only, no print risk.
+  2. [F-PLINTH](active/F-PLINTH-building-plinths-on-slopes.md) (Medium): flat pads under
+     buildings on slopes. Fixes heights overstated on every hillside build (a 10 m building on a 20 % slope prints 40 % too tall
+     at Granada scale), not only the look.
+  3. [F-WATERSURF](active/F-WATERSURF-flat-water-surface.md) (Medium): flat water just below the
+     banks. Builds on the existing `water` mode; lakes are already flat, so the work is rivers,
+     the sea and a shallower cut.
+  4. [F-VIEW-AO](active/F-VIEW-AO-ambient-occlusion.md) (Medium): soft occlusion in the 3D
+     view. View only, but a new bake and a mockup step.
+  5. [F-CITYTREES](active/F-CITYTREES-trees-in-the-city-model.md) (Medium–Large): tree crowns.
+     Visible gain at street scale only, and a face and boolean-time budget to hold.
+  6. [F-BRIDGES](active/F-BRIDGES-bridges-and-tunnels.md) (Large): decks and piers. Needs a
+     re-fetch of every cached road layer, a change to the assembly order and fragile thin
+     decks; its first step (drop tunnels and culverts) is small and can ship early.
 
 ## Landmarks and heights
 

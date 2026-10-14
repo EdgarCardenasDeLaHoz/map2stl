@@ -124,3 +124,103 @@ def test_h5_dem_voids_excluded_and_negatives_kept(tmp_path, monkeypatch):
     assert np.allclose(small[:15, 30:], 100)                # voids left out of the mean
     assert np.allclose(small[:, :30], -400)
     assert small[30, 30] == 0                               # an all-void block stays 0
+
+
+def _two_tile_store(tmp_path, monkeypatch):
+    """A 600 px-per-tile store holding only srtm_37_12 (lon 0-5, lat 0-5); the
+    box lon 2.5-7.5 also needs srtm_38_12, which is missing."""
+    import h5py
+    import numpy as np
+
+    from geo2stl import dem
+
+    monkeypatch.setattr(dem, "_H5_TILE_PX", 600)
+    h5 = tmp_path / "strm_data.h5"
+    with h5py.File(h5, "w") as fh:
+        fh["srtm_37_12"] = np.full((600, 600), 500, dtype=np.int16)
+    monkeypatch.setattr(dem, "_H5_SRTM_FILE", h5)
+    monkeypatch.setattr(dem, "_FALLBACK_FAILED", {})
+    return dem, (4.0, 1.0, 7.5, 2.5)
+
+
+def test_h5_dem_reports_missing_tiles(tmp_path, monkeypatch):
+    """Amazon (2026-10-14): 51 of 63 tiles were not in the store and came back as
+    a flat 0 with nothing saying so. fetch_h5_dem now reports them."""
+    dem, bb = _two_tile_store(tmp_path, monkeypatch)
+    cov = {}
+    grid = dem.fetch_h5_dem(*bb, coverage=cov)
+    assert cov["tiles_needed"] == ["srtm_37_12", "srtm_38_12"]
+    assert cov["tiles_missing"] == ["srtm_38_12"]
+    mask = cov["missing_mask"]
+    assert mask.shape == grid.shape
+    assert not mask[:, :300].any() and mask[:, 300:].all()   # east of lon 5
+    assert (grid[mask] == 0).all() and (grid[~mask] == 500).all()
+
+
+def test_h5_missing_tiles_filled_from_fallback(tmp_path, monkeypatch):
+    """Missing tiles are filled from the fallback; present ones keep h5 values,
+    and a bathymetric fill is raised to SRTM's sea level of 0."""
+    import numpy as np
+
+    from geo2stl import tiles
+
+    dem, bb = _two_tile_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(tiles, "get_tile_files", lambda: [])    # no GEBCO folder
+    calls = []
+
+    def fake_opentopo(n, s, e, w, demtype, api_key, dim):
+        calls.append(demtype)
+        out = np.full((dim, dim), 1200.0)
+        out[0, :] = -3000.0                                      # sea floor
+        return out
+
+    monkeypatch.setattr(dem, "fetch_opentopo_dem", fake_opentopo)
+    notes = []
+    grid = dem.fetch_layer_data("h5_local", *bb, 50, notes=notes)
+    assert calls == ["SRTMGL3"] and notes == []
+    w = grid.shape[1]
+    assert np.allclose(grid[:, : w // 2 - 1], 500)               # h5 tile kept
+    assert np.allclose(grid[1:, w // 2 + 1:], 1200)               # gap filled
+    assert grid.min() >= 0
+
+
+def test_h5_missing_tiles_fill_prefers_local_store(tmp_path, monkeypatch):
+    """The local GeoTIFF folder (GEBCO) is used before any OpenTopography call."""
+    import numpy as np
+
+    from geo2stl import tiles
+
+    dem, bb = _two_tile_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(tiles, "get_tile_files", lambda: ["gebco.tif"])
+    monkeypatch.setattr(dem, "fetch_local_dem",
+                        lambda n, s, e, w, dim, **kw: np.full((dim, dim), 800.0))
+
+    def no_network(*a, **k):
+        raise AssertionError("OpenTopography must not be called")
+
+    monkeypatch.setattr(dem, "fetch_opentopo_dem", no_network)
+    grid = dem.fetch_layer_data("h5_local", *bb, 50)
+    assert np.isclose(grid.max(), 800)
+
+
+def test_h5_missing_tiles_without_fallback_say_so(tmp_path, monkeypatch):
+    """No fallback answering: the gap stays 0 but a coverage note is returned,
+    and a failed OpenTopography fill is not retried on the next request."""
+    from geo2stl import tiles
+
+    dem, bb = _two_tile_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(tiles, "get_tile_files", lambda: [])
+    calls = []
+
+    def rate_limited(*a, **k):
+        calls.append(1)
+        raise RuntimeError("OpenTopography API error (401): limit")
+
+    monkeypatch.setattr(dem, "fetch_opentopo_dem", rate_limited)
+    for _ in range(3):
+        notes = []
+        dem.fetch_dem(bb, 50, "h5_local", depth_scale=1.0, subtract_water=False,
+                      notes=notes)
+        assert len(notes) == 1 and "Incomplete coverage" in notes[0]
+        assert "1 of 2 tiles" in notes[0]
+    assert len(calls) == 1

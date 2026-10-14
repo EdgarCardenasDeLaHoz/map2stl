@@ -227,9 +227,15 @@ def _isolate_disk_cache(request, tmp_path):
         yield
         return
     import geo2stl.cache as cache_module
+    import geo2stl.dem as dem_module
+    import geo2stl.water_layers as wl_module
 
     saved = cache_module.CACHE_ROOT
     cache_module.CACHE_ROOT = tmp_path / "_isolated_cache"
+    # The in-memory layers over the disk cache go too, or a carve or shared base
+    # memoised by one test answers the next test's (faked) request.
+    wl_module._CARVE_MEMO.clear()
+    dem_module._SHARED_BASE_MEMO.clear()
     yield
     cache_module.CACHE_ROOT = saved
 

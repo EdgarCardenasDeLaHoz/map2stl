@@ -48,7 +48,7 @@ const builtInPresets = {
     },
     'mountain': {
         dim: 400, depthScale: 0.2, waterScale: 0.02,
-        colormap: 'terrain', subtractWater: false, satScale: 500, elevationCurve: 'enhance-peaks'
+        colormap: 'terrain', subtractWater: true, satScale: 500, elevationCurve: 'enhance-peaks'
     },
     'coastal': {
         dim: 600, depthScale: 0.7, waterScale: 0.15,
@@ -276,10 +276,15 @@ function collectAllSettings() {
             rescale_max: rescaleMax && rescaleMax !== '' ? parseFloat(rescaleMax) : null,
             gridlines_show: _chk('showGridlines', true),
             gridlines_count: _int('gridlineCount', 10),
+            // Every grid starts on (2026-10-14); a region saved with one off keeps it off.
+            pixel_grid_show: _chk('showPixelGrid', true),
+            real_grid_show: _chk('showRealGrid', true),
             elevation_curve: window.appState.activeCurvePreset || null,
             elevation_curve_points: (window.appState.curvePoints || []).map(pt => [pt.x, pt.y]),
             elevation_curve_vmin: window.appState.curveDataVmin ?? null,
             elevation_curve_vmax: window.appState.curveDataVmax ?? null,
+            // The Layers rail's order, opacity and map-only visibility (stacked-layers.js).
+            layers: window.getLayerStackState?.() ?? null,
         },
         water: {
             dim: _int('waterResolution', 600),
@@ -292,8 +297,9 @@ function collectAllSettings() {
             dim: _int('satImgResolution', 600),
         },
         export: {
-            model_height: _flt('exportModelHeight', 30.0),
-            base_height: _flt('exportBaseHeight', 10.0),
+            model_height: _flt('exportModelHeight', 20.0),
+            mm_per_pixel: _flt('mmPerPixel', 1.0),
+            base_height: _flt('exportBaseHeight', 5.0),
             exaggeration: _flt('exportExaggeration', 1.0),
             sea_level_cap: _chk('exportSeaLevelCap', false),
             floor_val: _flt('exportFloorVal', 0.0),
@@ -305,8 +311,8 @@ function collectAllSettings() {
             puzzle_z: null,
         },
         split: {
-            split_rows: _int('splitRows', 4),
-            split_cols: _int('splitCols', 4),
+            split_rows: _int('splitRows', 3),
+            split_cols: _int('splitCols', 3),
             knob_width_mm: _flt('splitKnobWidth', 20),
             knob_depth_mm: _flt('splitKnobDepth', 8),
             clearance_mm: _flt('splitClearance', 0.3),
@@ -456,6 +462,11 @@ function applyAllSettings(s) {
     if (view.rescale_max != null) set('rescaleMax', view.rescale_max);
     if (view.gridlines_show != null) setChk('showGridlines', view.gridlines_show);
     if (view.gridlines_count != null) set('gridlineCount', view.gridlines_count);
+    // Regions saved before these were kept get the default (on), not the last region's choice.
+    setChk('showPixelGrid', view.pixel_grid_show ?? true);
+    setChk('showRealGrid', view.real_grid_show ?? true);
+    // null (a region saved before the rail owned it) puts the default order back.
+    if (s.view && 'layers' in view) window.applyLayerStackState?.(view.layers);
     if (view.elevation_curve_points && Array.isArray(view.elevation_curve_points) && view.elevation_curve_points.length >= 2) {
         const points = view.elevation_curve_points.map(pt => ({ x: pt[0], y: pt[1] }));
         // If the saved curve was created with a different elevation range,
@@ -490,6 +501,9 @@ function applyAllSettings(s) {
 
     // export group — new IDs: exportModelHeight, exportBaseHeight, exportExaggeration, etc.
     if (exp.model_height != null) set('exportModelHeight', exp.model_height);
+    // Always set: a region saved before mm/px was saved starts at 1 mm per pixel, not
+    // at the previous region's value.
+    set('mmPerPixel', exp.mm_per_pixel ?? 1.0);
     if (exp.base_height != null) set('exportBaseHeight', exp.base_height);
     if (exp.exaggeration != null) set('exportExaggeration', exp.exaggeration);
     if (exp.sea_level_cap != null) setChk('exportSeaLevelCap', exp.sea_level_cap);
@@ -602,10 +616,13 @@ async function loadAndApplyRegionSettings(regionName) {
             // must override the defaults' clip_valid_region, not sit beside it.
             const saved = normalizeSettingsKeys(data.settings || {});
             const merged = defaults ? _mergeSettings(normalizeSettingsKeys(defaults), saved) : saved;
+            // No saved layer stack: reset it rather than keep the previous region's.
+            if (merged.view && !merged.view.layers) merged.view = { ...merged.view, layers: null };
             _applyStored(merged);
             return true;
         }
         if (defaults) {
+            window.applyLayerStackState?.(null);
             _applyStored(defaults);
             return false;
         }
@@ -765,3 +782,5 @@ window.collectAllSettings = collectAllSettings;
 window.applyAllSettings = applyAllSettings;
 window.saveRegionSettings = saveRegionSettings;
 window.loadAndApplyRegionSettings = loadAndApplyRegionSettings;
+// For edits outside the two watched panels (the Layers rail's switches, sliders and drags).
+window.scheduleSettingsAutoSave = _scheduleAutoSave;

@@ -43,6 +43,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -116,6 +117,62 @@ def resize_relative(layer: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
         layer = ndimage.minimum_filter(layer, size=(max(fy, 1), max(fx, 1)), mode="nearest")
     return cv2.resize(layer.astype(np.float32), (w, h),
                       interpolation=cv2.INTER_NEAREST).astype(np.float64)
+
+
+def _partition_reduce(arr: np.ndarray, shape: tuple[int, int], ufunc) -> np.ndarray:
+    """Reduce the last two axes of *arr* onto *shape* by *ufunc* over a partition.
+
+    Each source cell belongs to exactly one target cell (``floor(i * h / H)``), so
+    a one-cell channel lands in one target cell: it never vanishes (as with
+    nearest) and never doubles in width (as a ``ceil(H / h)`` window filter does
+    when the factor is just over 1). Requires ``H >= h`` and ``W >= w``.
+    """
+    H, W = arr.shape[-2:]
+    h, w = int(shape[0]), int(shape[1])
+    out = arr
+    if H != h:
+        starts = np.searchsorted((np.arange(H) * h) // H, np.arange(h))
+        out = ufunc.reduceat(out, starts, axis=-2)
+    if W != w:
+        starts = np.searchsorted((np.arange(W) * w) // W, np.arange(w))
+        out = ufunc.reduceat(out, starts, axis=-1)
+    return out
+
+
+def pool_deepest(layer: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """A relative-depth grid (negative m) pooled down to *shape*, deepest kept.
+
+    The single-grid form of :func:`pool_river_stack` (the same partition, by
+    minimum); a target larger on an axis falls back to :func:`resize_relative`.
+    """
+    layer = np.asarray(layer, dtype=np.float64)
+    h, w = int(shape[0]), int(shape[1])
+    if layer.shape == (h, w):
+        return layer
+    if layer.shape[0] >= h and layer.shape[1] >= w:
+        return _partition_reduce(layer, (h, w), np.minimum)
+    return resize_relative(layer, (h, w))
+
+
+def pool_river_stack(stack: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """A per-order depth stack (positive m, ``(k, H, W)``) pooled down to *shape*.
+
+    Every target cell keeps the deepest reach of each order among the source
+    cells it covers (:func:`_partition_reduce`), so the carve computed once on
+    the shared grid (``geo2stl.projections.shared_source_shape``) serves every
+    projection's smaller source grid with no river lost or widened. A target
+    larger than the stack on an axis is not pooled but taken nearest.
+    """
+    stack = np.asarray(stack)
+    h, w = int(shape[0]), int(shape[1])
+    if stack.shape[-2:] == (h, w):
+        return stack
+    if stack.shape[-2] >= h and stack.shape[-1] >= w:
+        return _partition_reduce(stack, (h, w), np.maximum)
+    import cv2
+    return np.stack([cv2.resize(np.asarray(s, dtype=np.float32), (w, h),
+                                interpolation=cv2.INTER_NEAREST) for s in stack]) \
+        if len(stack) else np.zeros((0, h, w), dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -566,8 +623,22 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
             "snap": snap, "dem": dem_hash, "base": b, "v": RIVER_CARVE_VERSION,
             "scale_m": options.get("scale_m")})
 
+    def cached(b):
+        # An empty carve is never reused: entries written while the river source
+        # was failing (pyarrow broken, 2026-10-14) kept every river off Europa.
+        k = key(b)
+        with _CARVE_GUARD:
+            mem = _CARVE_MEMO.get(k)
+        if mem is not None:
+            return mem
+        hit = read_array_cache("river_carve", k)
+        if hit is None or not len(hit[0]["orders"]):
+            return None
+        _carve_memo_put(k, hit)
+        return hit
+
     for b in range(max(min_order, 1), 0, -1):
-        hit = read_array_cache("river_carve", key(b))
+        hit = cached(b)
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
     b = max(1, min(min_order, RIVER_BASE_ORDER))
@@ -575,7 +646,7 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
     # the same carve together (Colombia at 800 px) and both built it, ~35 s each
     # side by side. The second caller waits, then reads the cache.
     with _carve_lock(key(b)):
-        hit = read_array_cache("river_carve", key(b))
+        hit = cached(b)
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
         from geo2stl.perf import perf_step
@@ -584,12 +655,28 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
             orders, stack = river_depth_by_order(
                 gdf, north, south, east, west, shape,
                 width_scale=float(options.get("width_scale", 1.0)), dem=base, snap=snap)
-        write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+        if len(orders):
+            write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+            # Kept as the cache stores it (float32), so a memory hit and a disk hit agree.
+            _carve_memo_put(key(b), ({"orders": orders.astype(np.float32),
+                                      "stack": stack.astype(np.float32, copy=False)}, {}))
     return orders, stack
 
 
 _CARVE_GUARD = threading.Lock()
 _CARVE_LOCKS: dict[str, list] = {}    # cache key -> [lock, callers holding or waiting]
+#: The last few carves in memory: a projection switch pools the same shared-grid
+#: carve again, and reading its .npz back cost ~0.2 s each time (Europa, 7 orders).
+_CARVE_MEMO: OrderedDict = OrderedDict()
+_CARVE_MEMO_MAX = 4
+
+
+def _carve_memo_put(key: str, hit) -> None:
+    with _CARVE_GUARD:
+        _CARVE_MEMO[key] = hit
+        _CARVE_MEMO.move_to_end(key)
+        while len(_CARVE_MEMO) > _CARVE_MEMO_MAX:
+            _CARVE_MEMO.popitem(last=False)
 
 
 @contextmanager
@@ -619,6 +706,7 @@ def _river_source(name: str, fetch):
 
     provider.__name__ = f"river_layer_source_{name}"
     provider.terrain_relative = True
+    provider.shared_grid = True     # carve once on the shared grid, pool per projection
     return provider
 
 

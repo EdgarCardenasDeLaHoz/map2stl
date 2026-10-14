@@ -57,8 +57,20 @@ class TestStorage:
         assert client.delete(f"{base}/way/1").status_code == 404
         assert client.get(base).json()["overrides"] == {}
 
+    def test_height_spec_is_normalised(self, client):
+        base = "/api/regions/TestRegion/landmarks"
+        r = client.put(f"{base}/way/1", json={"kind": "height", "height_m": "45", "source": "patronato"})
+        assert r.status_code == 200, r.text
+        want = {"kind": "height", "height_m": 45.0, "source": "patronato"}
+        assert r.json()["override"] == want
+        assert client.get(base).json()["overrides"]["way/1"] == want
+
     @pytest.mark.parametrize("spec,status", [({"kind": "lego"}, 400), ({"kind": "mesh"}, 400),
-                                             ({"kind": "ndsm", "provider": "x"}, 400)])
+                                             ({"kind": "ndsm", "provider": "x"}, 400),
+                                             ({"kind": "height"}, 400),
+                                             ({"kind": "height", "height_m": 0}, 400),
+                                             ({"kind": "height", "height_m": 1000}, 400),
+                                             ({"kind": "height", "height_m": 30, "source": 5}, 400)])
     def test_rejects_bad_specs(self, client, spec, status):
         assert client.put("/api/regions/TestRegion/landmarks/way/1", json=spec).status_code == status
 
@@ -84,6 +96,17 @@ class TestPreview:
         assert r.status_code == 200, r.text
         rep = r.json()["report"]["landmarks"]["way/1"]
         assert rep["status"] == "applied" and rep["replaced_features"] == 3
+
+    def test_height_preview(self, client):
+        r = client.post("/api/cities/landmarks/preview", json={
+            "buildings": BUILDINGS, "osm_id": "way/1", "override": {"kind": "height", "height_m": 85.5}})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        rep = body["report"]["landmarks"]["way/1"]
+        assert rep["status"] == "applied" and rep["scaled_features"] == 3
+        osm = client.post("/api/cities/landmarks/preview", json={"buildings": BUILDINGS, "osm_id": "way/1"}).json()
+        # The 57 m tower is the tallest member: everything x1.5 above the 2 mm plinth.
+        assert body["size_mm"][2] - 2.0 == pytest.approx(1.5 * (osm["size_mm"][2] - 2.0), rel=0.02)
 
     def test_errors(self, client):
         r = client.post("/api/cities/landmarks/preview", json={"buildings": BUILDINGS, "osm_id": "way/99"})

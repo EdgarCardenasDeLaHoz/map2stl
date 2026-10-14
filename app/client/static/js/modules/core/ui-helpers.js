@@ -10,6 +10,7 @@
  *   window.showToast(message, type, duration)
  *   window.toastAnimation(duration)
  *   window.toastDropIndex(types, max)
+ *   window.toastLane(viewportW, panels, maxW, gutter)
  *   window.toggleCollapsible(header)
  *   window.setLayerStatus(layer, status)
  *   window.updateLayerStatusUI()
@@ -70,6 +71,59 @@ window.toastDropIndex = function toastDropIndex(types, max = window.TOAST_MAX_VI
     return i === -1 ? 0 : i;
 };
 
+/** Panels the toast stack must not cover: the left sidebar and the right settings panels. */
+const TOAST_AVOID = '#sidebar, .dem-right-panel';
+
+/** Error messages the user closed; showToast does not raise them again this page load. */
+const _closedErrors = new Set();
+
+/**
+ * Where to put the toast stack: centred in the widest horizontal gap the side panels
+ * leave free, so a toast never sits over a panel's controls. Falls back to the whole
+ * viewport when no gap is at least `minW` wide (a phone, or panels covering the view).
+ * @param {number} viewportW - window.innerWidth
+ * @param {{left: number, right: number}[]} panels - visible panels' rects, viewport px
+ * @param {number} [maxW=440] - widest toast, px (matches .toast-container)
+ * @param {number} [gutter=16] - space kept from a panel or the window edge, px
+ * @param {number} [minW=240] - narrowest usable lane, px
+ * @returns {{center: number, width: number}} lane centre x and stack max-width, px
+ */
+window.toastLane = function toastLane(viewportW, panels, maxW = 440, gutter = 16, minW = 240) {
+    const spans = panels
+        .map((r) => [Math.max(0, r.left), Math.min(viewportW, r.right)])
+        .filter(([a, b]) => b > a)
+        .sort((x, y) => x[0] - y[0]);
+    let best = null;
+    let from = 0;
+    for (const [a, b] of [...spans, [viewportW, viewportW]]) {
+        if (a - from > (best ? best[1] - best[0] : 0)) best = [from, a];
+        from = Math.max(from, b);
+    }
+    const free = best ? best[1] - best[0] - 2 * gutter : 0;
+    if (free < minW) return { center: viewportW / 2, width: Math.min(maxW, viewportW - 2 * gutter) };
+    return { center: (best[0] + best[1]) / 2, width: Math.min(maxW, free) };
+};
+
+let _toastObserver = null;
+
+/** Centre the stack in its lane now, and again whenever a side panel appears or resizes. */
+function _placeToasts(container) {
+    const place = () => {
+        const panels = Array.from(document.querySelectorAll(TOAST_AVOID))
+            .map((el) => el.getBoundingClientRect())
+            .filter((r) => r.width > 0 && r.height > 0);
+        const { center, width } = window.toastLane(window.innerWidth, panels);
+        container.style.left = `${center}px`;
+        container.style.maxWidth = `${width}px`;
+    };
+    place();
+    if (!_toastObserver && typeof ResizeObserver !== 'undefined') {
+        _toastObserver = new ResizeObserver(place);
+        _toastObserver.observe(document.body);
+    }
+    if (_toastObserver) document.querySelectorAll(TOAST_AVOID).forEach((el) => _toastObserver.observe(el));
+}
+
 /**
  * Show a toast in the stack at the bottom centre of the main view (#toastContainer).
  *
@@ -79,10 +133,16 @@ window.toastDropIndex = function toastDropIndex(types, max = window.TOAST_MAX_VI
  * - Errors persist until the user closes them (✕) and are announced with
  *   role="alert"; other types auto-hide after `duration` and use role="status".
  * - At most TOAST_MAX_VISIBLE are shown; the oldest non-error toast is dropped first.
+ * - The stack is centred in the gap between the side panels (toastLane), so it never
+ *   covers a panel's controls (the Extrude view checkboxes were under it).
+ * - A message already on screen is not stacked again, and an error the user closed
+ *   stays closed until the page reloads: a failing layer (Earth Engine not
+ *   authenticated) raised the same error on every composite request.
  * @param {string} message - Message text to display
  * @param {'success'|'error'|'warning'|'info'} [type='info'] - Visual style
  * @param {number} [duration=3000] - Auto-dismiss delay in ms (ignored for errors)
- * @returns {HTMLElement|undefined} the toast element
+ * @returns {HTMLElement|undefined} the toast element (the one already shown for a
+ *   repeat; undefined for a closed error)
  */
 window.showToast = function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
@@ -91,10 +151,20 @@ window.showToast = function showToast(message, type = 'info', duration = 3000) {
     const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
     const kind = icons[type] ? type : 'info';
     const persist = kind === 'error';
+    const text = message == null ? '' : String(message);
+    if (persist && _closedErrors.has(text)) {
+        console.warn('[toast] closed earlier, not shown again:', text);
+        return undefined;
+    }
+    const same = Array.from(container.children)
+        .find((el) => el.dataset.type === kind && el.dataset.text === text);
+    if (same) return same;
+    _placeToasts(container);
 
     const toast = document.createElement('div');
     toast.className = `toast ${kind}`;
     toast.dataset.type = kind;
+    toast.dataset.text = text;
     toast.setAttribute('role', persist ? 'alert' : 'status');
 
     const icon = document.createElement('span');
@@ -104,7 +174,7 @@ window.showToast = function showToast(message, type = 'info', duration = 3000) {
 
     const msg = document.createElement('span');
     msg.className = 'toast-message';
-    msg.textContent = message == null ? '' : String(message);
+    msg.textContent = text;
 
     const close = document.createElement('button');
     close.type = 'button';
@@ -112,7 +182,10 @@ window.showToast = function showToast(message, type = 'info', duration = 3000) {
     close.setAttribute('aria-label', 'Dismiss notification');
     close.title = 'Dismiss';
     close.textContent = '✕';
-    close.addEventListener('click', () => toast.remove());
+    close.addEventListener('click', () => {
+        if (persist) _closedErrors.add(text);
+        toast.remove();
+    });
 
     toast.append(icon, msg, close);
     toast.style.animation = persist ? 'slideIn 0.3s ease' : window.toastAnimation(duration);

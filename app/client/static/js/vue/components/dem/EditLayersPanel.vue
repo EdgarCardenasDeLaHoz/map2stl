@@ -1,33 +1,55 @@
 <template>
   <!-- Edit page, left: the layers of the print, each a picture from its own canvas, a status
-       line and a switch for whether it is in the model (design guidelines §2 Designer; mockup
-       claude/mockups/2026-10-01/edit.html). Clicking a row selects it; its settings show on the
-       right (LayerSettings.vue). Definitions: stores/editLayers.ts. -->
+       line and a switch (design guidelines §2 Designer; mockup claude/mockups/2026-10-01/edit.html).
+       Clicking a row selects it; its settings show on the right (LayerSettings.vue). Definitions:
+       stores/editLayers.ts. Since 2026-10-14 the rail also owns the map's layer order (top of the
+       list is drawn on top: drag a row, or Alt+Up/Down), each layer's opacity on the map (slider on
+       the selected row) and Terrain's map-only visibility (mockup
+       claude/mockups/2026-10-14-layers-rail/rail.png). Saved per region (presets.js view.layers). -->
   <aside id="editLayersPanel" class="el-panel" aria-label="Layers">
     <div class="el-cap">Layers</div>
-    <div v-for="l in shown" :key="l.id" class="el-row" role="button" tabindex="0"
-         :class="{ sel: store.selected === l.id, 'el-canvas': l.id === 'canvas' }" :aria-pressed="store.selected === l.id"
-         :aria-label="`${l.name}: ${status(l)}. Show its settings`"
-         :data-layer="l.id" @click="store.select(l.id)" @keydown.enter.prevent="store.select(l.id)"
-         @keydown.space.prevent="store.select(l.id)">
-      <canvas :ref="(c) => setThumb(l.id, c as HTMLCanvasElement | null)" class="el-thumb" width="80" height="80"
-              :data-icon="l.icon" aria-hidden="true"></canvas>
-      <div class="el-grow">
-        <div class="el-name">{{ l.name }}</div>
-        <div class="el-meta"><span class="el-dot" :class="dotClass(l)"></span>{{ status(l) }}</div>
+    <div v-for="l in rows" :key="l.id" class="el-row" role="button" tabindex="0"
+         :class="{ sel: store.selected === l.id, 'el-canvas': l.id === 'canvas', drag: drag.id === l.id && drag.active,
+                   'ins-above': insAbove === l.id, 'ins-below': insBelow === l.id }"
+         :style="drag.id === l.id && drag.active ? { transform: `translateY(${drag.dy}px)` } : undefined"
+         :aria-pressed="store.selected === l.id"
+         :aria-label="`${l.name}: ${status(l)}. Show its settings${l.stack ? '. Alt+arrow keys move it' : ''}`"
+         :data-layer="l.id" @click="onRowClick(l)" @keydown="onRowKey(l, $event)"
+         @pointerdown="onPointerDown(l, $event)">
+      <div class="el-head">
+        <span class="el-grip" :class="{ 'el-grip-none': !l.stack }" aria-hidden="true">{{ l.stack ? '⋮⋮' : '' }}</span>
+        <canvas :ref="(c) => setThumb(l.id, c as HTMLCanvasElement | null)" class="el-thumb" width="80" height="80"
+                :data-icon="l.icon" aria-hidden="true"></canvas>
+        <div class="el-grow">
+          <div class="el-name">{{ l.name }}</div>
+          <div class="el-meta" :title="status(l)"><span class="el-dot" :class="dotClass(l)"></span>{{ status(l) }}</div>
+        </div>
+        <input v-if="l.stack" type="checkbox" role="switch" class="el-switch"
+               :aria-label="l.id === 'terrain' ? 'Show the terrain on the map' : `${l.name} in the model`"
+               :title="switchTitle(l)"
+               :checked="on(l)" :disabled="blocked(l)" @click.stop @change="toggle(l, $event)">
       </div>
-      <input v-if="!l.fixed" type="checkbox" role="switch" class="el-switch"
-             :aria-label="`${l.name} in the model`" :title="switchTitle(l)"
-             :checked="on(l)" :disabled="blocked(l)" @click.stop @change="toggle(l, $event)">
+      <div v-if="store.selected === l.id && l.stack" class="el-op" @click.stop @pointerdown.stop>
+        <span>On the map</span>
+        <input type="range" class="el-range" min="0" max="100" step="5" :value="opacityPct(l)"
+               :aria-label="`${l.name} opacity on the map`"
+               @input="setOpacity(l, ($event.target as HTMLInputElement).value)" @change="save()">
+        <span class="el-pct">{{ opacityPct(l) }}%</span>
+      </div>
     </div>
     <div class="el-spacer"></div>
-    <div class="el-hint">A layer loads when switched on; its dot turns green when it is ready.</div>
+    <div class="el-hint">Top of the list is drawn on top. Drag a layer to move it; switch it off to hide it.
+      A layer loads when switched on; its dot turns green when it is ready.</div>
+    <div class="el-live" aria-live="polite">{{ announce }}</div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
-import { EDIT_LAYERS, setPreviewVisible, useEditLayersStore, type EditLayer, type EditLayerId } from '../../stores/editLayers';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import {
+  EDIT_LAYERS, isPreviewVisible, setPreviewVisible, useEditLayersStore, type EditLayer, type EditLayerId,
+} from '../../stores/editLayers';
+import { moveRow, stackToRailOrder } from '../../../modules/layers/layer-stack-state.js';
 import { useUiModeStore } from '../../stores/uiMode';
 import { useAppStore } from '../../stores/app';
 import { val } from '../../dom-fields';
@@ -39,12 +61,26 @@ const app = useAppStore();
 const w = () => window as any;
 
 const available = computed(() => EDIT_LAYERS.filter((l) => !l.tool || ui.shows(l.tool)));
-// Every layer is listed from the start (user 2026-10-05: no "+ Add layer" to unfold).
-const shown = available;
+/** The rows that can move: every listed layer but Canvas, by their stacked-layers.js key. */
+const railStacks = computed(() => available.value.filter((l) => l.stack).map((l) => l.stack));
+/**
+ * Canvas first, then the layers in draw order, top of the list on top of the map. Every layer
+ * is listed from the start (user 2026-10-05: no "+ Add layer" to unfold).
+ */
+const rows = computed(() => {
+  void store.tick;
+  const order: string[] = w().getLayerOrder?.() ?? [];
+  const byStack = new Map(available.value.filter((l) => l.stack).map((l) => [l.stack, l]));
+  const rail = stackToRailOrder(order, railStacks.value)
+    .map((st: string) => byStack.get(st))
+    .filter((l): l is EditLayer => !!l);
+  return [...available.value.filter((l) => !l.stack), ...rail];
+});
 
+/** Terrain's switch is the map only (it always prints); the others put the layer in the model. */
 function on(l: EditLayer): boolean {
   void store.tick;
-  return l.inModel();
+  return l.id === 'terrain' ? isPreviewVisible('Dem') : l.inModel();
 }
 
 const cityTooLarge = computed(() => {
@@ -56,6 +92,7 @@ function blocked(l: EditLayer): boolean {
 }
 function switchTitle(l: EditLayer): string {
   if (blocked(l)) return 'City data covers areas up to 25 km across';
+  if (l.id === 'terrain') return 'Show the terrain on the map (it is always in the print)';
   if (l.id === 'landcover') return 'Show land cover on the map (preview only: not carved into the model yet)';
   return `Put ${l.name.toLowerCase()} in the model and show it here`;
 }
@@ -69,6 +106,7 @@ function noRivers(): boolean {
   return !!h && h.feature_count === 0;
 }
 function dotClass(l: EditLayer): string {
+  if (l.id === 'terrain' && !on(l)) return 'off';
   if (l.id === 'terrain' || l.id === 'canvas') return app.lastDemData ? 'ok' : 'off';
   if (!on(l)) return 'off';
   if (l.id === 'water' && noRivers()) return 'busy';
@@ -88,6 +126,7 @@ function status(l: EditLayer): string {
     case 'canvas':
       return `${PROJ_NAMES[val('paramProjection') || 'none'] || val('paramProjection')} · ${val('paramDim') || '?'} px`;
     case 'terrain':
+      if (!on(l)) return 'Hidden · still prints';
       return dem ? `${Math.round(dem.vmin ?? 0)} – ${Math.round(dem.vmax ?? 0)} m` : 'Not loaded yet';
     case 'water': {
       if (!on(l)) return 'Not in the model';
@@ -122,10 +161,126 @@ function status(l: EditLayer): string {
 function toggle(l: EditLayer, e: Event) {
   const want = (e.target as HTMLInputElement).checked;
   l.setInModel(want);
-  // The canvas shows what prints (land cover / mesh: the switch is the preview itself).
+  // The canvas shows what prints (land cover / mesh: the switch is the preview itself;
+  // Terrain: the map only, its setInModel does nothing).
   setPreviewVisible(l.stack, want);
   if (want) store.select(l.id);
   store.bump();
+  save();
+}
+
+/** Save the region's settings (the rail is outside the panels presets.js watches). */
+function save() {
+  w().scheduleSettingsAutoSave?.();
+}
+
+// ── Opacity on the map: the selected row's slider ──
+function opacityPct(l: EditLayer): number {
+  void store.tick;
+  const o = Number(w().getLayerOpacities?.()?.[l.stack]);
+  return Math.round((Number.isFinite(o) ? o : 1) * 100);
+}
+function setOpacity(l: EditLayer, v: string) {
+  w().setLayerOpacity?.(l.stack, Number(v) / 100);
+  store.bump();
+}
+
+// ── Order: drag a row, or Alt+Up/Down (top of the list is drawn on top) ──
+const announce = ref('');
+function railIds(): EditLayerId[] {
+  return rows.value.filter((l) => l.stack).map((l) => l.id);
+}
+function moveTo(l: EditLayer, to: number) {
+  const order = w().getLayerOrder?.();
+  if (!Array.isArray(order)) return;
+  const ids = railIds();
+  const from = ids.indexOf(l.id);
+  const t = Math.max(0, Math.min(ids.length - 1, to));
+  if (from < 0 || t === from) return;
+  w().setLayerOrder?.(moveRow(order, railStacks.value, l.stack, t));
+  announce.value = `${l.name} moved to ${t + 1} of ${ids.length}${t === 0 ? ', drawn on top' : ''}`;
+  store.bump();
+  save();
+}
+
+function onRowKey(l: EditLayer, e: KeyboardEvent) {
+  if (e.target !== e.currentTarget) return;   // keys on the switch or the slider are theirs
+  if ((e.key === 'Enter' || e.key === ' ') && !e.altKey) {
+    e.preventDefault();
+    store.select(l.id);
+  } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && l.stack) {
+    e.preventDefault();
+    moveTo(l, railIds().indexOf(l.id) + (e.key === 'ArrowUp' ? -1 : 1));
+  }
+}
+
+const drag = reactive({ id: '' as EditLayerId | '', active: false, startY: 0, dy: 0, to: -1 });
+let suppressClick = false;
+const DRAG_THRESHOLD = 5;
+
+/** The row the blue insertion line sits on: above row `to`, or below the last row. */
+const insAbove = computed(() => {
+  if (!drag.active) return '';
+  const others = railIds().filter((id) => id !== drag.id);
+  return drag.to < others.length ? others[drag.to] : '';
+});
+const insBelow = computed(() => {
+  if (!drag.active) return '';
+  const others = railIds().filter((id) => id !== drag.id);
+  return drag.to >= others.length ? others[others.length - 1] : '';
+});
+
+function onPointerDown(l: EditLayer, e: PointerEvent) {
+  if (!l.stack || e.button !== 0) return;
+  if ((e.target as HTMLElement).closest('input')) return;
+  drag.id = l.id;
+  drag.active = false;
+  drag.startY = e.clientY;
+  drag.dy = 0;
+  drag.to = -1;
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerCancel);
+}
+function onPointerMove(e: PointerEvent) {
+  const dy = e.clientY - drag.startY;
+  if (!drag.active && Math.abs(dy) < DRAG_THRESHOLD) return;
+  drag.active = true;
+  drag.dy = dy;
+  // Drop index among the other rows: how many of their middles are above the pointer.
+  const others = railIds().filter((id) => id !== drag.id);
+  let to = 0;
+  for (const id of others) {
+    const r = document.querySelector(`#editLayersPanel .el-row[data-layer="${id}"]`)?.getBoundingClientRect();
+    if (r && r.top + r.height / 2 < e.clientY) to++;
+  }
+  drag.to = to;
+}
+function endDrag() {
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerCancel);
+}
+function onPointerUp() {
+  endDrag();
+  if (drag.active) {
+    const l = EDIT_LAYERS.find((x) => x.id === drag.id);
+    if (l && drag.to >= 0) moveTo(l, drag.to);
+    // The pointerup is followed by a click on the row: it must not count as selecting it.
+    suppressClick = true;
+    window.setTimeout(() => { suppressClick = false; }, 0);
+  }
+  drag.id = '';
+  drag.active = false;
+}
+function onPointerCancel() {
+  endDrag();
+  drag.id = '';
+  drag.active = false;
+}
+function onRowClick(l: EditLayer) {
+  if (suppressClick) return;
+  store.select(l.id);
 }
 
 // ── Thumbnails: a scaled copy of each layer's own canvas (the real renderer) ──
@@ -180,6 +335,7 @@ onMounted(() => {
   bump();
 });
 onBeforeUnmount(() => {
+  endDrag();
   window.removeEventListener('layer-stack-changed', bump);
   document.removeEventListener('change', bump, true);
   if (timer) window.clearInterval(timer);
@@ -197,10 +353,32 @@ onBeforeUnmount(() => {
   color: var(--text-muted); margin: 0 6px 6px;
 }
 .el-row {
-  display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; cursor: pointer;
+  display: flex; flex-direction: column; padding: 8px 8px 8px 4px; border-radius: 12px; cursor: pointer;
+  position: relative; user-select: none; touch-action: none;
 }
+.el-head { display: flex; align-items: center; gap: 8px; }
 .el-row:hover { background: #232326; }
-.el-row.el-canvas { margin-bottom: 6px; position: relative; }
+/* The grip shows where a row can be dragged: on hover, selection and keyboard focus. */
+.el-grip {
+  width: 10px; flex: none; text-align: center; font-size: 12px; letter-spacing: -2px; color: #a1a1a6;
+  visibility: hidden;
+}
+.el-row:hover .el-grip, .el-row.sel .el-grip, .el-row:focus-visible .el-grip, .el-row.drag .el-grip { visibility: visible; }
+.el-row .el-grip.el-grip-none { visibility: hidden; }
+.el-row.drag { z-index: 2; background: #3a3a3c; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55); cursor: grabbing; }
+.el-row.ins-above::before, .el-row.ins-below::after {
+  content: ""; position: absolute; left: 8px; right: 8px; height: 3px; border-radius: 2px; background: #0a84ff;
+}
+.el-row.ins-above::before { top: -3px; }
+.el-row.ins-below::after { bottom: -3px; }
+.el-op {
+  display: flex; align-items: center; gap: 8px; margin: 8px 0 0 58px; font-size: 12px;
+  color: var(--text-muted); cursor: default;
+}
+.el-range { flex: 1; min-width: 0; accent-color: #0a84ff; margin: 0; }
+.el-pct { width: 34px; text-align: right; color: #f5f5f7; font-variant-numeric: tabular-nums; }
+.el-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.el-row.el-canvas { margin-bottom: 6px; }
 .el-row.el-canvas::after {
   content: ""; position: absolute; left: 8px; right: 8px; bottom: -4px; height: 1px; background: #38383a;
 }
