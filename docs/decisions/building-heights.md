@@ -1634,6 +1634,52 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-14 - Unmapped cadastre polygons as extra footprints (Cartagena, 139 of >= 4 floors) fail the hard checks: they take 11 trusted readings from OSM rows, and the readings they get are mostly wrong or untestable
+
+- **Hypothesis (plan section (a), "cheap shortcut"):** passing the AMB cadastre polygons that have no OSM footprint to the
+  drone / Street View column measurement as extra footprints (ids `cx0000` ..., row `source: cadastre_extra`, height from pano
+  evidence only, tiers and trust rules unchanged) measures buildings OSM lacks without touching the OSM rows.
+- **Rule, stated before the replay:** a cadastre polygon is unmapped when OSM footprints cover <= 30 % of its area; it is an
+  extra when its largest part is >= 60 m2 and its floor count is a valid >= 4 (of two extras overlapping >= 30 % of the smaller,
+  the larger stays). Counts (scratch `extra/count.py`): 7,297 unmapped polygons; floors 1-3 4,373 (>= 60 m2; not measured),
+  4-7 93 (23 non-PH), 8+ 46 (8 non-PH), no valid count 4; selected 139 (108 PH, 31 non-PH). The plan's "48 of 8+ floors, 8 non-PH"
+  holds (46 / 8 at >= 60 m2).
+- **Pass marks (fixed before):** the 7 towers and every OSM row unchanged against the same-data control; no existing row loses a
+  trusted reading; no extra row has tier `tag`; >= 10 extras get a trusted reading.
+- **Control:** the OSM cache entry `f1e495b6` was rewritten on 2026-10-12 22:14 (3,021 buildings, 24 coastlines; v16 had 3,019 and
+  23), so ids shifted by +2 and `Cartagena_v16` is no baseline. A flag-off replay `Cartagena_v18_ctrl` on the same data is.
+  Replays `Cartagena_v18_extra` (extras among the prior's neighbours, as any footprint) and `Cartagena_v18_extra2` (excluded
+  from them, with a drone-segment dump), seeds 1/4/5/6, 0 Google requests. Both give the same OSM-row differences below; the
+  prior of the 713 OSM rows that are prior in both is unchanged to 0.05 m in each.
+- **Measured** (`Cartagena_v18_extra` against `Cartagena_v18_ctrl`; the extras' drone counts from `extra2`'s dump, the same 7
+  readings in both):
+  - held: the 7 towers (202 / 190 / 170 / 188 / 161 / 160 / 156) unchanged; no extra row has tier `tag`;
+  - failed: 11 of 143 drone readings on OSM rows are gone (b0898 s1 121 m, b0257 s5 130, b0963 s6 132, b1248 s6 174, b1405 s4
+    139 ...); 10 OSM rows change tier or height (b0846 single 79 m -> prior, b0106 prior -> single 31 m, b0752 54 -> 44 m); other
+    readings move (b1108 s6 63 -> 165 m, b0396 172 -> 177 m); 16 rows (15 prior, 1 single) vanish and 17 appear. Causes in the log: the extras'
+    claims and evidence leave more readings out (ownership 175 -> 179, tower-behind 87 -> 93 readings), one OSM reading is
+    re-credited to an extra (b0694 -> cx0039), and the seed_6 camera fit moves (189 -> 190 m) because the extras join the
+    footprints it fits;
+  - extras: 32 of 139 get any pano reading (28 a drone-seen row or a reading left out, 4 a published single, all four
+    `withheld:high_rise` from image floor counts, no drone reading). `extra2`'s dump: 29 measured by a drone seed; 11 with a
+    reading `trusted()` before the ownership / tower-behind marks, 9 after, 7 used in fusion (cx0003, 0005, 0007, 0017, 0023,
+    0036, 0039; all withheld by the single-over-2x-prior rule); 0 corroborated; none is non-PH. Raw `trusted()` meets the >= 10
+    mark, used readings (7) do not;
+  - plausibility (a check, not truth): the 7 used readings are 67-149 m on PH plots counting 4-14 floors (5.4-37 m a floor; a PH
+    count is a unit's); only cx0003 (10 floors, 67 m) and cx0039 (14 floors, 76 m) sit near 4-7 m a floor;
+  - eyeball (8 pano crops, scratch `extra/extras_sheet.png`): cx0003 and cx0023 are real tower tops; cx0007's box sits inside
+    the big tower an OSM footprint already owns (111 m); cx0005 and cx0017 sit over water or a low block; cx0036 and cx0039 are
+    in clutter or on a roof. At most 2-3 of 8 are right.
+- **Side finding:** keeping the extras out of the prior's neighbours (`extra2`) leaves them no fallback, so the withhold rule no
+  longer applies and six untrusted Street View readings (cx0045 174 m, cx0014 120 m ...) publish as `single`; an extra must stay
+  inside the prior, as in `extra`.
+- **Rejected:** no module, flag or site setting was committed (module, tests and wiring patch are in scratch `extra/`). Not tried
+  (new hypotheses, to pre-register): measure the extras in a separate pass after the main fit, as read-only claims that cannot
+  take a top from an OSM footprint or move the camera fit; and restrict them to non-PH plots (31), whose floor counts can bound
+  a reading.
+- Scratch: `extra/` (`count.py`, `code/cadastre_extra.py`, `code/test_skyline_cadastre_extra.py`, `cadastre_extra_wiring.patch`,
+  `gate18.py`, `extra_segments.json`, run logs).
+
 ### 2026-10-14 - A pre-capture OSM filter (drop alleys and narrow streets, keep viewpoints and open sight lines) fails its marks: it drops 8-16 % of requests, not 40 %, and loses 12.5-19 % of the readings that matter
 - **Hypothesis (user, 2026-10-14):** "alleys and narrow streets could be filtered upfront". A pure-OSM, metadata-free predicate
   `keep = class not in (alley, narrow) and (viewpoint or a tall footprint visible within 300 m)` would save images without
