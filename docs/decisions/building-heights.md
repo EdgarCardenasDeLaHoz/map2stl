@@ -1634,6 +1634,54 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-14 - Unmapped cadastre polygons measured in a separate pass as read-only claims (Cartagena, stage A 31 non-PH, stage B 139) leave every OSM row alone but get almost no reading of their own: 0 of 13 trusted readings fit the cadastre band, the rest are tops an OSM footprint owns
+
+- **Hypothesis (user, "Extras as read-only claims", after the in-run replay below failed):** measure the extras in a pass that
+  cannot disturb an OSM row, so the 7 towers and every OSM row stay as in the flag-off control, and see whether the extras
+  read right.
+- **Design, built and run (not committed; scratch `extra2/`: `code/extras.py`, `extras_pass_wiring.patch`, `run_extras.py`,
+  `gate19.py`):**
+  - the main run is the control's: the extras are never in `building_records`, the seed's footprints, the prior, fusion or
+    tower-behind. `measure_elevated_seed` builds its result first, then reads the same pano with the frozen pose and instances
+    for OSM footprints + extras and keeps only the extras' readings (`measure_waterline`; `roof_fit.fit_roof_heights` for the
+    overhead seed_6);
+  - ownership over OSM footprints, cadastre occluders and extras (`ownership.Scene`; an extra's own claim is the non-PH
+    floors x 1.5 x 4.13 m, for PH the prior p90). A column is taken when another polygon's claim holds the reading's top
+    pixel, or a frozen OSM reading (trusted or not) spans it with its top row within 4 px (x pano scale) of the extra's.
+    An extra keeps a reading with a third of its columns free: the taken ones are blanked and it is read again (never
+    needed);
+  - rows: an `extras` section of `heights.json`, `source: cadastre_extra`, tier `single` or none, never `tag`, `corroborated`
+    or `prior`, no cadastre height; PH rows flagged `floors_unreliable`. Drone seeds 1/4/5/6 only (street-level views not
+    measured). Stages A and B ran in one main pass: the OSM path does not depend on the extras.
+- **Pass marks (fixed before):** the OSM rows of `heights.json` byte-identical to `Cartagena_v18_ctrl`, the 7 towers unchanged,
+  no extra reading from a column an OSM footprint owns; stage B >= 10 extras with a trusted reading inside the cadastre band
+  (plausibility, not truth), >= 3 of them non-PH, <= 25 % of 8 eyeballed crops obviously wrong.
+- **Measured** (`Cartagena_v19_extras`, 0 Google requests, 0 Street View cache misses):
+  - hard checks held: the 1,012 OSM rows are byte-identical (same sha1 of the serialized `buildings`; the other top-level
+    keys equal, only `extras` added); the 7 towers 202 / 190 / 170 / 188 / 161 / 160 / 156 m unchanged; no extra row above
+    `single`, none `tag`; every kept reading has 0 taken columns;
+  - stage A (31, all non-PH): 6 extras with any reading (7 readings), 1 `trusted()` (cx0042, seed_1, 79 m on a 4-floor plot,
+    band 7-22 m), 0 kept: all 7 share their top row with a frozen OSM reading, 3 also sit inside an OSM claim;
+  - stage B (139, 108 PH): 29 extras with a reading (43 readings: seed_6 22, seed_5 9, seed_4 7, seed_1 5), 13 `trusted()`
+    on 11 extras (1 non-PH); 42 of the 43 dropped as owned (37 share a frozen OSM top row, 32 sit inside an OSM claim); 1
+    kept: cx0003, seed_4, 67 m (10 PH floors, band 28-42 m, outside it), published as `single`;
+  - **the plausibility mark fails with or without the ownership rule:** 0 of the 13 raw trusted readings are inside the band
+    (55-149 m on 4-27-floor plots; 12 above it, cx0021 75 m below 87.5-101.5 m), so 0 of 10 extras, 0 of 3 non-PH;
+  - eyeball (8 pano crops, scratch `extra2/extras_sheet2.png`): cx0003 a real tower top at the pano edge (the one kept);
+    cx0007 inside the big tower an OSM footprint reads; cx0017, cx0023 and cx0042 real building tops that an OSM reading
+    already holds at the same row (cx0042 is a 4-floor plot reading the 79 m mid-rise); cx0021 a real tower, 83 % of its
+    columns share a row with OSM readings; cx0005 the far shore over water; cx0039 a low white block under a sky-level row.
+    2 of 8 obviously wrong, 6 real tops of which 5 an OSM row already owns.
+- **Cause:** at 400-2,000 m the unmapped polygons stand in front of or inside blocks whose towers OSM maps. A column run that
+  ends at the sky ends on a tower an OSM footprint reads, so where an extra's reading is a real top it is also an OSM row's,
+  and the columns left to the extra read the shore, the horizon or a roof behind. The in-run replay's 7 used readings were
+  this kind (67-149 m on PH plots); here they are held back and what is left is 1 reading outside the band.
+- **Rejected:** no module, flag or site setting committed. Not tried (new hypotheses to pre-register): extras read from the
+  street-level views (lower and 30-300 m away, where a 4-8 floor block is the nearest top); the extra's own MobileSAM
+  instance (the one at its base) as its column set instead of its projected span; a looser rule (free-column share or the
+  frozen-top test), which would be tuned on the same 13 readings.
+- Scratch: `extra2/` (`run_extras.py`, `run_crops.py`, `gate19.py`, `gate19.json`, `full.log`, `crops/`, `code/`).
+
 ### 2026-10-14 - Unmapped cadastre polygons as extra footprints (Cartagena, 139 of >= 4 floors) fail the hard checks: they take 11 trusted readings from OSM rows, and the readings they get are mostly wrong or untestable
 
 - **Hypothesis (plan section (a), "cheap shortcut"):** passing the AMB cadastre polygons that have no OSM footprint to the
@@ -1676,7 +1724,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 - **Rejected:** no module, flag or site setting was committed (module, tests and wiring patch are in scratch `extra/`). Not tried
   (new hypotheses, to pre-register): measure the extras in a separate pass after the main fit, as read-only claims that cannot
   take a top from an OSM footprint or move the camera fit; and restrict them to non-PH plots (31), whose floor counts can bound
-  a reading.
+  a reading. The separate pass was tried the same day (the entry above this one).
 - Scratch: `extra/` (`count.py`, `code/cadastre_extra.py`, `code/test_skyline_cadastre_extra.py`, `cadastre_extra_wiring.patch`,
   `gate18.py`, `extra_segments.json`, run logs).
 
