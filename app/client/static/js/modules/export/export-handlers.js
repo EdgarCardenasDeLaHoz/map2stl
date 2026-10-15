@@ -8,6 +8,7 @@
  *   downloadSTL()                     — POST to /api/export/stl → download
  *   downloadModel(format)             — POST to /api/export/{format} → download
  *   downloadCrossSection()            — POST to /api/export/crosssection → download
+ *   downloadFitTest()                 — POST to /api/export/fit-test → puzzle fit-test STL
  *   cancelExport()                    — abandon the in-flight export (client-side)
  *   runPreflight(format)              — POST /api/export/preflight with the body the
  *                                       'city' / 'puzzle' export would send → {data, error}
@@ -274,10 +275,10 @@ function _puzzleOptions() {
     return {
         // 0 is valid for all three: a 0 knob size means "scale to the piece"
         // (app/server/core/puzzle.py), a 0 clearance a press fit.
-        knob_width_mm: num('splitKnobWidth', 20),
-        knob_depth_mm: num('splitKnobDepth', 8),
-        knob_shape: document.getElementById('splitKnobShape')?.value || 'classic',
-        clearance_mm: num('splitClearance', 0.3),
+        knob_width_mm: num('splitKnobWidth', 0),
+        knob_depth_mm: num('splitKnobDepth', 0),
+        knob_shape: document.getElementById('splitKnobShape')?.value || 'notched',
+        clearance_mm: num('splitClearance', 0.45),
     };
 }
 
@@ -547,11 +548,35 @@ function downloadCrossSection() {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Download the puzzle fit-test coupon: one two-piece joint per clearance
+ * (0.2 to 0.5 mm), cut with the chosen knob shape. Needs no region.
+ */
+async function downloadFitTest() {
+    try {
+        const resp = await fetch('/api/export/fit-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_puzzleOptions()),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${resp.status}`);
+        }
+        _triggerDownload(await resp.blob(), 'puzzle_fit_test.stl');
+        window.showToast?.('Fit test ready: print it, then use the clearance that fits', 'success', 5000);
+    } catch (e) {
+        console.error('Fit test error:', e);
+        window.showToast?.('Fit test failed: ' + e.message, 'error', 6000);
+    }
+}
+
 window._setExportButtonsEnabled = _setExportButtonsEnabled;
 window._demSettings = _demSettings;
 window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
+window.downloadFitTest = downloadFitTest;
 window.exportCityModel = exportCityModel;
 // The City Model export request, as exportCityModel sends it: the viewer builds the same
 // one in the background (model-viewer.js::_scheduleFullModel), so a download hits the cache.

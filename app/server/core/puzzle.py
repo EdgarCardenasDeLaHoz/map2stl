@@ -18,10 +18,20 @@ spec: ``cols`` + ``rows``, or ``piece_mm`` (largest piece side, e.g. the print b
 the grid is chosen so every piece fits), or explicit ``col_edges_mm`` /
 ``row_edges_mm`` (cut positions from the west / south edge, ``[0, ..., size]``);
 optional ``knob_width_mm``, ``knob_depth_mm`` (default: scaled to the piece
-size), ``knob_shape`` (``classic`` | ``dovetail`` | ``rectangular``),
-``clearance_mm``, ``method`` (``auto`` | ``mask`` | ``boolean``), ``engrave``
-(default true), ``engrave_depth_mm`` (0.6), ``layout`` (default false) +
-``bed_mm`` ([w, h], default 220 x 220) + ``layout_gap_mm`` (5).
+size), ``knob_shape`` (``notched``, the default: one wide rectangular tab across
+most of each edge | ``dovetail`` | ``classic`` | ``rectangular``),
+``clearance_mm`` (0.45), ``corner_radius_mm`` (0.5), ``chamfer_mm`` (0.4),
+``method`` (``auto`` | ``mask`` | ``boolean``), ``engrave`` (default true),
+``engrave_depth_mm`` (0.6), ``layout`` (default false) + ``bed_mm`` ([w, h],
+default 220 x 220) + ``layout_gap_mm`` (5).
+
+Printability defaults are for an FDM printer with a 0.4 mm nozzle (PLA): 0.3 mm
+of clearance per side needed sanding, so the default is 0.45; every convex
+corner is rounded (0.5 mm) because the printed groove's inside corners come out
+round anyway; and each piece's bottom edge is bevelled (0.4 mm x 45 degrees) so
+elephant's foot does not widen the first layers. ``fit_test_mesh`` builds a
+small coupon with one joint per clearance in ``FIT_TEST_CLEARANCES_MM`` to find
+the clearance a given printer needs.
 """
 
 from __future__ import annotations
@@ -40,6 +50,7 @@ import trimesh
 from numpy2stl import write3MF, writeOBJ
 from numpy2stl.applications.puzzle import (
     engrave_underside,
+    fit_test_pieces,
     heightfield_pieces,
     jigsaw_outlines,
     make_jigsaw_cutters,
@@ -52,6 +63,18 @@ from numpy2stl.processing.boolean import cut_jigsaw, mesh_volume
 MAX_PIECES = 64
 DEFAULT_BED_MM = (220.0, 220.0)   # Ender 220 x 220, the client default (decisions/frontend.md 2026-10-01)
 ENGRAVE_DEPTH_MM = 0.6
+DEFAULT_CLEARANCE_MM = 0.45   # per side; 0.3 needed sanding on a 0.4 mm nozzle (PLA)
+CORNER_RADIUS_MM = 0.5        # rounds every convex corner of a piece outline
+CHAMFER_MM = 0.4              # 45 degree bevel on the bottom edge, against elephant's foot
+DEFAULT_KNOB_SHAPE = "notched"  # the user's choice (decisions/mesh-pipeline.md 2026-10-14)
+FIT_TEST_CLEARANCES_MM = (0.2, 0.3, 0.4, 0.45, 0.5)
+FIT_TEST_PIECE_MM = 30.0
+
+
+def spec_mm(spec: dict, key: str, default: float) -> float:
+    """``spec[key]`` as a float; missing or null means ``default`` (0 is kept)."""
+    value = spec.get(key)
+    return default if value is None else float(value)
 
 
 @dataclass
@@ -92,12 +115,29 @@ def grid_edges(width_mm: float, depth_mm: float, spec: dict) -> tuple[np.ndarray
     return xs, ys
 
 
+KNOB_WIDTH_FRACTION = 0.3    # of the smallest piece side: the default and the cap
+KNOB_DEPTH_FRACTION = 0.15
+NOTCH_MARGIN_FRACTION = 0.05  # notched: extra corner margin beyond the fit rule
+
+
 def knob_size(xs: np.ndarray, ys: np.ndarray, spec: dict) -> tuple[float, float]:
-    """Knob width and depth: the request's, capped to fit the smallest piece."""
+    """Knob width and depth: the request's, capped to fit the smallest piece.
+
+    Unset (or 0) means the cap itself, so the knob scales with the piece: a fixed
+    20 mm knob was a sliver on a 180 mm piece. A ``notched`` tab is as wide as the
+    fit rule allows (numpy2stl ``jigsaw_outlines``: depth + width / 2 + 2 *
+    clearance < piece / 2) less a 5 % corner margin, so it spans about 60 % of the
+    edge. The client preview applies the same rule (``puzzle-cuts.js::knobSize``).
+    """
     piece = float(min(np.diff(xs).min(), np.diff(ys).min()))
-    knob_w = float(spec.get("knob_width_mm") or 0.3 * piece)
-    knob_d = float(spec.get("knob_depth_mm") or 0.12 * piece)
-    return min(knob_w, 0.3 * piece), min(knob_d, 0.15 * piece)
+    cap_d = KNOB_DEPTH_FRACTION * piece
+    depth = min(float(spec.get("knob_depth_mm") or cap_d), cap_d)
+    if (spec.get("knob_shape") or DEFAULT_KNOB_SHAPE) == "notched":
+        clearance = spec_mm(spec, "clearance_mm", DEFAULT_CLEARANCE_MM)
+        cap_w = max(piece * (1 - 2 * NOTCH_MARGIN_FRACTION) - 2 * depth - 4 * clearance, 0.0)
+    else:
+        cap_w = KNOB_WIDTH_FRACTION * piece
+    return min(float(spec.get("knob_width_mm") or cap_w), cap_w), depth
 
 
 def choose_method(spec: dict, terrain_only: bool) -> str:
@@ -134,26 +174,34 @@ def cut_pieces(spec: dict, mesh: trimesh.Trimesh | None = None,
     if cols * rows > MAX_PIECES:
         raise ValueError(f"Maximum {MAX_PIECES} pieces (got {cols} x {rows})")
     knob_w, knob_d = knob_size(xs, ys, spec)
-    shape = str(spec.get("knob_shape") or "classic")
-    clearance = float(spec.get("clearance_mm", 0.3))
+    shape = str(spec.get("knob_shape") or DEFAULT_KNOB_SHAPE)
+    clearance = spec_mm(spec, "clearance_mm", DEFAULT_CLEARANCE_MM)
+    radius = spec_mm(spec, "corner_radius_mm", CORNER_RADIUS_MM)
+    chamfer = spec_mm(spec, "chamfer_mm", CHAMFER_MM)
     if progress:
         progress(60, f"Cutting {cols} x {rows} jigsaw pieces ({method})...")
     t0 = time.perf_counter()
-    kw = dict(knob_shape=shape, col_edges=xs, row_edges=ys)
+    # notched is numpy2stl's rectangular tab at the width knob_size gives it
+    kw = dict(knob_shape="rectangular" if shape == "notched" else shape,
+              col_edges=xs, row_edges=ys, corner_radius=radius)
     if method == "mask":
         outlines = jigsaw_outlines(ext[0], ext[1], cols, rows, knob_w, knob_d, clearance, **kw)
         pieces = heightfield_pieces(heightfield.z_mm, outlines, heightfield.max_error,
-                                    mm_per_px=heightfield.mm_per_px, floor=0.0)
+                                    mm_per_px=heightfield.mm_per_px, floor=0.0,
+                                    chamfer=chamfer)
     else:
         outlines = jigsaw_outlines(ext[0], ext[1], cols, rows, knob_w, knob_d, clearance,
                                    border=0.0, **kw)
-        cutters = make_jigsaw_cutters(ext[0], ext[1], cols, rows, knob_w, knob_d, clearance,
-                                      z0=-1.0, z1=ext[2] + 10.0, **kw)
         lo = mesh.bounds[0]
+        # The bevel starts at the model's own floor (z is not shifted below).
+        cutters = make_jigsaw_cutters(ext[0], ext[1], cols, rows, knob_w, knob_d, clearance,
+                                      z0=lo[2] - 1.0, z1=lo[2] + ext[2] + 10.0,
+                                      chamfer=chamfer, floor=lo[2], **kw)
         pieces = cut_jigsaw(mesh.vertices - [lo[0], lo[1], 0.0], mesh.faces, cutters)
     info = {"cols": cols, "rows": rows, "pieces": len(pieces), "method": method,
             "knob_shape": shape, "knob_width_mm": round(knob_w, 2),
             "knob_depth_mm": round(knob_d, 2), "clearance_mm": clearance,
+            "corner_radius_mm": radius, "chamfer_mm": chamfer,
             "col_edges_mm": [round(float(x), 2) for x in xs],
             "row_edges_mm": [round(float(y), 2) for y in ys],
             "seconds": {"cut": round(time.perf_counter() - t0, 2)}}
@@ -178,6 +226,28 @@ def cut_pieces(spec: dict, mesh: trimesh.Trimesh | None = None,
         info["engraved"] = {"pieces": engraved, "depth_mm": depth, "skipped": skipped}
         info["seconds"]["engrave"] = round(time.perf_counter() - t0, 2)
     return pieces, info
+
+
+def fit_test_mesh(spec: dict) -> trimesh.Trimesh:
+    """The fit-test coupon: one two-piece joint per clearance in ``FIT_TEST_CLEARANCES_MM``.
+
+    Same knob shape, corner radius and chamfer as the puzzle ``spec`` would get,
+    on ``FIT_TEST_PIECE_MM`` squares (knob scaled to that piece, as ``knob_size``
+    does; the request's own knob mm are for the real pieces and ignored). Each
+    piece has its clearance engraved underneath. Print it once, then export with
+    the clearance of the joint that slides together without sanding.
+    """
+    shape = str(spec.get("knob_shape") or DEFAULT_KNOB_SHAPE)
+    edges = np.array([0.0, FIT_TEST_PIECE_MM, 2 * FIT_TEST_PIECE_MM])
+    knob_w, knob_d = knob_size(edges, edges[:2], {
+        "knob_shape": shape, "clearance_mm": max(FIT_TEST_CLEARANCES_MM)})
+    pieces = fit_test_pieces(
+        FIT_TEST_CLEARANCES_MM, knob_w, knob_d,
+        knob_shape="rectangular" if shape == "notched" else shape, piece=FIT_TEST_PIECE_MM,
+        corner_radius=spec_mm(spec, "corner_radius_mm", CORNER_RADIUS_MM),
+        chamfer=spec_mm(spec, "chamfer_mm", CHAMFER_MM))
+    return trimesh.util.concatenate(
+        [trimesh.Trimesh(v, f, process=False) for v, f in pieces.values()])
 
 
 def _min_top(v, f) -> float:

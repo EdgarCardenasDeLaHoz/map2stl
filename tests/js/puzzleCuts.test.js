@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-    cutPolyline, evenEdges, gridKey, isCustom, jigsawCuts, knobFits, minPieceMm,
+    cutPolyline, evenEdges, gridKey, isCustom, jigsawCuts, knobFits, knobSize, minPieceMm,
     moveEdge, nearestEdge, roundEdges, tonguePath,
 } from '../../app/client/static/js/modules/export/puzzle-cuts.js';
 
@@ -74,8 +74,11 @@ describe('tonguePath', () => {
     it('rectangular is the plain tab', () => {
         expect(tonguePath('rectangular', 10, 8)).toEqual([[0, -10], [8, -10], [8, 10], [0, 10]]);
     });
-    it('dovetail widens from 0.6x at the cut to the full width at the tip', () => {
-        expect(tonguePath('dovetail', 10, 8)).toEqual([[0, -6], [8, -6 / 0.6], [8, 10], [0, 6]]);
+    it('dovetail widens from 0.75x at the cut to the full width at the tip', () => {
+        expect(tonguePath('dovetail', 10, 8)).toEqual([[0, -7.5], [8, -10], [8, 10], [0, 7.5]]);
+    });
+    it('notched is the plain tab too (it only differs in size)', () => {
+        expect(tonguePath('notched', 10, 8)).toEqual(tonguePath('rectangular', 10, 8));
     });
     it('classic is a neck at half width and a head the full width', () => {
         const p = tonguePath('classic', 10, 8, 16);
@@ -97,6 +100,28 @@ describe('knobFits', () => {
         expect(knobFits(20, 8, 0.3, 40, 40)).toBe(true);     // 18.6 < 20
         expect(knobFits(20, 8, 0.3, 37, 40)).toBe(false);    // 18.6 > 18.5
         expect(knobFits(0, 8, 0.3, 100, 100)).toBe(false);   // no knob at all
+    });
+});
+
+describe('knobSize', () => {
+    const e100 = evenEdges(300, 3);
+    it('is 0.3x and 0.15x the smallest piece when unset', () => {
+        expect(knobSize(e100, e100, 0, 0, 'dovetail')).toEqual({ knobWidth: 30, knobDepth: 15 });
+        expect(knobSize([0, 40, 300], e100, 0, 0, 'dovetail'))
+            .toEqual({ knobWidth: 12, knobDepth: 6 });
+    });
+    it('keeps a smaller request and caps a larger one', () => {
+        expect(knobSize(e100, e100, 20, 8, 'dovetail')).toEqual({ knobWidth: 20, knobDepth: 8 });
+        expect(knobSize(e100, e100, 50, 40, 'dovetail')).toEqual({ knobWidth: 30, knobDepth: 15 });
+    });
+    it('defaults to the notched tab', () => {
+        expect(knobSize(e100, e100)).toEqual(knobSize(e100, e100, 0, 0, 'notched'));
+    });
+    it('makes a notched tab as wide as the fit rule allows, less a 5 % margin', () => {
+        const { knobWidth, knobDepth } = knobSize(e100, e100, 0, 0, 'notched', 0.3);
+        expect(knobDepth).toBe(15);
+        expect(knobWidth).toBeCloseTo(100 * 0.9 - 30 - 1.2, 9);          // 58.8
+        expect(knobFits(knobWidth, knobDepth, 0.3, 100, 100)).toBe(true);
     });
 });
 
@@ -146,14 +171,18 @@ describe('jigsawCuts', () => {
         expect(above(horizontal[1], 100)).toBe(false);                // column 1: -y
     });
     it('falls back to straight cuts when the knob does not fit', () => {
-        const { polylines, knobs } = jigsawCuts(evenEdges(60, 3), evenEdges(60, 3), knob);
+        // 20 mm pieces cap the knob at 6 x 3 mm; 2 mm of clearance leaves no room.
+        const loose = { ...knob, clearance: 2 };
+        const { polylines, knobs } = jigsawCuts(evenEdges(60, 3), evenEdges(60, 3), loose);
         expect(knobs).toBe(false);
         expect(polylines.every(p => p.length === 2)).toBe(true);
     });
-    it('follows dragged edges, measuring the knob against the smallest piece', () => {
+    it('follows dragged edges, shrinking the knob to the smallest piece', () => {
         const { polylines, knobs } = jigsawCuts([0, 40, 300], rows, knob);
-        expect(knobs).toBe(true);                                     // 40 mm piece > 38.2
+        expect(knobs).toBe(true);                                     // capped to 12 x 6 mm
         expect(polylines.slice(0, 2).every(p => p[0][0] === 40)).toBe(true);
-        expect(jigsawCuts([0, 30, 300], rows, knob).knobs).toBe(false);
+        // A 30 mm piece still keeps a 9 x 4.5 mm knob: 4.5 + 4.5 + 0.6 < 15.
+        const tip = jigsawCuts([0, 30, 300], rows, knob).polylines[0];
+        expect(Math.max(...tip.map(q => q[0]))).toBeCloseTo(34.5, 9);
     });
 });

@@ -23,6 +23,9 @@ export function minPieceMm(knobWidth, knobDepth, clearance) {
     return 2 * (knobDepth + knobWidth / 2 + 2 * clearance) + 1;
 }
 
+/** Smallest piece a dragged cut may leave when the knob scales with the piece. */
+export const MIN_AUTO_PIECE_MM = 30;
+
 /** Interior edge index nearest to `pos` within `tol`, or -1. */
 export function nearestEdge(edges, pos, tol) {
     let best = -1;
@@ -64,8 +67,11 @@ export function roundEdges(edges) {
 // Jigsaw outline (the shape the server actually cuts)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The knob outlines numpy2stl offers (applications/puzzle.py KNOB_SHAPES). */
-export const KNOB_SHAPES = ['classic', 'dovetail', 'rectangular'];
+/**
+ * The knob outlines numpy2stl offers (applications/puzzle.py KNOB_SHAPES), plus
+ * `notched`: the server's name for a rectangular tab sized across most of the edge.
+ */
+export const KNOB_SHAPES = ['classic', 'dovetail', 'rectangular', 'notched'];
 
 /**
  * Tongue outline in the edge frame, as `[[u, v], ...]` from the root at
@@ -74,14 +80,14 @@ export const KNOB_SHAPES = ['classic', 'dovetail', 'rectangular'];
  *
  * Same three shapes as numpy2stl's `_tongue`: `classic` is a rounded head
  * (an ellipse 0.9 * depth by the full width) on a neck half as wide,
- * `dovetail` widens from 0.6x at the cut to the full width at the tip,
- * `rectangular` is a plain tab.
+ * `dovetail` widens from 0.75x at the cut to the full width at the tip,
+ * `rectangular` (and `notched`, which only differs in size) is a plain tab.
  */
 export function tonguePath(shape, halfWidth, depth, segments = 16) {
     const k2 = halfWidth;
     const d = depth;
-    if (shape === 'rectangular') return [[0, -k2], [d, -k2], [d, k2], [0, k2]];
-    if (shape === 'dovetail') return [[0, -0.6 * k2], [d, -k2], [d, k2], [0, 0.6 * k2]];
+    if (shape === 'rectangular' || shape === 'notched') return [[0, -k2], [d, -k2], [d, k2], [0, k2]];
+    if (shape === 'dovetail') return [[0, -0.75 * k2], [d, -k2], [d, k2], [0, 0.75 * k2]];
     if (shape !== 'classic') throw new Error(`unknown knob shape ${shape}`);
     // Neck out to u = 0.55 d at half width, then the head's ellipse from the
     // point where it leaves the neck (-150°) round the tip to +150°.
@@ -94,6 +100,25 @@ export function tonguePath(shape, halfWidth, depth, segments = 16) {
     }
     pts.push([0, 0.5 * k2]);
     return pts;
+}
+
+/**
+ * The knob the server cuts (app/server/core/puzzle.py::knob_size): the
+ * requested width and depth capped at 0.3x and 0.15x the smallest piece side;
+ * 0 (or unset) means the cap itself, so the knob scales with the piece. A
+ * `notched` tab's width cap is the widest the fit rule allows less a 5 %
+ * corner margin: piece * 0.9 - 2 * depth - 4 * clearance.
+ */
+export function knobSize(colEdges, rowEdges, knobWidth = 0, knobDepth = 0,
+    shape = 'notched', clearance = 0) {
+    const minSpan = (e) => e.slice(1).reduce((m, v, i) => Math.min(m, v - e[i]), Infinity);
+    const piece = Math.min(minSpan(colEdges), minSpan(rowEdges));
+    const capD = 0.15 * piece;
+    const depth = Math.min(knobDepth > 0 ? knobDepth : capD, capD);
+    const capW = shape === 'notched'
+        ? Math.max(piece * 0.9 - 2 * depth - 4 * clearance, 0)
+        : 0.3 * piece;
+    return { knobWidth: Math.min(knobWidth > 0 ? knobWidth : capW, capW), knobDepth: depth };
 }
 
 /**
@@ -114,7 +139,7 @@ export function knobFits(knobWidth, knobDepth, clearance, pieceW, pieceH) {
  * cut at y = `at` (`lo`/`hi` are x); `sign` is the direction the tongue points
  * along that axis. A zero-size knob gives the straight edge.
  */
-export function cutPolyline({ axis, at, lo, hi, centre, sign, shape = 'classic',
+export function cutPolyline({ axis, at, lo, hi, centre, sign, shape = 'notched',
     halfWidth = 0, depth = 0, segments = 16 }) {
     const frame = axis === 0
         ? ([u, v]) => [at + sign * u, centre + v]
@@ -131,18 +156,19 @@ export function cutPolyline({ axis, at, lo, hi, centre, sign, shape = 'classic',
  * vertical cuts point +x in even rows and -x in odd rows, horizontal cuts
  * +y in even columns and -y in odd columns.
  *
- * `{ polylines, knobs }` — `knobs` is false when the knob does not fit the
- * smallest piece (or is zero), in which case the cuts are straight lines, as
- * the server would refuse the knob anyway.
+ * The knob is sized as the server sizes it (`knobSize`: 0 = scale to the
+ * piece). `{ polylines, knobs }` — `knobs` is false when even that knob does
+ * not fit the smallest piece, in which case the cuts are straight lines.
  */
-export function jigsawCuts(colEdges, rowEdges, { shape = 'classic', knobWidth = 0,
+export function jigsawCuts(colEdges, rowEdges, { shape = 'notched', knobWidth = 0,
     knobDepth = 0, clearance = 0, segments = 16 } = {}) {
     const cols = colEdges.length - 1;
     const rows = rowEdges.length - 1;
     const minSpan = (e) => e.slice(1).reduce((m, v, i) => Math.min(m, v - e[i]), Infinity);
+    const size = knobSize(colEdges, rowEdges, knobWidth, knobDepth, shape, clearance);
     const knobs = KNOB_SHAPES.includes(shape)
-        && knobFits(knobWidth, knobDepth, clearance, minSpan(colEdges), minSpan(rowEdges));
-    const knob = knobs ? { shape, halfWidth: knobWidth / 2, depth: knobDepth, segments } : {};
+        && knobFits(size.knobWidth, size.knobDepth, clearance, minSpan(colEdges), minSpan(rowEdges));
+    const knob = knobs ? { shape, halfWidth: size.knobWidth / 2, depth: size.knobDepth, segments } : {};
     const polylines = [];
     for (let r = 0; r < rows; r++) {
         const yc = (rowEdges[r] + rowEdges[r + 1]) / 2;

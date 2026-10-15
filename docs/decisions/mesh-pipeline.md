@@ -2,6 +2,29 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
+### 2026-10-14 — Puzzle pieces are cut for FDM fit: 0.45 mm clearance, rounded corners, bevelled bottom
+- **Decision:**
+  - Default clearance 0.45 mm per side (server `app/server/core/puzzle.py::DEFAULT_CLEARANCE_MM`,
+    the Extrude panel, presets, settings and the SDK).
+  - Every convex corner of a piece outline is rounded, radius 0.5 mm
+    (`numpy2stl/src/numpy2stl/applications/puzzle.py::jigsaw_outlines` `corner_radius`).
+  - Each piece's bottom edge gets a 0.4 mm x 45 degree bevel, on both cut paths
+    (`heightfield_pieces` `chamfer`; `make_jigsaw_cutters` via `chamfered_prism`).
+  - A fit-test coupon (`app/server/core/puzzle.py::fit_test_mesh`, `POST /api/export/fit-test`,
+    *Fit test* button) prints five joints at 0.20 / 0.30 / 0.40 / 0.45 / 0.50 mm.
+  - A fourth knob shape, `notched`, and the default (`app/server/core/puzzle.py::DEFAULT_KNOB_SHAPE`,
+    the panel's first option): a rectangular tab as wide as the fit rule allows less a 5 %
+    corner margin (about 60 % of the edge). Knob depth defaults to 0.15 x the smallest piece.
+    User: "I prefer notched". Pieces no longer lock sideways; the wide tab carries the load.
+- **Why:** the user's pieces "require a lot of sanding" on an FDM printer (0.4 mm nozzle, PLA).
+  0.3 mm per side is at the tight end for FDM; nothing compensated for elephant's foot; sharp
+  tongue corners met groove inside corners that print rounded. The user chose all four fixes.
+  A printer's real fit varies, so the coupon measures it instead of guessing a second time.
+- **Rejected:** a full classic jigsaw outline as the default — "too complex", it prints poorly
+  at small piece sizes. Raising clearance further — loose joints on well-tuned printers; the
+  coupon covers that case.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-02 — Buildings print as drawn: no widening, no gap closing, no merged-outline smoothing
 - **Decision:**
   - Extruded footprints (buildings, churches, towers) are never widened, and none is dropped

@@ -48,7 +48,8 @@ import { buildingPrisms, demGroundMm } from './city-quickview.js';
 import { parseModelParts, partColor, staleParts, toViewerFrame } from './city-fullmodel.js';
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import {
-    evenEdges, gridKey, isCustom, jigsawCuts, minPieceMm, moveEdge, nearestEdge, roundEdges,
+    MIN_AUTO_PIECE_MM, evenEdges, gridKey, isCustom, jigsawCuts, minPieceMm, moveEdge,
+    nearestEdge, roundEdges,
 } from './puzzle-cuts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1393,16 +1394,19 @@ function _puzzleGrid() {
     // The knob both export routes send (export-handlers.js::_puzzleOptions), so
     // the drawn cut is the one the server cuts.
     const knob = {
-        shape: document.getElementById('splitKnobShape')?.value || 'classic',
-        knobWidth: num('splitKnobWidth', 20),
-        knobDepth: num('splitKnobDepth', 8),
-        clearance: _num('splitClearance', 0.3),
+        shape: document.getElementById('splitKnobShape')?.value || 'notched',
+        // Blank or 0: scale to the piece (puzzle-cuts.js::knobSize).
+        knobWidth: num('splitKnobWidth', 0),
+        knobDepth: num('splitKnobDepth', 0),
+        clearance: _num('splitClearance', 0.45),
     };
     return {
         cols, rows, key, knob,
         colEdges: own ? saved.cols : evenEdges(g.modelWidthMm, cols),
         rowEdges: own ? saved.rows : evenEdges(g.modelDepthMm, rows),
-        minGap: minPieceMm(knob.knobWidth, knob.knobDepth, knob.clearance),
+        // A knob that scales with the piece always fits; a set one needs room.
+        minGap: knob.knobWidth > 0 && knob.knobDepth > 0
+            ? minPieceMm(knob.knobWidth, knob.knobDepth, knob.clearance) : MIN_AUTO_PIECE_MM,
     };
 }
 

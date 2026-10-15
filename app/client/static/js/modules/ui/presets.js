@@ -313,9 +313,9 @@ function collectAllSettings() {
         split: {
             split_rows: _int('splitRows', 3),
             split_cols: _int('splitCols', 3),
-            knob_width_mm: _flt('splitKnobWidth', 20),
-            knob_depth_mm: _flt('splitKnobDepth', 8),
-            clearance_mm: _flt('splitClearance', 0.3),
+            knob_width_mm: _flt('splitKnobWidth', 0),
+            knob_depth_mm: _flt('splitKnobDepth', 0),
+            clearance_mm: _flt('splitClearance', 0.45),
         },
         city: {
             layers: cityLayers.length ? cityLayers : ['buildings', 'roads', 'waterways'],

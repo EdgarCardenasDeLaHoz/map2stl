@@ -132,6 +132,7 @@ def preflight(data: dict) -> dict:
     from app.server.core.export import puzzle_spec, terrain_stage
     from app.server.core.export_params import ExportContext
     from app.server.core.puzzle import (
+        DEFAULT_KNOB_SHAPE,
         MAX_PIECES,
         choose_method,
         grid_edges,
@@ -259,7 +260,7 @@ def preflight(data: dict) -> dict:
                 "largest_piece_mm": [round(float(np.diff(xs).max()), 1),
                                      round(float(np.diff(ys).max()), 1)],
                 "knob_mm": [round(kw, 1), round(kd, 1)],
-                "knob_shape": spec.get("knob_shape") or "classic",
+                "knob_shape": spec.get("knob_shape") or DEFAULT_KNOB_SHAPE,
             }
             if cols * rows > MAX_PIECES:
                 warnings.append(f"{cols * rows} pieces: the maximum is {MAX_PIECES}")

@@ -86,7 +86,7 @@ def _default_region_settings() -> dict:
             "split_cols": 4,
             "knob_width_mm": 20.0,
             "knob_depth_mm": 8.0,
-            "clearance_mm": 0.3,
+            "clearance_mm": 0.45,
         },
         "city": {
             "layers": ["buildings", "roads", "waterways"],

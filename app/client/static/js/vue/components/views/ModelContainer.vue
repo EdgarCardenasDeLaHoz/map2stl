@@ -249,22 +249,28 @@
                   <input type="number" id="splitRows" value="3" min="1" max="20">
                 </div>
                 <div class="param-group">
-                  <label for="splitKnobWidth" title="Width of the tongue on each shared edge (mm)">Knob width (mm):</label>
-                  <input type="number" id="splitKnobWidth" value="20" min="2" max="200" step="1">
+                  <label for="splitKnobWidth" title="Width of the tongue on each shared edge (mm). Blank: 30% of the smallest piece">Knob width (mm):</label>
+                  <input type="number" id="splitKnobWidth" value="" placeholder="Auto" min="0" max="200" step="1">
                 </div>
                 <div class="param-group">
-                  <label for="splitKnobDepth" title="How far the tongue reaches into the neighbouring piece (mm)">Knob depth (mm):</label>
-                  <input type="number" id="splitKnobDepth" value="8" min="1" max="50" step="0.5">
+                  <label for="splitKnobDepth" title="How far the tongue reaches into the neighbouring piece (mm). Blank: 15% of the smallest piece">Knob depth (mm):</label>
+                  <input type="number" id="splitKnobDepth" value="" placeholder="Auto" min="0" max="50" step="0.5">
                 </div>
                 <div class="param-group">
-                  <label for="splitClearance" title="Gap taken off the groove side so printed pieces fit (mm)">Clearance (mm):</label>
-                  <input type="number" id="splitClearance" value="0.3" min="0" max="2" step="0.05">
+                  <label for="splitClearance" title="Gap taken off the groove side so printed pieces fit (mm). 0.45 suits a 0.4 mm nozzle; print the fit test to check yours">Clearance (mm):</label>
+                  <input type="number" id="splitClearance" value="0.45" min="0" max="2" step="0.05">
+                </div>
+                <div class="mhint">
+                  Pieces too tight or too loose? Print a small test joint at 0.2 to 0.5 mm.
+                  <button id="puzzleFitTestBtn" type="button" class="btn btn-xs" style="margin-left:4px;"
+                          title="Download an STL with one two-piece joint per clearance, each labelled underneath">Fit test</button>
                 </div>
                 <div class="param-group">
-                  <label for="splitKnobShape" title="Tongue outline: classic rounded knob, dovetail, or a plain rectangular tab">Knob shape:</label>
+                  <label for="splitKnobShape" title="Tongue outline: notched (one wide tab across most of the edge: sturdiest, but it does not lock), dovetail (locks), classic rounded knob, or a plain rectangular tab">Knob shape:</label>
                   <select id="splitKnobShape" class="ctrl-input-sm" style="width:auto;">
-                    <option value="classic" selected>Classic (rounded)</option>
+                    <option value="notched" selected>Notched (wide tab)</option>
                     <option value="dovetail">Dovetail</option>
+                    <option value="classic">Classic (rounded)</option>
                     <option value="rectangular">Rectangular</option>
                   </select>
                 </div>

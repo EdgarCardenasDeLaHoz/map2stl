@@ -130,4 +130,6 @@ window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
 
     document.getElementById('exportPuzzle3MFBtn')
         ?.addEventListener('click', () => window.exportPuzzle?.());
+    document.getElementById('puzzleFitTestBtn')
+        ?.addEventListener('click', () => window.downloadFitTest?.());
 };

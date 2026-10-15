@@ -659,6 +659,7 @@ _PUZZLE_FIELDS = {
     "split_cols": "cols", "split_rows": "rows", "piece_mm": "piece_mm",
     "knob_width_mm": "knob_width_mm", "knob_depth_mm": "knob_depth_mm",
     "knob_shape": "knob_shape", "clearance_mm": "clearance_mm",
+    "corner_radius_mm": "corner_radius_mm", "chamfer_mm": "chamfer_mm",
     "col_edges_mm": "col_edges_mm", "row_edges_mm": "row_edges_mm",
     "puzzle_method": "method", "engrave_ids": "engrave", "layout": "layout",
     "bed_mm": "bed_mm",
@@ -667,11 +668,27 @@ _PUZZLE_FIELDS = {
 
 def puzzle_spec(data: dict) -> dict:
     """The puzzle spec of a ``puzzle`` export request (flat fields or ``puzzle``)."""
-    spec = {"clearance_mm": 0.3}
+    spec = {}   # unset fields take core/puzzle.py's defaults (clearance 0.45 mm)
     spec.update({key: data[f] for f, key in _PUZZLE_FIELDS.items() if data.get(f) is not None})
     if isinstance(data.get("puzzle"), dict):
         spec.update(data["puzzle"])
     return spec
+
+
+def generate_fit_test(data: dict):
+    """The puzzle fit-test coupon as an STL (``core/puzzle.py::fit_test_mesh``),
+    built with the request's knob shape, corner radius and chamfer."""
+    from fastapi.responses import FileResponse
+
+    from app.server.core.puzzle import fit_test_mesh
+
+    temp_path = _write_mesh(fit_test_mesh(puzzle_spec(data)), ".stl")
+    return FileResponse(
+        temp_path,
+        filename="puzzle_fit_test.stl",
+        media_type="application/octet-stream",
+        background=BackgroundTask(os.unlink, temp_path),
+    )
 
 
 def generate_puzzle(data: dict, task: ExportTask) -> None:

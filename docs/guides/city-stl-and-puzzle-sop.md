@@ -180,10 +180,19 @@ refresh them). A red outline marks the control each step talks about.
 
 7. **Puzzle details** (card: switch on *More settings* → *Puzzle details* in Extrude's
    right-hand panel). *City puzzle* is what *Split into pieces* turns on for a city box;
-   *max* is the largest piece (bed − 10 mm, 210 mm on the Ender). Knob shape (*classic*
-   rounded, *dovetail*, *rectangular*), knob width / depth and clearance apply to both
-   puzzles; engraved piece ids + north arrow on the underside (on by default); *Lay out
-   on plates* (one 3MF per bed). *Columns × Rows* belong to the *Terrain puzzle*: while
+   *max* is the largest piece (bed − 10 mm, 210 mm on the Ender). Knob shape (*notched*,
+   the default: one wide tab across most of the edge, sturdiest but it does not lock;
+   *dovetail*, which locks; *classic* rounded; *rectangular*), knob width / depth (blank: scaled to the
+   smallest piece) and clearance apply to both puzzles; engraved piece ids + north arrow
+   on the underside (on by default); *Lay out on plates* (one 3MF per bed).
+
+   **Fit without sanding.** Clearance defaults to 0.45 mm per side (right for a 0.4 mm
+   nozzle in PLA; 0.3 mm needed sanding). Every piece also gets rounded corners (0.5 mm)
+   and a 0.4 mm × 45° bevel on its bottom edge against elephant's foot. To tune the
+   clearance for your printer, press **Fit test** next to Clearance: it downloads a small
+   STL (66 × 174 mm, 4 mm thick) with five two-piece joints at 0.20, 0.30, 0.40, 0.45 and
+   0.50 mm, each labelled underneath, cut with the chosen knob shape. Print it with the
+   puzzle's settings and use the smallest clearance whose joint slides together by hand. *Columns × Rows* belong to the *Terrain puzzle*: while
    that box is ticked the preview draws its grid and the city build ignores dragged
    cuts, so leave it off for a city. Drag the red cuts in the preview to move one (a cut
    stops where a piece would get too small for its knobs); **Reset cuts** goes back to
