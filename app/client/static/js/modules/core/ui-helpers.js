@@ -403,15 +403,26 @@ window.showErrInEl = function showErrInEl(containerId, msg) {
  * @param {Array|undefined}  arr  - fallback plain JS array
  * @returns {Float32Array|Array}
  */
-function _decodeGrid(b64, arr) {
+function _decodeGrid(b64, arr, dtype = 'float32') {
     if (b64) {
         const bin = atob(b64);
         const buf = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        if (dtype === 'uint8') {
+            // Class / mask grids are sent as uint8 (a quarter of the size); 255 is NaN.
+            const out = new Float32Array(buf.length);
+            for (let i = 0; i < buf.length; i++) out[i] = buf[i] === 255 ? NaN : buf[i];
+            return out;
+        }
         return new Float32Array(buf.buffer);
     }
     return arr;
 }
+
+/** Satellite overlay values from /api/terrain/dem (`sat_values` list from older servers). */
+window.decodeSatValues = function decodeSatValues(data) {
+    return _decodeGrid(data.sat_values_b64, data.sat_values);
+};
 
 window.decodeDemValues = function decodeDemValues(data) {
     return _decodeGrid(data.dem_values_b64, data.dem_values);
@@ -428,11 +439,11 @@ window.decodeBordersGrid = function decodeBordersGrid(data) {
 };
 
 window.decodeWaterMask = function decodeWaterMask(data) {
-    return _decodeGrid(data.water_mask_values_b64, data.water_mask_values);
+    return _decodeGrid(data.water_mask_values_b64, data.water_mask_values, data.water_mask_dtype);
 };
 
 window.decodeEsaValues = function decodeEsaValues(data) {
-    return _decodeGrid(data.esa_values_b64, data.esa_values);
+    return _decodeGrid(data.esa_values_b64, data.esa_values, data.esa_dtype);
 };
 
 window.decodeHydrologyValues = function decodeHydrologyValues(data) {
@@ -491,9 +502,16 @@ window.decodeMeshMask = function decodeMeshMask(b64) {
 /**
  * Schedule a STACKED_UPDATE event on the next animation frame.
  * Centralises the repeated `requestAnimationFrame(() => window.events?.emit(...))` pattern.
+ * Calls before that frame share it: one redraw, not one per caller (a projection switch made
+ * five or six in a row, each a full stack redraw at up to 3x density).
  */
+let _stackUpdateFrame = 0;
 window.emitStackUpdate = function emitStackUpdate() {
-    requestAnimationFrame(() => window.events?.emit(window.EV?.STACKED_UPDATE));
+    if (_stackUpdateFrame) return;
+    _stackUpdateFrame = requestAnimationFrame(() => {
+        _stackUpdateFrame = 0;
+        window.events?.emit(window.EV?.STACKED_UPDATE);
+    });
 };
 
 // ============================================================

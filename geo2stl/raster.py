@@ -30,7 +30,8 @@ def read_geotiff(
 ) -> tuple[np.ndarray, Any, str | None, float | None]:
     """Read one band of a GeoTIFF from bytes, a buffer or a path.
 
-    Uses rasterio; when rasterio is not installed or cannot decode the data,
+    Uses rasterio (block decoding on every core, ``GDAL_NUM_THREADS=ALL_CPUS``,
+    set for this read only); when rasterio is not installed or cannot decode the data,
     falls back to PIL (pixels only: ``transform``, ``crs`` and ``nodata`` are
     then None).
 
@@ -66,7 +67,10 @@ def read_geotiff(
         rasterio = None
     if rasterio is not None:
         try:
-            with rasterio.open(buf) as src:
+            # GDAL decodes the file's blocks on every core for this read only: the
+            # values are the same (same resampling), Colorado's 352 MB SRTM file
+            # read in 5.4 s single-threaded (F-SPEED #5A).
+            with rasterio.Env(GDAL_NUM_THREADS="ALL_CPUS"), rasterio.open(buf) as src:
                 if fit_dim:
                     raw = src.read(band, out_shape=_fit_shape(src.height, src.width, fit_dim),
                                    resampling=Resampling.bilinear)

@@ -213,7 +213,11 @@ app = FastAPI(
 # (measured: 1.9 MB for a 600x600 grid) and compresses well; STL/3MF downloads
 # are already binary and are streamed as FileResponse, which GZipMiddleware
 # leaves alone below the size threshold it applies per response.
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# Level 1, not Starlette's default 9: compression runs on the event loop, and at level 9
+# the 10.6 MB hydrology payload took 0.5-1 s, holding every other response behind it
+# (borders, hydrology and dem-merge all ended together). Level 1 takes ~50 ms; the body
+# grows from 0.29 to 0.43 MB, which does not matter on localhost.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=1)
 
 
 @app.middleware("http")

@@ -201,3 +201,33 @@ def test_carve_memo_answers_without_the_disk(carve_env, monkeypatch):
     monkeypatch.setattr("geo2stl.cache.read_array_cache", no_disk)
     second = wl.river_carve_layers("hydrorivers", RIVER_FETCH["hydrorivers"], N, S, E, W, sd, opts, base)
     assert np.array_equal(first[1], second[1]) and len(carve_env) == 1
+
+
+NORWAY = (72.07, 57.03, 33.28, -3.0)
+
+
+def test_shared_grid_cap_is_a_cell_budget():
+    """Norway at 600 px: Mercator needs 596 x 1438 (0.86M cells), past the old 1200 px
+    side cap, so cosine and Mercator fell off the shared grid. The cell budget keeps
+    every projection on it and still bounds a polar box
+    (geo2stl/projections.py::shared_source_dim)."""
+    shared = shared_source_shape(600, NORWAY)
+    for p in get_projection_info():
+        assert shared_covers(shared, source_shape(600, NORWAY, p)), p
+    rows, cols = shared_source_shape(600, (85.0, 60.0, 180.0, -180.0))
+    assert rows * cols <= (2 * 600) ** 2 and max(rows, cols) <= 3 * 600
+
+
+def test_dem_route_reads_the_shared_grid_once(slow_dem, monkeypatch):
+    """fetch_dem(shared_dim=dim) cuts every projection's grid from one shared read
+    instead of decoding the GeoTIFF per projection, and asks for the water mask at
+    one scale (geo2stl/dem.py::fetch_dem)."""
+    scales = []
+    monkeypatch.setattr(dem_mod, "fetch_bbox_image",
+                        lambda *a, scale=None, **k: scales.append(scale))
+    dem_mod._SHARED_BASE_MEMO.clear()
+    for p in ("cosine", "mercator", "sinusoidal", "lambert"):
+        im = dem_mod.fetch_dem(BOX, source_dim(64, BOX, p), "SRTMGL1",
+                               maintain_dimensions=False, shared_dim=64)
+        assert im.shape == source_shape(64, BOX, p), p
+    assert len(slow_dem) == 1 and len(scales) == 4 and len(set(scales)) == 1

@@ -5,6 +5,27 @@ rationale: [composite-dem-design.md](../reference/composite-dem-design.md). Rela
 [osm-water-hydrology.md](osm-water-hydrology.md) (rivers and lakes as composite sources),
 [frontend.md](frontend.md).
 
+### 2026-10-14 — The DEM route uses the shared grid, and its cap is a cell budget
+- **Decision:** `GET /api/terrain/dem` takes an OpenTopography grid from `shared_base_grid`
+  (`geo2stl/dem.py::fetch_dem(shared_dim=dim)`) and reads ESA water at the shared grid's scale for
+  every projection. The shared grid is capped at (2 x dim)² cells and 3 x dim on its longest side
+  (`geo2stl/projections.py::shared_source_dim`) instead of 2 x dim on its longest side. Big boxes
+  (>= 500,000 km²) start the carve worker pool before the reaches are read
+  (`geo2stl/water_layers.py::start_carve_pool`). No cache version bumped: a carve for a given key
+  is unchanged bit for bit; Norway's new shared shape is a new key.
+- **Why:** the DEM route decoded the GeoTIFF per projection (Colorado 4-5.7 s, Norway 4.3 s per
+  switch) and a finer per-projection ESA scale cost Norway an Earth Engine download (7 s).
+  Norway's Mercator grid (596 x 1438, 0.86M cells) passed the old side cap, so three projections
+  carved on their own (11-15 s). Norway cosine/equidistant pooled from the shared carve: 99.7 % of
+  old river pixels within 1 px on the source grid (97.7 % after the categorical projection);
+  Mercator identical.
+- **Rejected:** a fast per-projection first answer with the shared carve in the background
+  (option 3): not needed once the cold carve fit in ~8 s, and it doubles the work; raising the
+  side factor to 2.5 (Norway-specific; a cell budget bounds any box).
+- **Supersedes / superseded by:** amends the shared-grid entry below (its 2 x dim cap).
+- **Source:** issues.md "Edit map: changing the projection changed nothing visible"; tests in
+  `tests/test_shared_grid_carve.py`, `tests/test_water_mask_sea.py`.
+
 ### 2026-10-14 — The base DEM and the river carve are computed once per box on a shared grid, not per projection
 - **Decision:** the composite and the rivers preview read a built-in base DEM once onto
   `geo2stl/projections.py::shared_source_shape` (the largest projection's source grid, capped at

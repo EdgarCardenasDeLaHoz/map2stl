@@ -86,7 +86,9 @@ const LAYER_CANVAS_IDS = {
  *
  * `ready()` reports whether the layer already holds something to draw, so
  * activating it costs a request only the first time; every loader here also
- * de-duplicates its own in-flight calls. Two layers are deliberately absent:
+ * de-duplicates its own in-flight calls. A layer whose fetch came back empty (no rivers, no
+ * trails in the box) counts as ready too: its status is 'loaded' with no canvas, and the
+ * projection switch (event-listeners-map.js) has usually fetched it already when the DEM lands. Two layers are deliberately absent:
  * `MeshImport` comes from a file the user uploads, and `CompositeDem` is built
  * from layers that are already loaded rather than fetched.
  */
@@ -96,7 +98,8 @@ const LAYER_AUTOLOAD = {
         load: () => window.loadDEM?.(),
     },
     WaterHydrology: {
-        ready: () => !!window.appState?.waterHydrologyCanvas,
+        ready: () => !!window.appState?.waterHydrologyCanvas
+            || window.appState?.layerStatus?.waterHydrology === 'loaded',
         load: () => window.loadWaterHydrology?.(),
     },
     Sat: {
@@ -120,7 +123,8 @@ const LAYER_AUTOLOAD = {
         load: () => window.loadBorders?.({ activate: false }),
     },
     Trails: {
-        ready: () => !!window.appState?.lastTrailsData,
+        ready: () => !!window.appState?.lastTrailsData
+            || window.appState?.layerStatus?.trails === 'loaded',
         // Already switched on by setStackMode, so it must not click itself again.
         load: () => window.loadTrails?.({ activate: false }),
     },

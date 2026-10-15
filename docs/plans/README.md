@@ -28,13 +28,17 @@ _Last updated: 2026-10-14._ The one place for "what's next".
 | [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
 | [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | planned | truth per footprint (survey + 3D Tiles), then the scorer |
 | [F-COARSEBLD](active/F-COARSEBLD-coarse-building-layer.md) | planned (proposal pending) | block polygons from OSM landuse + roads, then the GHS-BUILT raster lookup |
-| [F-VIEW-SATPARTS](active/F-VIEW-SATPARTS-satellite-on-model-parts.md) | planned (proposal pending) | planar UVs in `toViewerFrame`, then share the quick-view satellite texture |
-| [F-PLINTH](active/F-PLINTH-building-plinths-on-slopes.md) | planned (proposal pending) | flatten DEM cells under footprints before the terrain TIN; heights from the pad |
+| [F-VIEW-SATPARTS](active/F-VIEW-SATPARTS-satellite-on-model-parts.md) | approved 2026-10-14 | planar UVs in `toViewerFrame`, then share the quick-view satellite texture |
+| [F-PLINTH](active/F-PLINTH-building-plinths-on-slopes.md) | approved 2026-10-14 | flatten DEM cells under footprints before the terrain TIN; heights from the pad |
 | [F-WATERSURF](active/F-WATERSURF-flat-water-surface.md) | planned (proposal pending) | shallower lake cut, then level river pieces, then the sea polygon |
 | [F-VIEW-AO](active/F-VIEW-AO-ambient-occlusion.md) | planned (proposal pending) | PNG mockup of the switch, then the horizon-AO bake in a worker |
 | [F-CITYTREES](active/F-CITYTREES-trees-in-the-city-model.md) | planned (proposal pending) | fetch `natural=tree` / `tree_row`, then crowns, then woods; measure faces |
 | [F-BRIDGES](active/F-BRIDGES-bridges-and-tunnels.md) | planned (proposal pending) | keep the tags and drop tunnels (can ship alone), then decks and piers |
-| [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | planned (proposal pending); PNG mockups ready for approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
+| [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | approved 2026-10-14; PNG mockups still need approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
+| [F-DATADIR](active/F-DATADIR-portable-data-dir.md) | approved 2026-10-14 | `DATA_DIR` in `app/paths.py`, then route the writers through it; runs before F-KEYS on the same PC |
+| [F-DESKTOP](active/F-DESKTOP-standalone-app.md) | approved 2026-10-14 | `[project.scripts]` plus `app/cli.py`, then a `numpy2stl` wheel; needs F-DATADIR first |
+| [F-CLOUD](active/F-CLOUD-hosted-multi-user.md) | plan approved 2026-10-14; implementation not approved | phase 1 only (stateless and bounded), which also improves the desktop build |
+| [F-SPEED](active/F-SPEED-region-open-and-fetch.md) | approved 2026-10-14 (phases 1 and 2); phases 1 and 2 done | phase 3: post-water grid cache (#17), binary DEM response (#16), hydrology keyed on the shared size (#18) |
 | F-DET, registration learning | skyline and registration plans | see the Skyline section |
 
 ## Mesh pipeline and city model
@@ -205,6 +209,24 @@ _Last updated: 2026-10-14._ The one place for "what's next".
     widened/clamped, filament and time) in the UI after a build.
   - *Map rendering*: the 2D map still draws fetched heights, not the user's height overrides.
     It also does not show the layers the build adds.
+
+## Deployment and packaging
+
+From the 2026-10-14 deployment audit. Standalone is about two weeks of work once the shared
+prerequisite lands; hosted is two to three months, and its blocker is single-tenancy and
+local-filesystem state, not dependency weight.
+
+- [F-DATADIR](active/F-DATADIR-portable-data-dir.md) is the shared prerequisite and also fixes a
+  live desktop bug: ~9 GB of the 12 GB cache sits outside any eviction policy and `output/` (1.9 GB)
+  has none at all, all inside the OneDrive-synced repository folder. Do this one first regardless of
+  which track is wanted.
+- [F-DESKTOP](active/F-DESKTOP-standalone-app.md) then needs an entry point, a `numpy2stl` wheel, the
+  Vite bundle as package data, and an installer. The F-KEYS Earth Engine sign-in is a hard
+  prerequisite for any Earth Engine feature in a packaged build, because an installed app cannot use
+  the developer's cached credentials.
+- [F-CLOUD](active/F-CLOUD-hosted-multi-user.md) phase 1 overlaps F-DESKTOP's prerequisites. Phases 2
+  to 4 (identity, job queue, quotas) only pay off if hosting is actually wanted, and a public
+  instance without phase 4 quotas is an open invoice on the paid Google services.
 
 ## Architecture (F-ARCH leftovers)
 

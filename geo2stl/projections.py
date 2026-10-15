@@ -25,7 +25,6 @@ from typing import Literal
 
 import cv2
 import numpy as np
-from scipy import ndimage
 
 from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ, m_per_deg_lon
 
@@ -253,10 +252,14 @@ def source_shape(dim: int,
                            source_dim(dim, bbox, projection, maintain_dimensions))
 
 
-#: The shared source grid is at most this many times *dim* on its longest side: a
-#: near-polar Mercator box would otherwise ask for a huge grid. A projection that
-#: needs more samples than that is served from its own grid (:func:`shared_covers`).
+#: The shared source grid has at most (this x *dim*)² cells and a longest side of
+#: at most :data:`SHARED_SOURCE_MAX_SIDE` x *dim*: a near-polar Mercator box would
+#: otherwise ask for a huge grid. A projection that needs more samples than that is
+#: served from its own grid (:func:`shared_covers`). A cell budget rather than a
+#: side cap: Norway (dim 600, 57-72 N) needs 596 x 1438 for Mercator, 0.86M cells,
+#: which a 1200 px side cap refused, so cosine and Mercator left the shared grid.
 SHARED_SOURCE_MAX_FACTOR = 2.0
+SHARED_SOURCE_MAX_SIDE = 3.0
 
 
 def shared_source_dim(dim: int,
@@ -264,8 +267,9 @@ def shared_source_dim(dim: int,
                       maintain_dimensions: bool = False) -> int:
     """Longest side of one equal-angle grid fine enough for every projection.
 
-    The largest :func:`source_dim` over all projections (capped at
-    :data:`SHARED_SOURCE_MAX_FACTOR` x *dim*). Work done on this grid (the base
+    The largest :func:`source_dim` over all projections, capped to
+    (:data:`SHARED_SOURCE_MAX_FACTOR` x *dim*)² cells and a longest side of
+    :data:`SHARED_SOURCE_MAX_SIDE` x *dim*. Work done on this grid (the base
     DEM read, the river carve) does not depend on the projection, so switching
     projection only resamples it down to the projection's :func:`source_shape`.
     Europa (dim 600): 936, Mercator's grid.
@@ -273,8 +277,13 @@ def shared_source_dim(dim: int,
     dim = max(1, int(dim))
     if maintain_dimensions:
         return dim
-    best = max(source_dim(dim, bbox, p) for p in get_projection_info())
-    return max(dim, min(best, int(np.ceil(SHARED_SOURCE_MAX_FACTOR * dim))))
+    best = min(max(source_dim(dim, bbox, p) for p in get_projection_info()),
+               int(np.ceil(SHARED_SOURCE_MAX_SIDE * dim)))
+    rows, cols = projected_shape(bbox, 'none', best)
+    budget = (SHARED_SOURCE_MAX_FACTOR * dim) ** 2
+    if rows * cols > budget:
+        best = int(best * np.sqrt(budget / (rows * cols)))
+    return max(dim, best)
 
 
 def shared_source_shape(dim: int,
@@ -601,13 +610,97 @@ def _project_cosine(
 
 
 # ---------------------------------------------------------------------------
+# Inverse sampling (shared by mercator, lambert, sinusoidal, miller, gall)
+# ---------------------------------------------------------------------------
+
+def _sample_axis(x: np.ndarray, n: int, order: int):
+    """Neighbour indices, weights and in-range flags along one axis of length *n*
+    (see :func:`_sample_grid`). Returns ``(i0, i1, t, valid)``; ``i1`` and ``t``
+    are None for order 0."""
+    x = np.asarray(x, dtype=np.float64)
+    if x.size and x.min() >= 0 and x.max() <= n - 1:   # the usual case (NaN fails both)
+        valid, xc = None, x
+    else:
+        valid = (x >= 0) & (x <= n - 1)
+        xc = np.where(valid, x, 0.0)                     # out-of-range: filled later
+    if order == 0:
+        return np.floor(xc + 0.5).astype(np.intp), None, None, valid
+    # Cell (floor(x), floor(x) + 1); at x == n - 1 it is (n - 2, n - 1) with t = 1,
+    # like scipy's mirrored edge (so a NaN in row n - 2 reaches row n - 1, as there).
+    f = np.floor(xc)
+    np.minimum(f, max(n - 2, 0), out=f)
+    i0 = f.astype(np.intp)
+    i1 = i0 + 1 if n > 1 else i0
+    f -= xc
+    np.negative(f, out=f)                                # t = x - i0, in [0, 1]
+    return i0, i1, f.astype(np.float32), valid
+
+
+def _take_lerp(a: np.ndarray, i0: np.ndarray, i1, t, axis: int) -> np.ndarray:
+    """Gather ``a`` at ``i0`` along *axis* (order 0), or lerp between ``i0`` and
+    ``i1`` with weight ``t`` (order 1). A 2-D index on axis 1 is per row."""
+    def take(idx):
+        if idx.ndim == 2:
+            return np.take_along_axis(a, idx, axis=axis)
+        return np.take(a, idx, axis=axis)
+    lo = take(i0)
+    if i1 is None:
+        return lo
+    hi = take(i1)
+    hi -= lo          # NaN in either neighbour gives NaN, even at zero weight
+    hi *= t
+    hi += lo
+    return hi
+
+
+def _sample_grid(
+    mat: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+    order: int,
+    fill_value: float,
+) -> np.ndarray:
+    """Sample ``mat`` at row ``rows[i]`` and column ``cols[j]`` (1-D) or
+    ``cols[i, j]`` (2-D); returns a float64 ``(len(rows), n_cols)`` grid.
+
+    Drop-in for ``ndimage.map_coordinates(mat, [row_grid, col_grid], order=order,
+    mode='constant', cval=fill_value)`` wherever the row coordinate depends only on
+    the output row, which holds for every projection here. That lets each axis be
+    interpolated in turn (two gathers and a lerp per axis, float32), with no float64
+    copy of the input and no meshgrid: ~4x faster at dim 2000 (F-SPEED #8).
+
+    Matches map_coordinates (tests/test_projections_remap.py):
+
+    - order 0 takes index ``floor(x + 0.5)`` (ties round up): values are exact.
+    - order 1 is bilinear over the cell ``(floor(x), floor(x) + 1)``. A NaN among the
+      four neighbours gives NaN even at zero weight, as in scipy, so NaN masks are
+      identical. Values differ by float32 rounding only (about 1 ulp of the value).
+    - a coordinate outside ``[0, len - 1]`` (or NaN) gives ``fill_value``.
+
+    Not cv2.remap: it quantises sub-pixel positions to 1/32 px for INTER_LINEAR,
+    which shifted a steep synthetic DEM by up to 0.5 m against map_coordinates.
+    """
+    m, n = mat.shape
+    i0, i1, tr, vr = _sample_axis(rows, m, order)
+    j0, j1, tc, vc = _sample_axis(cols, n, order)
+    src = mat if order == 0 else np.asarray(mat, dtype=np.float32)
+    tmp = _take_lerp(src, i0, i1, None if tr is None else tr[:, None], axis=0)
+    out = _take_lerp(tmp, j0, j1, tc, axis=1).astype(np.float64, copy=False)
+    if vr is not None:
+        out[~vr] = fill_value
+    if vc is not None:
+        out[np.broadcast_to(~vc, out.shape)] = fill_value
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Generic cylindrical projection
 # ---------------------------------------------------------------------------
 # A cylindrical projection maps longitude linearly to x and latitude to y via a
 # monotonic function y = f(lat) (degrees in, unitless out). Any such projection
 # (Mercator, Lambert, Miller, Gall, ...) is a one-liner given f. We inverse-sample
 # on a regular y grid so maintain_dimensions holds and the result stays aligned
-# with all other layers. This is the vectorized single-map_coordinates path.
+# with all other layers. Sampling goes through _sample_grid.
 
 def _miller_y(lat_deg):
     """Miller Cylindrical: y = 1.25 * ln(tan(pi/4 + 0.4*phi)). Compromise."""
@@ -679,13 +772,7 @@ def _project_cylindrical_y(
 
     lat_px = np.clip((north - lat_sample) / (north - south) * (m - 1), 0, m - 1)
     lon_px = np.clip((lon_sample - west) / (east - west) * (n - 1), 0, n - 1)
-    lon_grid, lat_grid = np.meshgrid(lon_px, lat_px)
-
-    result = ndimage.map_coordinates(
-        mat.astype(np.float64),
-        [lat_grid.ravel(), lon_grid.ravel()],
-        order=order, mode='constant', cval=fill_value,
-    ).reshape(out_m, out_n)
+    result = _sample_grid(mat, lat_px, lon_px, order, fill_value)
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['y_range'] = (y_north, y_south)
@@ -751,17 +838,7 @@ def _project_mercator(
     # Map to input pixel coordinates
     lat_px = np.clip((north - lat_sample) / (north - south) * (m - 1), 0, m - 1)
     lon_px = np.clip((lon_sample - west) / (east - west) * (n - 1), 0, n - 1)
-
-    lon_grid, lat_grid = np.meshgrid(lon_px, lat_px)
-
-    # Use map_coordinates for smooth interpolation
-    result = ndimage.map_coordinates(
-        mat.astype(np.float64),
-        [lat_grid.ravel(), lon_grid.ravel()],
-        order=order,
-        mode='constant',
-        cval=fill_value
-    ).reshape(out_m, out_n)
+    result = _sample_grid(mat, lat_px, lon_px, order, fill_value)
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['mercator_y_range'] = (y_north, y_south)
@@ -874,16 +951,7 @@ def _project_lambert(
     # Map to input pixel coordinates
     lat_px = np.clip((north - lat_sample) / (north - south) * (m - 1), 0, m - 1)
     lon_px = np.clip((lon_sample - west) / (east - west) * (n - 1), 0, n - 1)
-
-    lon_grid, lat_grid = np.meshgrid(lon_px, lat_px)
-
-    result = ndimage.map_coordinates(
-        mat.astype(np.float64),
-        [lat_grid.ravel(), lon_grid.ravel()],
-        order=order,
-        mode='constant',
-        cval=fill_value
-    ).reshape(out_m, out_n)
+    result = _sample_grid(mat, lat_px, lon_px, order, fill_value)
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['lambert_y_range'] = (y_north, y_south)
@@ -931,10 +999,8 @@ def _project_sinusoidal(
     # Vectorized inverse sample. For each output row i (latitude lat) and each
     # output column (normalized x in [-1, 1]):
     #     lon = x * half_width / cos(lat) + center_lon
-    # We build the full (out_m, out_n) lon-sample grid at once and sample with a
-    # single map_coordinates call. The previous implementation looped per row
-    # and called map_coordinates once per row (out_m scipy calls), which made
-    # sinusoidal ~20-40x slower than the other projections.
+    # We build the full (out_m, out_n) lon-sample grid at once and sample it in
+    # one _sample_grid call (the row coordinate is per row, the column per cell).
     lat_values = np.linspace(north, south, out_m)
     x_out = np.linspace(-1.0, 1.0, out_n)          # (out_n,)
     half_width = (east - west) / 2.0
@@ -957,18 +1023,9 @@ def _project_sinusoidal(
 
     # Input pixel coordinates for every output cell.
     lon_px = np.clip((lon_sample - west) / (east - west) * (n - 1), 0, n - 1)
-    lat_px = ((north - lat_values) / (north - south) * (m - 1))[:, None]
-    lat_px = np.broadcast_to(lat_px, lon_px.shape)
-
-    sampled = ndimage.map_coordinates(
-        mat.astype(np.float64),
-        [lat_px.ravel(), lon_px.ravel()],
-        order=order,
-        mode='constant',
-        cval=fill_value,
-    ).reshape(out_m, out_n)
-
-    result = np.where(valid, sampled, fill_value).astype(np.float64)
+    lat_px = (north - lat_values) / (north - south) * (m - 1)
+    result = _sample_grid(mat, lat_px, lon_px, order, fill_value)   # fresh float64
+    result[~valid] = fill_value
 
     metadata['output_shape'] = (out_m, out_n)
     metadata['center_lon'] = center_lon
@@ -1073,6 +1130,11 @@ def project_water_arrays(water_mask: np.ndarray,
     (true at every call site — both come from one fetch_water_mask() call).
     With ``target_dim`` both land on :func:`projected_shape` and no border is
     clipped (see :func:`project_coordinates`).
+
+    The mask stays bilinear (order 1) then ``> 0.5``: nearest-neighbour (order 0)
+    is not the same threshold. On a synthetic lakes-and-rivers mask at dim 2000 it
+    flipped ~1 % of all pixels (~5 % of water pixels, mostly 1-3 px river edges) to
+    save 15-30 ms (F-SPEED #14, measured 2026-10-14).
     """
     wm_proj, _wm_meta = project_coordinates(
         water_mask, (north, south, east, west),

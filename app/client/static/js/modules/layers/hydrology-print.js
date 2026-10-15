@@ -68,6 +68,20 @@ export function loadedDemGrid(appState, doc = globalThis.document) {
 }
 
 /**
+ * The grid the next loadDEM() will fetch (its dim and dem_source, read from the form the same
+ * way dem-main.js loadDEM does), so the hydrology can be requested before that DEM lands. Equal
+ * to loadedDemGrid() once it has, so the two requests share one in-flight key.
+ *
+ * @param {Document} [doc]
+ * @returns {{dim:number, demSource:string}}
+ */
+export function nextDemGrid(doc = globalThis.document) {
+    const dim = parseInt(doc?.getElementById?.('paramDim')?.value, 10) || 600;
+    const demSource = doc?.getElementById?.('paramDemSource')?.value || 'local';
+    return { dim, demSource };
+}
+
+/**
  * Query for GET /api/terrain/hydrology in print mode.
  *
  * @param {Object} o

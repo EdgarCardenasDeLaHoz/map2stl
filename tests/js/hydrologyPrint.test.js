@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     riverSourceFromHydro, readHydrologyRiverControls, loadedDemGrid, hydrologyPrintQuery,
-    readRiverDepthScale,
+    readRiverDepthScale, nextDemGrid,
 } from '../../app/client/static/js/modules/layers/hydrology-print.js';
 
 /** Minimal document stub: id → {value}. */
@@ -84,5 +84,17 @@ describe('readRiverDepthScale', () => {
     it('reads Composite Depth × with default 1', () => {
         expect(readRiverDepthScale(doc({ compositeRiverDepthScale: '2.5' }))).toBe(2.5);
         expect(readRiverDepthScale(doc({}))).toBe(1);
+    });
+});
+
+describe('nextDemGrid', () => {
+    it('reads the grid the next DEM fetch will use from the form', () => {
+        expect(nextDemGrid(doc({ paramDim: '1000', paramDemSource: 'copernicus' })))
+            .toEqual({ dim: 1000, demSource: 'copernicus' });
+    });
+
+    it('falls back to 600 px and the local source', () => {
+        expect(nextDemGrid(doc({ paramDim: '' }))).toEqual({ dim: 600, demSource: 'local' });
+        expect(nextDemGrid(null)).toEqual({ dim: 600, demSource: 'local' });
     });
 });

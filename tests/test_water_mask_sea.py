@@ -69,12 +69,33 @@ def test_failed_river_fetch_is_not_cached(monkeypatch):
     assert len(calls) == 2
 
 
-def test_unreadable_hydrorivers_region_raises(monkeypatch):
+def test_unreadable_hydrorivers_region_raises(monkeypatch, tmp_path):
     import time
 
+    monkeypatch.setattr(hydrology, "_cache_dir", lambda: tmp_path)   # no parquet at all
     monkeypatch.setattr(hydrology, "_ensure_region_parquet", lambda region: None)
     with pytest.raises(hydrology.HydroRiversUnavailable):
         hydrology._read_region_parquets(["eu"], W, S, E, N, True, time)
+
+
+def test_order3_read_does_not_rebuild_the_full_parquet(monkeypatch, tmp_path):
+    """A valid order 3+ parquet answers an order 3+ read even when the full one is
+    missing: rebuilding that from the shapefile cost Colombia's first open 21 s
+    (geo2stl/hydrology.py::_read_region_parquets)."""
+    import time
+
+    monkeypatch.setattr(hydrology, "_cache_dir", lambda: tmp_path)
+    gpd.GeoDataFrame({"ORD_STRA": [4], "geometry": [LineString([(W, S), (E, N)])]},
+                     crs="EPSG:4326").to_parquet(
+        hydrology._region_parquet_path("eu", order3plus=True), write_covering_bbox=True)
+    built = []
+    monkeypatch.setattr(hydrology, "_ensure_region_parquet",
+                        lambda region: built.append(region))
+    gdf = hydrology._read_region_parquets(["eu"], W, S, E, N, True, time)
+    assert built == [] and len(gdf) == 1
+    with pytest.raises(hydrology.HydroRiversUnavailable):   # the full read still needs a build
+        hydrology._read_region_parquets(["eu"], W, S, E, N, False, time)
+    assert built == ["eu"]
 
 
 def test_incomplete_rivers_preview_is_not_cacheable():

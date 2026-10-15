@@ -9,11 +9,12 @@
  * #bordersCountryColor, #bordersStateColor) repaint without a new request.
  *
  * Public API (on window):
- *   loadBorders({activate})  — fetch for the loaded terrain and paint
+ *   loadBorders({activate, bbox, dim}) — fetch for the loaded (or the loading) terrain and paint
  *   renderBorders()          — repaint from the kept grid
  *   clearBorders()           — drop the grid and the canvas
  *
- * Reads: window.appState.currentDemBbox, lastDemData (size), getProjectionParams().
+ * Reads: window.appState.currentDemBbox, lastDemRequest (dim) / lastDemData (size),
+ * getProjectionParams().
  * Writes: window.appState.bordersSourceCanvas (stacked-layers.js draws it, key 'Borders').
  */
 
@@ -58,16 +59,23 @@ window.renderBorders = function renderBorders() {
 
 /**
  * Fetch the borders for the loaded terrain (same box, size and projection) and paint them.
- * @param {{activate?: boolean}} [opts] activate: also switch the layer on in the stack
+ * The size is the DEM request's dim (the server projects onto the DEM's exact grid from it),
+ * not the returned raster's longest side, which clipping can shorten.
+ * @param {{activate?: boolean, bbox?: object, dim?: number}} [opts] activate: also switch the
+ *   layer on in the stack; bbox + dim: the terrain being loaded, so a projection switch can
+ *   fetch the borders in parallel with its DEM (event-listeners-map.js)
+ * @returns {Promise<object|null>} the kept grid, or null (no terrain, failed, superseded)
  */
-window.loadBorders = async function loadBorders({ activate = true } = {}) {
-    const bbox = window.appState?.currentDemBbox;
-    const dem = window.appState?.lastDemData;
-    if (!bbox || !dem) {
+window.loadBorders = async function loadBorders({ activate = true, bbox: nextBbox = null, dim: nextDim = 0 } = {}) {
+    const st = window.appState;
+    const bbox = nextBbox || st?.currentDemBbox;
+    const dem = st?.lastDemData;
+    if (!bbox || !(dem || nextDim)) {
         window.setLayerStatus?.('borders', 'empty');
         return null;
     }
-    const dim = Math.max(dem.width || 0, dem.height || 0) || 600;
+    const dim = nextDim || parseInt(st.lastDemRequest?.dem?.dim, 10)
+        || Math.max(dem.width || 0, dem.height || 0) || 600;
     const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
     const p = { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west, dim };
     if (projection !== 'none') {
@@ -78,7 +86,9 @@ window.loadBorders = async function loadBorders({ activate = true } = {}) {
     const params = new URLSearchParams(p);
     const key = params.toString();
     if (_last?.key === key) {
-        window.renderBorders();
+        // Already fetched (e.g. the DEM_LOADED listener after a projection switch fetched it in
+        // parallel): paint only when nothing is painted.
+        if (!st.bordersSourceCanvas) window.renderBorders();
         if (activate && !window.getActiveLayers?.().has('Borders')) window.setStackMode?.('Borders');
         return _last;
     }

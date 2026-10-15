@@ -14,6 +14,14 @@ a zoom level: ``x`` grows east from the antimeridian, ``y`` grows south from
 85.05° N, and one tile is ``TILE_SIZE`` pixels.
 
 ESRI World Imagery needs no API key for reasonable use.
+
+Tile cache: with a ``cache_dir``, each tile is stored as the bytes the server
+sent, at ``<cache_dir>/<z>/<x>/<y>.jpg``, so a cache hit decodes to exactly the
+pixels a fresh fetch gives. :func:`default_tile_cache_dir` is the shared home
+under the cache root, one folder per provider
+(``CACHE_ROOT/tiles/<provider>/<z>/<x>/<y>.jpg``). :func:`stitch_tiles` reads
+cached tiles first, then fetches the missing ones on a pool of
+``TILE_WORKERS`` threads; the stitched image is the same as a serial fetch.
 """
 
 from __future__ import annotations
@@ -22,10 +30,13 @@ import io
 import logging
 import math
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 
+from geo2stl import cache as _geo_cache
 from geo2stl.geo import bbox_size_m
 
 logger = logging.getLogger(__name__)
@@ -46,6 +57,10 @@ MAX_LAT = 85.05
 #: Equatorial circumference (m); ground size of zoom 0.
 EARTH_CIRCUMFERENCE_M = 40_075_016.686
 USER_AGENT = "map2stl/1.0"
+#: Provider name of ``ESRI_TILE_URL``: the folder its tiles are cached under.
+TILE_PROVIDER = "esri"
+#: Threads that fetch the uncached tiles of one stitch.
+TILE_WORKERS = 8
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +158,43 @@ def new_session(user_agent: str = USER_AGENT):
     return s
 
 
+def default_tile_cache_dir(provider: str = TILE_PROVIDER) -> Path:
+    """Shared tile cache of *provider*: ``CACHE_ROOT/tiles/<provider>``.
+
+    Reads ``geo2stl.cache.CACHE_ROOT`` at call time, so ``$MAP2STL_CACHE``
+    and tests that patch the root move it too.
+    """
+    return Path(_geo_cache.CACHE_ROOT) / "tiles" / provider
+
+
 def tile_cache_path(cache_dir: str | os.PathLike, zoom: int, x: int, y: int) -> Path:
     """On-disk location of one cached tile: ``<cache_dir>/<z>/<x>/<y>.jpg``."""
     return Path(cache_dir) / str(zoom) / str(x) / f"{y:d}.jpg"
+
+
+def _read_cached_tile(path: Path):
+    """The cached tile at *path* as an RGB image, or None (absent or corrupt)."""
+    from PIL import Image  # noqa: PLC0415
+
+    if not path.exists():
+        return None
+    try:
+        with Image.open(path) as im:
+            return im.convert("RGB")
+    except Exception:  # noqa: BLE001 - corrupt cache entry, refetch
+        path.unlink(missing_ok=True)
+        return None
+
+
+def _write_cached_tile(path: Path, data: bytes) -> None:
+    """Store a tile's raw bytes at *path* atomically (best effort)."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 - cache write is best effort
+        tmp.unlink(missing_ok=True)
 
 
 def fetch_tile(
@@ -159,7 +208,8 @@ def fetch_tile(
     """One tile as an RGB ``PIL.Image``, or None if it cannot be had.
 
     With *cache_dir*, a cached tile is returned without a request and a
-    fetched one is written there (JPEG, quality 90).
+    fetched one is written there as the bytes the server sent (so a later
+    hit decodes to the same pixels).
     """
     from PIL import Image  # noqa: PLC0415
 
@@ -167,24 +217,20 @@ def fetch_tile(
     if not (0 <= x < n and 0 <= y < n):
         return None
     path = tile_cache_path(cache_dir, zoom, x, y) if cache_dir is not None else None
-    if path is not None and path.exists():
-        try:
-            return Image.open(path).convert("RGB")
-        except Exception:  # noqa: BLE001 - corrupt cache entry, refetch
-            path.unlink(missing_ok=True)
+    if path is not None:
+        img = _read_cached_tile(path)
+        if img is not None:
+            return img
     try:
         r = (session or new_session()).get(url.format(z=zoom, x=x, y=y), timeout=timeout)
         r.raise_for_status()
-        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        data = r.content
+        img = Image.open(io.BytesIO(data)).convert("RGB")
     except Exception as exc:  # noqa: BLE001
         logger.debug("Satellite tile %d/%d/%d failed: %s", zoom, y, x, exc)
         return None
     if path is not None:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            img.save(path, "JPEG", quality=90)
-        except Exception:  # noqa: BLE001 - cache write is best effort
-            pass
+        _write_cached_tile(path, data)
     return img
 
 
@@ -194,26 +240,62 @@ def stitch_tiles(
     session=None,
     cache_dir: str | os.PathLike | None = None,
     timeout: float = 10,
+    workers: int = TILE_WORKERS,
 ):
     """Paste tiles ``x_min..x_max`` × ``y_min..y_max`` into one RGB image.
+
+    Cached tiles (with *cache_dir*) are read first; the rest are fetched on up
+    to *workers* threads (``workers=1`` fetches serially). A given *session*
+    is shared by the threads; without one, each thread opens its own. The
+    result does not depend on *workers*.
 
     Missing tiles stay black. Returns ``(image, tiles_loaded)``; the image's
     (0, 0) is global pixel ``(x_min·TILE_SIZE, y_min·TILE_SIZE)``.
     """
     from PIL import Image  # noqa: PLC0415
 
-    session = session or new_session()
+    coords = [(tx, ty) for tx in range(x_min, x_max + 1)
+              for ty in range(y_min, y_max + 1)]
+    tiles: dict[tuple[int, int], object] = {}
+    if cache_dir is not None:
+        for tx, ty in coords:
+            if 0 <= tx < (1 << zoom) and 0 <= ty < (1 << zoom):
+                t = _read_cached_tile(tile_cache_path(cache_dir, zoom, tx, ty))
+                if t is not None:
+                    tiles[(tx, ty)] = t
+    missing = [c for c in coords if c not in tiles]
+
+    local = threading.local()
+
+    def _session():
+        if session is not None:
+            return session
+        s = getattr(local, "session", None)
+        if s is None:
+            s = local.session = new_session()
+        return s
+
+    def _fetch(c: tuple[int, int]):
+        return fetch_tile(zoom, c[0], c[1], session=_session(), cache_dir=cache_dir,
+                          timeout=timeout)
+
+    n_workers = max(1, min(workers, len(missing)))
+    if n_workers == 1:
+        fetched = [_fetch(c) for c in missing]
+    else:
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            fetched = list(pool.map(_fetch, missing))
+    tiles.update(zip(missing, fetched, strict=True))
+
     composite = Image.new("RGB", ((x_max - x_min + 1) * TILE_SIZE,
                                   (y_max - y_min + 1) * TILE_SIZE))
     loaded = 0
-    for tx in range(x_min, x_max + 1):
-        for ty in range(y_min, y_max + 1):
-            t = fetch_tile(zoom, tx, ty, session=session, cache_dir=cache_dir,
-                           timeout=timeout)
-            if t is None:
-                continue
-            composite.paste(t, ((tx - x_min) * TILE_SIZE, (ty - y_min) * TILE_SIZE))
-            loaded += 1
+    for tx, ty in coords:
+        t = tiles[(tx, ty)]
+        if t is None:
+            continue
+        composite.paste(t, ((tx - x_min) * TILE_SIZE, (ty - y_min) * TILE_SIZE))
+        loaded += 1
     return composite, loaded
 
 
@@ -228,12 +310,15 @@ def fetch_rgb(
     session=None,
     cache_dir: str | os.PathLike | None = None,
     timeout: float = 10,
+    workers: int = TILE_WORKERS,
 ) -> tuple[np.ndarray, dict]:
     """Web Mercator RGB image of *bbox*, cropped to it.
 
     The zoom is *zoom* if given, else :func:`choose_zoom` from
     *target_m_per_px* or *dim*. Rows are Mercator-spaced (row 0 = north); use
     ``geo2stl.sat2stl._mercator_to_plate_carree`` for uniform latitude rows.
+    Tiles are cached only with *cache_dir* (usually
+    :func:`default_tile_cache_dir`); *workers* is passed to :func:`stitch_tiles`.
 
     Returns:
         ``(rgb, meta)``: *rgb* is ``(H, W, 3)`` uint8; *meta* holds ``zoom``,
@@ -251,7 +336,7 @@ def fetch_rgb(
     total = (x_max - x_min + 1) * (y_max - y_min + 1)
     composite, loaded = stitch_tiles(x_min, x_max, y_min, y_max, zoom,
                                      session=session, cache_dir=cache_dir,
-                                     timeout=timeout)
+                                     timeout=timeout, workers=workers)
     if loaded == 0:
         raise RuntimeError(
             f"All {total} satellite tiles failed for bbox {bbox} at zoom {zoom}. "

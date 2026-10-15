@@ -10,7 +10,7 @@
  * loaded DEM nothing is requested.
  *
  * Public API (all on window):
- *   loadWaterHydrology()    — fetch water + hydrology in parallel and render combined
+ *   loadWaterHydrology({grid}) — fetch water + hydrology in parallel and render combined
  *   clearWaterHydrology()   — clear canvas + state
  *
  * Dependencies:
@@ -23,7 +23,7 @@
  *   window.decodeWaterMask(data)     — from water-mask.js
  *   window.decodeHydrologyValues(data) — from ui-helpers.js
  *   window.setLayerStatus(name, status) — from app.js
- *   window.updateStackedLayers()    — from stacked-layers.js
+ *   window.emitStackUpdate()        — from ui-helpers.js
  *   (renderer logic mirrored from water-mask.js)
  */
 
@@ -217,8 +217,12 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
  *   - Water: #waterResolution, #waterDataset
  *   - Hydrology: #hydroSource, #hydroMinOrder, #hydroWidthFactor (Fetch) and
  *     #compositeRiverDepthScale (Composite Depth ×); grid = the loaded DEM's.
+ * @param {{grid?: {dim:number, demSource:string}}} [opts]  grid: carve on the DEM being
+ *   loaded (hydrology-print.js nextDemGrid) instead of the loaded one, so a projection switch
+ *   can request rivers in parallel with its DEM (event-listeners-map.js)
+ * @returns {Promise<boolean|undefined>} true once rendered (with or without rivers)
  */
-window.loadWaterHydrology = async function loadWaterHydrology() {
+window.loadWaterHydrology = async function loadWaterHydrology({ grid: nextGrid = null } = {}) {
   const boundingBox = window.getBoundingBox?.();
   const selectedRegion = window.appState?.selectedRegion;
 
@@ -230,7 +234,7 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
   const { north, south, east, west } = coords;
 
   // The preview is the print carve on the loaded DEM, so it needs that DEM.
-  const grid = loadedDemGrid(window.appState);
+  const grid = nextGrid || loadedDemGrid(window.appState);
   if (!grid) {
     const statusEl = document.getElementById('waterHydrologyStatus');
     if (statusEl) statusEl.textContent = NEED_DEM_MESSAGE;
@@ -263,17 +267,21 @@ window.loadWaterHydrology = async function loadWaterHydrology() {
     coords, grid, river, depthScale, projection, maintainDimensions, clipValidRegion,
   });
 
-  _combinedInflightKey = inflightKey;
-  _combinedInflightPromise = _performCombinedLoad(
+  const mine = _performCombinedLoad(
     north, south, east, west, waterDim, waterDataset, hydroParams, river.hydroSource, signal,
     projection, maintainDimensions ? 'true' : 'false', clipValidRegion ? 'true' : 'false',
   );
+  _combinedInflightKey = inflightKey;
+  _combinedInflightPromise = mine;
 
   try {
-    await _combinedInflightPromise;
+    return await mine;
   } finally {
-    _combinedInflightPromise = null;
-    _combinedInflightKey = null;
+    // A newer call may own the slot by now: clearing it would drop its dedupe.
+    if (_combinedInflightPromise === mine) {
+      _combinedInflightPromise = null;
+      _combinedInflightKey = null;
+    }
   }
 };
 
@@ -331,6 +339,9 @@ async function _performCombinedLoad(north, south, east, west, waterDim, waterDat
     const hydroPromise = window.api.dem.hydrology(hydroParams, signal);
 
     const [waterRes, hydroRes] = await Promise.all([waterPromise, hydroPromise]);
+    // Superseded: api.js turns the AbortError into {error}, which must not show as a failure
+    // over the newer request.
+    if (signal.aborted) return;
 
     if (waterRes.error || hydroRes.error) {
       const err = waterRes.error || hydroRes.error;
@@ -360,6 +371,7 @@ async function _performCombinedLoad(north, south, east, west, waterDim, waterDat
       statusEl.textContent = `✓ Hydrology loaded | Water: ${waterPct}% | Source: ${hydroSource}`;
     }
     window.showToast?.('Hydrology loaded', 'success');
+    return true;
 
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -393,7 +405,9 @@ window.clearWaterHydrology = function clearWaterHydrology() {
   if (statusEl) statusEl.textContent = '';
 
   window.setLayerStatus?.('waterHydrology', 'empty');
-  window.updateStackedLayers?.();
+  // Next frame, not now: loadDEM clears this on every reload, and a synchronous full stack
+  // redraw there cost a long task before the DEM request went out.
+  window.emitStackUpdate?.();
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

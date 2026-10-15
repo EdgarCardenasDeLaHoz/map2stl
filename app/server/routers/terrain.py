@@ -33,6 +33,9 @@ from app.server.core.validation import (
     b64_encode as _b64,
 )
 from app.server.core.validation import (
+    b64_encode_u8 as _b64u8,
+)
+from app.server.core.validation import (
     parse_bbox_query as _parse_bbox_query,
 )
 from app.server.core.validation import (
@@ -119,6 +122,26 @@ _TRAILS_INFLIGHT: dict[str, "asyncio.Future"] = {}
 # ---------------------------------------------------------------------------
 # Sync compute helpers (called via run_in_executor to avoid blocking the loop)
 # ---------------------------------------------------------------------------
+
+
+def _layer_source_dim(dim: int, bbox: tuple[float, float, float, float],
+                      projection: str, maintain_dimensions: bool) -> int:
+    """Sampling size for a layer that is fetched once per box (water, ESA).
+
+    The shared source grid (``geo2stl.projections.shared_source_dim``) is fine
+    enough for every projection, so a projection switch reuses the cached fetch
+    instead of downloading from Earth Engine again (7-12 s on a large box). A
+    projection the shared grid cannot cover keeps its own ``source_dim``.
+    """
+    from geo2stl.projections import shared_covers, shared_source_dim, shared_source_shape
+
+    own = _source_dim(dim, bbox, projection, maintain_dimensions)
+    if maintain_dimensions:
+        return own
+    if shared_covers(shared_source_shape(dim, bbox, maintain_dimensions),
+                     _source_shape(dim, bbox, projection, maintain_dimensions)):
+        return max(own, shared_source_dim(dim, bbox, maintain_dimensions))
+    return own
 
 
 def _dem_empty_warning(im: np.ndarray) -> str | None:
@@ -283,7 +306,7 @@ async def get_terrain_dem(
                                     water_scale=water_scale,
                                     subtract_water=subtract_water,
                                     maintain_dimensions=maintain_dimensions,
-                                    notes=_water_notes)
+                                    notes=_water_notes, shared_dim=dim)
             # Sources return their native size (h5 up to 2x, a coarse source
             # less): bring it to the exact sampling grid.
             im_raw = _fit_grid(np.asarray(im_raw, dtype=np.float32), _sshape)
@@ -344,16 +367,16 @@ async def get_terrain_dem(
                 if sat_result is not None:
                     sat_values, sat_width, sat_height = sat_result
                     # Project the plate-carree overlay onto the DEM's exact grid
-                    sat_arr = np.array(sat_values, dtype=np.float32).reshape(
+                    sat_arr = np.asarray(sat_values, dtype=np.float32).reshape(
                         sat_height, sat_width)
                     sat_arr = _project_grid(
                         sat_arr, north, south, east, west,
                         projection, clip_valid_region, categorical=True,
                         maintain_dimensions=maintain_dimensions, target_dim=dim)
                     sat_height, sat_width = sat_arr.shape
-                    sat_values = sat_arr.ravel().tolist()
                     response_content["sat_available"] = True
-                    response_content["sat_values"] = sat_values
+                    # base64 float32: tolist() took 0.2 s and 4.9 MB of JSON
+                    response_content["sat_values_b64"] = _b64(sat_arr)
                     response_content["sat_dimensions"] = [
                         sat_height, sat_width]
             except Exception as sat_err:
@@ -370,7 +393,9 @@ async def get_terrain_dem(
         # nothing until the cache was cleared by hand.
         if not show_sat and not from_cache and not _empty_warning and not _water_notes:
             im_clean = im_raw.astype(np.float32, copy=False)
-            write_array_cache(
+            # Off the event loop: compressing a 1360x1600 grid took 1.37 s.
+            await run_sync(
+                write_array_cache,
                 "dem", _dem_cache_key,
                 {"dem": im_clean},
                 {"min_elevation": float(np.nanmin(im_raw)),
@@ -433,10 +458,11 @@ async def get_terrain_water_mask(
         if err:
             return err
 
-        # Sampled at the plate-carree size that projects to ``dim`` (source_dim,
-        # user decision 2026-10-13), then projected onto the DEM's exact grid.
+        # Sampled on the shared source grid (one fetch serves every projection),
+        # then projected onto the DEM's exact grid.
         # Scale clamping (50 MB / 32768 px limits) is handled inside fetch_water_mask.
-        _sdim = _source_dim(dim, (north, south, east, west), projection, maintain_dimensions)
+        _sdim = _layer_source_dim(dim, (north, south, east, west), projection,
+                                  maintain_dimensions)
         _longer_m = max(*bbox_size_m({"north": north or 0.0, "south": south or 0.0,
                                       "east": east or 0.0, "west": west or 0.0}), 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / _sdim)))
@@ -447,30 +473,43 @@ async def get_terrain_water_mask(
         # v2: ESA no-data (the open sea) counts as water (sat2stl.esa_water, 2026-10-14)
         _water_cache_key = make_cache_key("water", north, south, east, west, {
             "dim": _sdim, "ds": water_dataset, "v": 2})
-        _wc = read_array_cache("water", _water_cache_key)
-        if _wc is not None:
-            _warr, _wmeta = _wc
-            _wm = _warr.get("water_mask")
-            _esa = _warr.get("esa")
-            if _wm is not None and _esa is not None:
-                logger.info(f"Water mask cache hit: {_water_cache_key[:8]}...")
-                _wm, _esa = _project_water_arrays(
-                    _wm.astype(np.float32), _esa.astype(np.float32),
-                    north, south, east, west, projection, clip_valid_region,
-                    maintain_dimensions=maintain_dimensions, target_dim=dim)
-                _h, _w = _wm.shape
-                _wp = int(np.sum(_wm > 0.5))
-                _tp = _h * _w
-                return JSONResponse(content={
-                    "water_mask_values_b64": _b64(_wm),
-                    "water_mask_dimensions": [_h, _w],
-                    "water_pixels": _wp,
-                    "total_pixels": _tp,
-                    "water_percentage": 100.0 * _wp / _tp if _tp else 0.0,
-                    "esa_values_b64": _b64(_esa),
-                    "esa_dimensions": [_h, _w],
-                    "from_cache": True,
-                })
+        def _water_payload(water_mask: np.ndarray, esa: np.ndarray, **extra) -> dict:
+            # Project onto the DEM's exact grid ('none' only resamples to it)
+            water_mask, esa = _project_water_arrays(
+                water_mask.astype(np.float32), esa.astype(np.float32),
+                north, south, east, west, projection, clip_valid_region,
+                maintain_dimensions=maintain_dimensions, target_dim=dim)
+            h, w = water_mask.shape
+            wp = int(np.sum(water_mask > 0.5))
+            tp = h * w
+            return {
+                "water_mask_values_b64": _b64u8(water_mask),
+                "water_mask_dtype": "uint8",
+                "water_mask_dimensions": [h, w],
+                "water_pixels": wp,
+                "total_pixels": tp,
+                "water_percentage": 100.0 * wp / tp if tp else 0.0,
+                "esa_values_b64": _b64u8(esa),
+                "esa_dtype": "uint8",
+                "esa_dimensions": [h, w],
+                **extra,
+            }
+
+        def _water_from_cache() -> dict | None:
+            hit = read_array_cache("water", _water_cache_key)
+            if hit is None:
+                return None
+            wm, esa = hit[0].get("water_mask"), hit[0].get("esa")
+            if wm is None or esa is None:
+                return None
+            logger.info(f"Water mask cache hit: {_water_cache_key[:8]}...")
+            return _water_payload(wm, esa, from_cache=True)
+
+        # Off the event loop: a hit still reads, projects and encodes two grids,
+        # which queued behind other layers for 0.35-1.0 s during a region open.
+        _hit = await run_sync(_water_from_cache)
+        if _hit is not None:
+            return JSONResponse(content=_hit)
 
         if TEST_MODE:
             h, w = 50, 50
@@ -486,12 +525,14 @@ async def get_terrain_water_mask(
             wp = int(np.sum(water_arr > 0.5))
             tp = h * w
             return JSONResponse(content={
-                "water_mask_values_b64": _b64(water_arr),
+                "water_mask_values_b64": _b64u8(water_arr),
+                "water_mask_dtype": "uint8",
                 "water_mask_dimensions": [h, w],
                 "water_pixels": wp,
                 "total_pixels": tp,
                 "water_percentage": 100.0 * wp / tp,
-                "esa_values_b64": _b64(esa_arr),
+                "esa_values_b64": _b64u8(esa_arr),
+                "esa_dtype": "uint8",
                 "esa_dimensions": [h, w],
                 "resolution_m": sat_scale,
             })
@@ -503,33 +544,14 @@ async def get_terrain_water_mask(
         except RuntimeError as fetch_err:
             return error_response(str(fetch_err))
 
-        h, w = water_mask.shape
-        water_pixels = int(np.sum(water_mask))
-        total_pixels = h * w
+        def _water_store() -> dict:
+            write_array_cache("water", _water_cache_key,
+                              {"water_mask": water_mask.astype(np.float32),
+                               "esa": img.astype(np.float32)},
+                              {"shape": list(water_mask.shape)})
+            return _water_payload(water_mask, img, resolution_m=sat_scale)
 
-        write_array_cache("water", _water_cache_key,
-                          {"water_mask": water_mask.astype(np.float32),
-                           "esa": img.astype(np.float32)},
-                          {"shape": [h, w]})
-
-        # Project onto the DEM's exact grid ('none' only resamples to it)
-        water_mask, img = _project_water_arrays(
-            water_mask, img, north, south, east, west, projection, clip_valid_region,
-            maintain_dimensions=maintain_dimensions, target_dim=dim)
-        h, w = water_mask.shape
-        water_pixels = int(np.sum(water_mask > 0.5))
-        total_pixels = h * w
-
-        return JSONResponse(content={
-            "water_mask_values_b64": _b64(water_mask),
-            "water_mask_dimensions": [h, w],
-            "water_pixels": water_pixels,
-            "total_pixels": total_pixels,
-            "water_percentage": 100.0 * water_pixels / total_pixels if total_pixels > 0 else 0.0,
-            "esa_values_b64": _b64(img),
-            "esa_dimensions": [h, w],
-            "resolution_m": sat_scale,
-        })
+        return JSONResponse(content=await run_sync(_water_store))
 
     except ValueError as ve:
         return error_response(str(ve), 400)
@@ -567,8 +589,9 @@ async def get_terrain_esa_land_cover(
         if err:
             return err
 
-        # Sampled at source_dim (the plate-carree size that projects to dim).
-        _sdim = _source_dim(dim, (north, south, east, west), projection, maintain_dimensions)
+        # Sampled on the shared source grid: one fetch serves every projection.
+        _sdim = _layer_source_dim(dim, (north, south, east, west), projection,
+                                  maintain_dimensions)
         _longer_m = max(*bbox_size_m({"north": north or 0.0, "south": south or 0.0,
                                       "east": east or 0.0, "west": west or 0.0}), 1.0)
         sat_scale = max(10, int(math.ceil(_longer_m / _sdim)))
@@ -580,24 +603,26 @@ async def get_terrain_esa_land_cover(
         # instead of silently returning a stale shape from a prior request.
         _esa_cache_key = make_cache_key("esa_lc", north, south, east, west, {
             "dim": _sdim})
-        _ec = read_array_cache("esa_lc", _esa_cache_key)
-        if _ec is not None:
-            _earr, _emeta = _ec
-            _esa_raw = _earr.get("esa")
-            if _esa_raw is not None:
-                logger.info(
-                    f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
-                _esa = _project_grid(
-                    _esa_raw.astype(np.float32), north, south, east, west,
-                    projection, clip_valid_region, categorical=True,
-                    maintain_dimensions=maintain_dimensions, target_dim=dim)
-                _h, _w = _esa.shape
-                return JSONResponse(content={
-                    "esa_values_b64": _b64(_esa),
-                    "esa_dimensions": [_h, _w],
-                    "resolution_m": sat_scale,
-                    "from_cache": True,
-                })
+        def _esa_payload(esa: np.ndarray, **extra) -> dict:
+            esa = _project_grid(
+                esa.astype(np.float32), north, south, east, west,
+                projection, clip_valid_region, categorical=True,
+                maintain_dimensions=maintain_dimensions, target_dim=dim)
+            h, w = esa.shape
+            return {"esa_values_b64": _b64u8(esa), "esa_dtype": "uint8",
+                    "esa_dimensions": [h, w],
+                    "resolution_m": sat_scale, **extra}
+
+        def _esa_from_cache() -> dict | None:
+            hit = read_array_cache("esa_lc", _esa_cache_key)
+            if hit is None or hit[0].get("esa") is None:
+                return None
+            logger.info(f"ESA land cover cache hit: {_esa_cache_key[:8]}...")
+            return _esa_payload(hit[0]["esa"], from_cache=True)
+
+        _hit = await run_sync(_esa_from_cache)   # off the event loop, as for water
+        if _hit is not None:
+            return JSONResponse(content=_hit)
 
         if TEST_MODE:
             h, w = 50, 50
@@ -609,7 +634,8 @@ async def get_terrain_esa_land_cover(
                 maintain_dimensions=maintain_dimensions, target_dim=dim)
             h, w = esa_arr.shape
             return JSONResponse(content={
-                "esa_values_b64": _b64(esa_arr),
+                "esa_values_b64": _b64u8(esa_arr),
+                "esa_dtype": "uint8",
                 "esa_dimensions": [h, w],
                 "resolution_m": sat_scale,
             })
@@ -646,22 +672,14 @@ async def get_terrain_esa_land_cover(
         # value (see the cache-hit path above for why: baking it in made
         # a later request with a different projection/maintain_dimensions
         # silently return the first request's shape).
-        img = img.astype(np.float32)
-        write_array_cache("esa_lc", _esa_cache_key,
-                          {"esa": img},
-                          {"shape": list(img.shape)})
+        def _esa_store() -> dict:
+            raw = img.astype(np.float32)
+            write_array_cache("esa_lc", _esa_cache_key,
+                              {"esa": raw},
+                              {"shape": list(raw.shape)})
+            return _esa_payload(raw)
 
-        img = _project_grid(img, north, south, east, west,
-                            projection, clip_valid_region, categorical=True,
-                            maintain_dimensions=maintain_dimensions, target_dim=dim)
-
-        h, w = img.shape
-
-        return JSONResponse(content={
-            "esa_values_b64": _b64(img),
-            "esa_dimensions": [h, w],
-            "resolution_m": sat_scale,
-        })
+        return JSONResponse(content=await run_sync(_esa_store))
 
     except ValueError as ve:
         return error_response(str(ve), 400)
@@ -815,8 +833,12 @@ HYDRO_ORDER_BASE = 3       # fetch at least orders >= 3 so 3..9 reuse one raster
 WATER_CODE = 100           # open water in the order grid sent to the client
 
 
-def _hydrorivers_layers(north, south, east, west, dim, width_factor, min_order):
+def _hydrorivers_layers(north, south, east, west, dim, width_factor, min_order,
+                        water_dim=None):
     """(order grid uint8, water bool | None, reach counts per order) for HydroRIVERS.
+
+    ``water_dim`` is the ESA sampling size for the open-water union
+    (``geo2stl.hydrology.water_surface_mask`` ``fetch_dim``).
 
     Cached without min order, depth or exponent - those are lookups on the order
     grid (geo2stl.hydrology.order_depth_grid) - so stepping the min order
@@ -849,7 +871,7 @@ def _hydrorivers_layers(north, south, east, west, dim, width_factor, min_order):
         orders = rasterize_hydrorivers_orders(gdf, north, south, east, west, dim, width_factor)
         vc = gdf["ORD_STRA"].clip(lower=1, upper=10).astype(int).value_counts()
         counts = {int(k): int(v) for k, v in vc.items()}
-    water = water_surface_mask(north, south, east, west, orders.shape)
+    water = water_surface_mask(north, south, east, west, orders.shape, fetch_dim=water_dim)
     write_array_cache("hydro_orders", key(base),
                       {"orders": orders,
                        "water": (water if water is not None else np.zeros_like(orders, bool)).astype(np.uint8)},
@@ -868,8 +890,9 @@ def _hydrorivers_payload(north, south, east, west, dim, depression_m, min_order,
     from geo2stl.hydrology import order_depth_grid, union_water_surface
 
     sdim = _source_dim(dim, (north, south, east, west), projection, maintain_dimensions)
-    orders, water, counts = _hydrorivers_layers(north, south, east, west, sdim,
-                                                width_factor, min_order)
+    orders, water, counts = _hydrorivers_layers(
+        north, south, east, west, sdim, width_factor, min_order,
+        _layer_source_dim(dim, (north, south, east, west), projection, maintain_dimensions))
     depth = order_depth_grid(orders, depression_m, order_exponent, min_order)
     shown = np.where(orders >= min_order, orders, 0).astype(np.float32)
     if water is not None:
@@ -951,7 +974,9 @@ def _river_print_payload(north, south, east, west, dim, dem_source, river_source
     else:
         carve = np.zeros(base_raw.shape, dtype=np.float64)
         shown = np.zeros(base_raw.shape, dtype=np.float32)
-    water = water_surface_mask(north, south, east, west, base_raw.shape)
+    water = water_surface_mask(
+        north, south, east, west, base_raw.shape,
+        fetch_dim=_layer_source_dim(dim, bbox, projection, maintain_dimensions))
     terrain = base_raw
     water_f = (water.astype(np.float32) if water is not None
                else np.zeros(base_raw.shape, dtype=np.float32))
@@ -1154,24 +1179,36 @@ async def get_terrain_hydrology(
     }
     cache_key = make_cache_key(
         "hydrology", north, south, east, west, cache_extra)
-    cached = read_array_cache("hydrology", cache_key)
-    if cached is not None:
-        arrs, meta = cached
-        river_grid = arrs.get("river_grid")
-        if river_grid is not None:
-            river_grid = np.nan_to_num(_project_grid(
-                river_grid, north, south, east, west, projection, clip_valid_region,
-                categorical=False, maintain_dimensions=maintain_dimensions,
-                target_dim=dim), nan=0.0)
-            h, w = river_grid.shape
-            logger.info("Hydrology cache hit: %s (%dx%d)", cache_key[:8], w, h)
-            return JSONResponse(content={
-                "river_grid_values_b64": _b64(river_grid),
-                "river_grid_dimensions": [h, w],
-                "feature_count": int(meta.get("feature_count", 0)),
-                "source": meta.get("source", source),
-                "depression_m": depression_m,
-            })
+    def _river_payload(river_grid: np.ndarray, feature_count: int, src: str) -> dict:
+        # Project onto the DEM's exact grid. NaN fill (from projection) becomes
+        # 0 (= no river) so JSON serialisation produces 0.0 instead of null.
+        river_grid = np.nan_to_num(_project_grid(
+            river_grid, north, south, east, west, projection, clip_valid_region,
+            categorical=False, maintain_dimensions=maintain_dimensions,
+            target_dim=dim), nan=0.0)
+        h, w = river_grid.shape
+        return {
+            "river_grid_values_b64": _b64(river_grid),
+            "river_grid_dimensions": [h, w],
+            "feature_count": int(feature_count),
+            "source": src,
+            "depression_m": depression_m,
+        }
+
+    def _river_from_cache() -> dict | None:
+        hit = read_array_cache("hydrology", cache_key)
+        if hit is None or hit[0].get("river_grid") is None:
+            return None
+        arrs, meta = hit
+        payload = _river_payload(arrs["river_grid"], meta.get("feature_count", 0),
+                                 meta.get("source", source))
+        logger.info("Hydrology cache hit: %s (%dx%d)", cache_key[:8],
+                    *payload["river_grid_dimensions"][::-1])
+        return payload
+
+    _hit = await run_sync(_river_from_cache)   # off the event loop
+    if _hit is not None:
+        return JSONResponse(content=_hit)
 
     if TEST_MODE:
         h, w = dim, dim
@@ -1215,31 +1252,18 @@ async def get_terrain_hydrology(
         # Cache the RAW (unprojected) river grid — projection is applied fresh
         # below (and on every future cache hit above), never baked into the
         # cached value. See the cache-hit path's comment for why.
-        river_grid_raw = result["river_grid"]
-        write_array_cache(
-            "hydrology", cache_key,
-            {"river_grid": river_grid_raw},
-            {"feature_count": int(result["feature_count"]),
-             "source": result.get("source", source)},
-        )
+        def _store() -> dict:
+            write_array_cache(
+                "hydrology", cache_key,
+                {"river_grid": result["river_grid"]},
+                {"feature_count": int(result["feature_count"]),
+                 "source": result.get("source", source)},
+            )
+            return _river_payload(result["river_grid"], result["feature_count"],
+                                  result.get("source", source))
 
-        # Project onto the DEM's exact grid. NaN fill (from projection) becomes
-        # 0 (= no river) so JSON serialisation produces 0.0 instead of null.
-        river_grid = np.nan_to_num(_project_grid(
-            river_grid_raw, north, south, east, west, projection, clip_valid_region,
-            categorical=False, maintain_dimensions=maintain_dimensions,
-            target_dim=dim), nan=0.0)
-
-        h, w = river_grid.shape
-
-        payload = {
-            "river_grid_values_b64": _b64(river_grid),
-            "river_grid_dimensions": [h, w],
-            "feature_count": result["feature_count"],
-            "source": result.get("source", source),
-            "depression_m": depression_m,
-        }
-        return payload   # missing: every cache miss answered `null` (2026-09-30)
+        # a missing return here once answered `null` to every cache miss (2026-09-30)
+        return await run_sync(_store)
 
     if cache_key in _HYDRO_INFLIGHT:
         logger.info("Hydrology in-flight join: %s", cache_key[:8])
@@ -1298,21 +1322,25 @@ async def get_terrain_borders(
         write_array_cache("borders", key, {"grid": g}, {"counts": counts})
         return g, counts
 
+    def _payload() -> dict:
+        grid, counts = _compute()
+        grid = np.nan_to_num(_project_grid(
+            grid.astype(np.float32), north, south, east, west, projection, clip_valid_region,
+            categorical=True, maintain_dimensions=maintain_dimensions, target_dim=dim), nan=0.0)
+        h, w = grid.shape
+        return {
+            "grid_values_b64": _b64(np.asarray(grid, dtype=np.float32)),
+            "grid_dimensions": [h, w],
+            "codes": {"state": 1, "country": 2},
+            "counts": counts,
+        }
+
     try:
-        grid, counts = await run_sync(_compute)
+        payload = await run_sync(_payload)   # read, project and encode off the event loop
     except Exception as e:  # noqa: BLE001 - offline or a bad archive: say so, don't 500 the page
         logger.warning("Borders unavailable: %s", e)
         return error_response(f"Borders unavailable: {e}")
-    grid = np.nan_to_num(_project_grid(
-        grid.astype(np.float32), north, south, east, west, projection, clip_valid_region,
-        categorical=True, maintain_dimensions=maintain_dimensions, target_dim=dim), nan=0.0)
-    h, w = grid.shape
-    return JSONResponse(content={
-        "grid_values_b64": _b64(np.asarray(grid, dtype=np.float32)),
-        "grid_dimensions": [h, w],
-        "codes": {"state": 1, "country": 2},
-        "counts": counts,
-    })
+    return JSONResponse(content=payload)
 
 
 #: Largest region (bbox diagonal) trails are fetched for; see get_terrain_trails.

@@ -1,7 +1,7 @@
 /**
  * modules/dem-loader.js — DEM rendering, projection, zoom/pan helpers.
  *
- * Loaded as a plain <script> before app.js. All functions become globals.
+ * Imported by main.js; its functions are put on window.
  *
  * Functions:
  *   Colour math:
@@ -19,6 +19,7 @@
  *   window.appState         — shared state proxy (currentDemBbox, lastDemData)
  *   updateStackedLayers()   — global from stacked-layers.js
  */
+import { binCounts, finiteRange } from './dem-stats.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Colour math
@@ -122,7 +123,7 @@ function renderSatelliteCanvas(values, width, height) {
     ctx.clearRect(0, 0, width, height);
     const img = ctx.createImageData(width, height);
     const data = img.data;
-    const flat = Array.isArray(values) ? values : [];
+    const flat = values && typeof values.length === 'number' ? values : [];
     const len = flat.length;
 
     let vmin = Infinity, vmax = -Infinity;
@@ -260,24 +261,17 @@ function drawHistogram(values) {
     const ctx = canvas.getContext('2d');
     const colormap = document.getElementById('demColormap').value;
 
-    const valid = values.filter(v => Number.isFinite(v));
-    if (valid.length === 0) {
+    const { min, max, count } = finiteRange(values);
+    if (count === 0) {
         ctx.fillStyle = '#888';
         ctx.fillText('No data', 100, 60);
         container.appendChild(canvas);
         return;
     }
 
-    const min = valid.reduce((a, b) => a < b ? a : b, valid[0]);
-    const max = valid.reduce((a, b) => a > b ? a : b, valid[0]);
     const range = (max - min) || 1;
     const numBins = 40;
-    const bins = new Array(numBins).fill(0);
-
-    valid.forEach(v => {
-        const idx = Math.min(numBins - 1, Math.floor(((v - min) / range) * numBins));
-        bins[idx]++;
-    });
+    const bins = binCounts(values, min, max, numBins);
 
     const maxBin = Math.max(...bins);
     const barWidth = canvas.width / numBins;

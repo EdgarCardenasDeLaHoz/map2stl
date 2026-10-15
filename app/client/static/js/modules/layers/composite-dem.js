@@ -518,39 +518,61 @@ let _computeGen = 0;
 /**
  * Rivers + lakes contribution (negative metres), from the server: the same
  * terrain-relative layers the export carves, fetched through dem-merge on a
- * zero-weight base DEM so only the carve comes back. Cached per request body.
+ * zero-weight base DEM so only the carve comes back.
+ *
+ * Two caches. The dem-merge grid is cached per request body (_hydroFetch), so a
+ * projection switch can start it before its DEM lands (prefetchCompositeHydro) and
+ * the recompute after the DEM picks the same promise up. The resample onto the
+ * DEM's size is cached per body and size (_hydroCache). Promises are cached, not
+ * only results: a second caller while the first request is still running shares
+ * it (opening Colombia sent the same 6-minute dem-merge twice). A failed fetch is
+ * dropped so the next call retries.
  */
+let _hydroFetch = null;   // { key, grid: Promise<{vals:Float32Array, w:number, h:number}|null> }
 let _hydroCache = null;   // { key, values: Promise<Float32Array|null> }
-async function _hydroContribution(demW, demH) {
+
+/** The dem-merge body for the rivers/lakes carve on a grid, or null when both are off. */
+function _hydroBody(bbox, grid) {
     _syncRiverParamsFromHydrology();
+    const water = waterTerrainLayers(params, grid.dim);
+    if (!water.length) return null;
+    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
+    return {
+        bbox: { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west },
+        dim: grid.dim,
+        layers: [{ source: grid.demSource, dim: grid.dim, blend_mode: 'base', weight: 0, options: {} }, ...water],
+        projection,
+        clip_valid_region: clipValidRegion,
+        maintain_dimensions: maintainDimensions,
+    };
+}
+
+function _hydroGrid(body) {
+    const key = JSON.stringify(body);
+    if (_hydroFetch?.key === key) return _hydroFetch.grid;
+    const grid = _fetchHydro(body);
+    _hydroFetch = { key, grid };
+    grid.then((g) => { if (g == null && _hydroFetch?.key === key) _hydroFetch = null; });
+    return grid;
+}
+
+async function _hydroContribution(demW, demH) {
     const bbox = window.appState?.currentDemBbox;
     if (!bbox) return null;
     const snapshot = window.appState?.lastDemRequest?.dem;
     const dim = parseInt(snapshot?.dim ?? document.getElementById('paramDim')?.value, 10) || 600;
     const demSource = snapshot?.dem_source || document.getElementById('paramDemSource')?.value || 'local';
-    const water = waterTerrainLayers(params, dim);
-    if (!water.length) return null;
-    const { projection, maintainDimensions, clipValidRegion } = window.getProjectionParams();
-    const body = {
-        bbox: { north: bbox.north, south: bbox.south, east: bbox.east, west: bbox.west },
-        dim,
-        layers: [{ source: demSource, dim, blend_mode: 'base', weight: 0, options: {} }, ...water],
-        projection,
-        clip_valid_region: clipValidRegion,
-        maintain_dimensions: maintainDimensions,
-    };
+    const body = _hydroBody(bbox, { dim, demSource });
+    if (!body) return null;
     const key = JSON.stringify(body) + `->${demW}x${demH}`;
-    // The promise is cached, not only the result: a second caller while the first
-    // request is still running shares it (opening Colombia sent the same
-    // 6-minute dem-merge twice). A failed fetch is dropped so the next call retries.
     if (_hydroCache?.key === key) return _hydroCache.values;
-    const values = _fetchHydro(body, demW, demH);
+    const values = _hydroGrid(body).then((g) => (g ? _resampleGrid(g.vals, g.w, g.h, demW, demH) : null));
     _hydroCache = { key, values };
     values.then((v) => { if (v == null && _hydroCache?.key === key) _hydroCache = null; });
     return values;
 }
 
-async function _fetchHydro(body, demW, demH) {
+async function _fetchHydro(body) {
     const { data, error } = await (window.api?.composite?.demMerge(body)
         ?? Promise.resolve({ data: null, error: 'api not ready' }));
     if (error || !data || data.error) {
@@ -560,8 +582,21 @@ async function _fetchHydro(body, demW, demH) {
     const vals = window.decodeDemValues?.(data);
     const [h, w] = data.dimensions || [];
     if (!vals?.length || !h || !w) return null;
-    return _resampleGrid(new Float32Array(vals), w, h, demW, demH);
+    return { vals: new Float32Array(vals), w, h };
 }
+
+/**
+ * Start the composite's rivers/lakes dem-merge for the DEM about to load, so it runs in
+ * parallel with that DEM instead of after it (a projection switch, event-listeners-map.js).
+ * Does nothing unless the composite is on and rivers or lakes are on in it.
+ * @param {{bbox:{north:number,south:number,east:number,west:number}, grid:{dim:number, demSource:string}}} next
+ * @returns {Promise<object|null>|null} the shared fetch, or null when nothing was started
+ */
+window.prefetchCompositeHydro = function prefetchCompositeHydro({ bbox, grid } = {}) {
+    if (!bbox || !grid || !document.getElementById('compositeEnabled')?.checked) return null;
+    const body = _hydroBody(bbox, grid);
+    return body ? _hydroGrid(body) : null;
+};
 
 window.computeCompositeDem = function computeCompositeDem() {
     const run = _computeCompositeDem();
@@ -636,7 +671,7 @@ async function _computeCompositeDem() {
     }
     if (params.riversEnabled || params.lakesEnabled) {
         try { hydroFeat = await _hydroContribution(W, H); } catch (e) { console.warn('[composite] rivers/lakes:', e); }
-        if (gen !== _computeGen) return;
+        await _yieldToMain(); if (gen !== _computeGen) return;
     }
     if (cityAnyEnabled) {
         try {
@@ -701,6 +736,9 @@ async function _computeCompositeDem() {
         statsEl.textContent = `${cMin.toFixed(1)}m — ${cMax.toFixed(1)}m`;
     }
 
+    // The histograms are a separate task from the render above: together they were one
+    // ~400 ms long task after the rivers/lakes merge landed.
+    await _yieldToMain(); if (gen !== _computeGen) return;
     _renderAllHistograms({
         dem: params.demEnabled ? demFeat : null,
         water: waterFeat, hydro: hydroFeat, ...cityComponents,
@@ -1103,6 +1141,10 @@ let _recomputeTimer = null;
 function _scheduleRecompute() {
     clearTimeout(_recomputeTimer);
     _recomputeTimer = setTimeout(async () => {
+        // loadDEM clears lastDemData before its fetch: recomputing then built a flat 1000 x 1000
+        // baseline nobody sees (~360 ms of main thread on Colombia) while the DEM was loading.
+        const st = window.appState;
+        if (!st?.lastDemData && st?.layerStatus?.dem === 'loading') return;
         await window.computeCompositeDem();
         window.updateStackedLayers?.();
         _updateContribStatus();

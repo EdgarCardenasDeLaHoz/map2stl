@@ -9,9 +9,10 @@
  *   window._setupBboxListeners()
  */
 import {
-    endProjectionPreview, isProjectionPreviewActive, markPreviewDemLanded, releaseProjectionPreview,
-    startProjectionPreview,
+    endProjectionPreview, isProjectionPreviewActive, markPreviewDemLanded, projTiming, projTimingStart,
+    releaseProjectionPreview, settlePreviewLayer, startProjectionPreview,
 } from '../dem/projection-preview.js';
+import { nextDemGrid } from '../layers/hydrology-print.js';
 
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     // New-region flow (modules/map/new-region.js): draw mode with a live size label.
@@ -84,43 +85,75 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         _syncClipToggleState();
 
         let _projChangeTimer = null;
+        /** performance.now() of the last change event: a pick within 80 ms of it is a burst. */
+        let _lastProjChange = -Infinity;
         // Every pick gets a number; only the newest pick's responses may finish the reload
-        // (an older pick's DEM is aborted by loadDEM, its other layers are never requested).
+        // or settle a layer of its preview (an older pick's requests are aborted by the
+        // loaders, which drop an in-flight request when the key changes).
         let _projPick = 0;
         // Which layers the reload must re-fetch, read once when a reload starts: a pick made
         // while one is running finds them cleared by loadDEM's clearLayerCache.
         let _reloadLayers = null;
+        /** The pick the preview was last warped for (a burst warps before it fetches). */
+        let _previewedPick = 0;
 
         /** Raster size of the DEM the preview was taken from (its longest side). */
         let _previewDim = 0;
 
-        /** Re-draw the loaded layers in the newly picked projection, at once. */
-        const _previewPick = () => {
+        /**
+         * The loaded DEM's box, projection and raster size, or null when none is loaded. Read
+         * it before loadDEM: its clearLayerCache nulls lastDemData, currentDemBbox and
+         * lastDemRequest synchronously, before its first await.
+         * @returns {{bbox:object, from:object, dim:number}|null}
+         */
+        const _loadedFrame = () => {
             const st = window.appState;
-            let from = null, bbox = null;
-            if (!isProjectionPreviewActive()) {
+            const dem = st.lastDemData;
+            const req = st.lastDemRequest;
+            if (!dem || !req?.dem) return null;
+            return {
+                bbox: st.currentDemBbox || req.bbox,
                 // The loaded layers are in the projection the DEM was fetched with.
-                const dem = st.lastDemData;
-                const req = st.lastDemRequest;
-                if (!dem || !req?.dem) return false;
-                _previewDim = Math.max(dem.width || 0, dem.height || 0) || req.dem.dim;
-                bbox = st.currentDemBbox || req.bbox;
-                from = { projection: req.dem.projection || 'none', maintainDimensions: !!req.dem.maintain_dimensions };
-            }
-            // A pick made while a preview shows re-warps the same loaded pixels (bbox/from ignored).
-            const ok = startProjectionPreview({
-                bbox, from, to: window.getProjectionParams(), dim: _previewDim,
-                sources: window.getLayerSourceCanvases?.(),
-            });
-            // The module shows the "Preview · loading layers…" pill (DemContainer.vue).
-            if (ok) window.updateStackedLayers?.();
-            return ok;
+                from: { projection: req.dem.projection || 'none', maintainDimensions: !!req.dem.maintain_dimensions },
+                dim: Math.max(dem.width || 0, dem.height || 0) || req.dem.dim,
+            };
         };
 
-        /** Re-fetch every loaded layer in the picked projection; the preview stands in meanwhile. */
-        const _reloadForProjection = async (pick) => {
+        /**
+         * Re-draw the loaded layers in the newly picked projection. `sources` and `frame` must
+         * be read before loadDEM runs: it detaches the DEM canvas and clears the loaded DEM.
+         */
+        const _previewPick = (pick, sources = window.getLayerSourceCanvases?.(), frame = _loadedFrame()) => {
+            let from = null, bbox = null;
+            if (!isProjectionPreviewActive()) {
+                if (!frame) return false;
+                ({ bbox, from } = frame);
+                _previewDim = frame.dim;
+            }
+            // A pick made while a preview shows re-warps the same loaded pixels (bbox/from ignored).
+            // The module shows the "Preview · loading layers…" pill (DemContainer.vue).
+            _previewedPick = pick;
+            return startProjectionPreview({
+                pick, bbox, from, to: window.getProjectionParams(), dim: _previewDim, sources,
+            });
+        };
+
+        /** Log when a request starts and when it lands (window.DEBUG_PROJ_TIMING). */
+        const _timed = (what, promise) => {
+            projTiming(`${what} request`);
+            return Promise.resolve(promise).finally(() => projTiming(`${what} landed`));
+        };
+
+        /**
+         * Re-fetch every loaded layer in the picked projection; the preview stands in meanwhile.
+         * Every request goes out first, in parallel: the DEM, then Rivers & lakes, Borders,
+         * Trails and the composite's rivers/lakes merge, whose parameters do not need the new
+         * DEM (the grid is the form's dim and source, hydrology-print.js nextDemGrid). They used
+         * to wait for the DEM to land (DEM_LOADED), ~1.5 s on Colombia. The warp runs after.
+         */
+        const _switchProjection = async (pick) => {
+            const st = window.appState;
             if (!_reloadLayers) {
-                const st = window.appState;
                 if (!st.lastDemData) return;  // nothing loaded yet
                 // Snapshot which layers were loaded BEFORE loadDEM runs, because
                 // loadDEM calls clearLayerCache() which nulls lastWaterMaskData,
@@ -140,34 +173,70 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 };
             }
             const had = _reloadLayers;
-            // Layers that reload on their own after the DEM (Rivers & lakes, Borders, Trails)
-            // keep their preview until they land: release, not end.
-            const finish = (failed) => {
-                _reloadLayers = null;
-                if (failed) endProjectionPreview();
-                else releaseProjectionPreview(window.getLayerSourceCanvases?.());
-                window.updateStackedLayers?.();
-            };
+            // Read before loadDEM: it detaches the DEM canvas and clears the loaded DEM.
+            const sources = window.getLayerSourceCanvases?.() || {};
+            const previewMe = _previewedPick !== pick;
+            const frame = previewMe ? _loadedFrame() : null;
+            const active = window.getActiveLayers?.() || new Set();
+            // The box and grid loadDEM is about to fetch (dem-main.js loadDEM reads the same).
+            const coords = window.getBboxCoords?.(window.getBoundingBox?.(), st.selectedRegion);
+            const grid = nextDemGrid();
 
             window.showToast?.('Projection changed — re-fetching layers…', 'info');
 
             // Re-fetch DEM with new projection param (includes water if subtract_water).
-            // Its synchronous start clears the layer cache and the stack, so redraw the preview.
-            const demLoad = window.loadDEM?.();
-            if (isProjectionPreviewActive()) window.updateStackedLayers?.();
+            const demLoad = _timed('dem', window.loadDEM?.());
+
+            // Layers that reload on their own (they used to wait for DEM_LOADED): each settles
+            // its preview when its own fetch finishes, with a picture, with none or failed.
+            const pending = new Set();
+            const own = (mode, load, on = active.has(mode)) => {
+                if (!on) return;
+                pending.add(mode);
+                let run;
+                try { run = load(); } catch (e) { run = Promise.reject(e); }
+                return _timed(mode, run)
+                    .catch((e) => console.warn(`[projection] ${mode} reload:`, e))
+                    .finally(() => { if (settlePreviewLayer(mode, pick)) window.emitStackUpdate?.(); });
+            };
+            if (coords) {
+                own('Borders', () => window.loadBorders?.({ activate: false, bbox: coords, dim: grid.dim }));
+                own('WaterHydrology', () => window.loadWaterHydrology?.({ grid }));
+                own('Trails', () => window.loadTrails?.({ activate: false }));
+                const merge = window.prefetchCompositeHydro?.({ bbox: coords, grid });
+                if (merge) _timed('composite dem-merge', merge);
+            }
+            // Water mask and land cover read the box and their own resolution controls, not the
+            // DEM, so they go out now too (they waited for the DEM: landCover landed last, 4 s).
+            // loadSatelliteImage is loadEsaLandCover: one call, or the second aborts the first.
+            const early = [];
+            if (had.water) early.push(_timed('water', window.loadWaterMask?.()));
+            if (had.landCover || had.satEsa) early.push(own('Sat', () => window.loadEsaLandCover?.(), true));
+
+            // Show the new shape now: the loaded layers warped in the browser
+            // (modules/dem/projection-preview.js). loadDEM has cleared the stack: redraw it
+            // on the next frame, before it paints.
+            if (previewMe) _previewPick(pick, sources, frame);
+            window.emitStackUpdate?.();
+
+            // Layers that reload on their own keep their preview until they settle: release, not end.
+            const finish = (failed) => {
+                _reloadLayers = null;
+                if (failed) endProjectionPreview();
+                else releaseProjectionPreview(window.getLayerSourceCanvases?.(), pending);
+                window.emitStackUpdate?.();
+            };
+
             await demLoad;
             if (pick !== _projPick) return;           // a newer pick owns the map now
             if (!window.appState.lastDemData) { finish(true); return; }   // failed or cancelled
             markPreviewDemLanded(window.getLayerSourceCanvases?.());
-            window.updateStackedLayers?.();
+            window.emitStackUpdate?.();
 
             // Re-fetch other layers that were already loaded
-            const tasks = [];
-            if (had.water) tasks.push(window.loadWaterMask?.());
-            if (had.landCover) tasks.push(window.loadEsaLandCover?.());
-            if (had.sat) tasks.push(window.loadSatelliteRGBImage?.());
-            if (had.satEsa) tasks.push(window.loadSatelliteImage?.());
-            if (had.city) tasks.push(window.loadCityRaster?.());
+            const tasks = [...early];
+            if (had.sat) tasks.push(_timed('sat', window.loadSatelliteRGBImage?.()));
+            if (had.city) tasks.push(_timed('city', window.loadCityRaster?.()));
             if (tasks.length) await Promise.allSettled(tasks);
             if (pick !== _projPick) return;
 
@@ -189,16 +258,18 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             if (desc) desc.textContent = projDescriptions[projSelect.value] || '';
             _syncClipToggleState();
 
-            // Show the new shape now: the loaded layers warped in the browser
-            // (modules/dem/projection-preview.js). The server's layers replace them as they land.
             const pick = ++_projPick;
-            _previewPick();
-
-            // Debounce 80ms so rapid clicks don't fire multiple fetches.
-            // Projection is applied server-side: re-fetch every loaded layer
-            // so all canvases arrive pre-projected and aligned.
+            projTimingStart();
             clearTimeout(_projChangeTimer);
-            _projChangeTimer = setTimeout(() => _reloadForProjection(pick), 80);
+            const now = performance.now();
+            const burst = now - _lastProjChange < 80;
+            _lastProjChange = now;
+            // Projection is applied server-side: re-fetch every loaded layer so all canvases
+            // arrive pre-projected and aligned. A single pick fetches at once; a burst of picks
+            // (arrow keys through the list) shows each one now and fetches the last, 80 ms on.
+            if (!burst) { _switchProjection(pick); return; }
+            if (_previewPick(pick)) window.emitStackUpdate?.();
+            _projChangeTimer = setTimeout(() => _switchProjection(pick), 80);
         });
     }
 

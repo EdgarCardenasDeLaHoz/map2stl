@@ -120,10 +120,10 @@ def fetch_satellite_tiles(north: float, south: float, east: float, west: float, 
 
     from PIL import Image
 
-    from geo2stl.imagery import fetch_rgb
+    from geo2stl.imagery import default_tile_cache_dir, fetch_rgb
 
     rgb, _meta = fetch_rgb({"north": north, "south": south, "east": east, "west": west},
-                           dim=dim, timeout=8)
+                           dim=dim, timeout=8, cache_dir=default_tile_cache_dir())
 
     # De-project from Web Mercator to Plate Carree (equirectangular)
     # The cropped image has non-uniform latitude spacing per pixel row
@@ -283,7 +283,10 @@ def fetch_water_mask(
 
 
 def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, dim):
-    """Fetch + resize satellite overlay. Returns (values_list, w, h) or None."""
+    """Fetch + resize satellite overlay. Returns (values, w, h) or None.
+
+    ``values`` is the resized grid as a 2-D numpy array (it was a flat list).
+    """
     import cv2 as _cv2
     import numpy as _np
 
@@ -302,7 +305,7 @@ def fetch_sat_overlay(north, south, east, west, dataset, width_px, height_px, di
     sat_th = max(height_px, dim or height_px)
     sat_arr = _cv2.resize(sat_arr, (sat_tw, sat_th),
                           interpolation=_cv2.INTER_LINEAR)
-    return (sat_arr.ravel().tolist(), sat_arr.shape[1], sat_arr.shape[0])
+    return (sat_arr, sat_arr.shape[1], sat_arr.shape[0])
 
 
 # ---------------------------------------------------------------------------

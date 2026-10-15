@@ -105,7 +105,7 @@ _DEFAULT_SETTINGS: dict = {
         "split_cols":     4,
         "knob_width_mm":  20.0,
         "knob_depth_mm":  8.0,
-        "clearance_mm":   0.3,
+        "clearance_mm":   0.45,
     },
     # ── Water mask ────────────────────────────────────────────────────────
     # Sent to /api/terrain/water-mask
@@ -1065,9 +1065,18 @@ class TerrainSession:
         return np.array(values, dtype=dtype).reshape(h, w)
 
     @staticmethod
-    def _decode_b64_grid(b64_str: str, h: int, w: int) -> np.ndarray:
-        """Decode a base64-encoded little-endian float32 grid to (h, w) array."""
+    def _decode_b64_grid(b64_str: str, h: int, w: int, dtype: str = "float32") -> np.ndarray:
+        """Decode a base64 grid to an (h, w) float32 array.
+
+        ``dtype`` is the response's ``<name>_dtype`` field: ``"uint8"`` grids
+        (land-cover classes, water masks) map 255 back to NaN.
+        """
         raw = base64.b64decode(b64_str)
+        if dtype == "uint8":
+            u8 = np.frombuffer(raw, dtype=np.uint8)
+            out = u8.astype(np.float32)
+            out[u8 == 255] = np.nan
+            return out.reshape(h, w)
         return np.frombuffer(raw, dtype=np.float32).reshape(h, w)
 
     def _decode_grid_response(
@@ -1075,7 +1084,8 @@ class TerrainSession:
     ) -> np.ndarray:
         """Decode a grid from a server response, preferring b64 over plain array."""
         if b64_key in data:
-            return self._decode_b64_grid(data[b64_key], h, w)
+            dtype = data.get(b64_key.replace("_values_b64", "_dtype"), "float32")
+            return self._decode_b64_grid(data[b64_key], h, w, dtype)
         return self._prepare_array_response(data[arr_key], h, w)
 
     def _project_rgb_channels(self, img: np.ndarray) -> np.ndarray:

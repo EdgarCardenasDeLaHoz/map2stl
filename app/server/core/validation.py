@@ -95,6 +95,23 @@ def b64_encode(arr: np.ndarray) -> str:
     return _b64m.b64encode(arr.ravel().astype(np.float32).tobytes()).decode("ascii")
 
 
+U8_NODATA = 255  # NaN in a uint8 grid; decoders turn it back into NaN
+
+
+def b64_encode_u8(arr: np.ndarray) -> str:
+    """Encode a small-integer grid (classes, 0/1 masks) as base64 uint8.
+
+    A quarter of the float32 size. Values are rounded and clipped to 0..254;
+    NaN becomes :data:`U8_NODATA`. Responses that use it name the dtype in a
+    ``<name>_dtype: "uint8"`` field so clients know how to decode.
+    """
+    a = np.asarray(arr, dtype=np.float32).ravel()
+    nan = np.isnan(a)
+    out = np.clip(np.rint(np.where(nan, 0.0, a)), 0, U8_NODATA - 1).astype(np.uint8)
+    out[nan] = U8_NODATA
+    return _b64m.b64encode(out.tobytes()).decode("ascii")
+
+
 def model_to_dict(model: Any) -> dict:
     """Convert a Pydantic model to a dictionary."""
     if hasattr(model, 'model_dump'):

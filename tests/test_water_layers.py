@@ -568,4 +568,12 @@ def test_parallel_carve_matches_one_pass(monkeypatch):
     o2, s2 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem)
     assert np.array_equal(o1, o2)
     assert np.array_equal(s1, s2)
+    # A pool started before the reaches were read (river_carve_layers on a big box).
+    pool = wl.start_carve_pool()
+    assert pool is not None
+    try:
+        o3, s3 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem, pool=pool)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    assert np.array_equal(o1, o3) and np.array_equal(s1, s3)
     assert (s1 > 0).sum() > 100

@@ -36,6 +36,34 @@ _Last updated: 2026-10-14_
     per-projection carve to within 1 px for 99 % of river pixels. Still open: the final
     categorical (nearest) `project_grid` can drop thin N-S rivers where a projection stretches x;
     lakes are still fetched per projection.
+  - **Fixed 2026-10-14 (client side):** a switch took 3.3-5.3 s on 1000 px Colombia, and Everest
+    held the pill 31 s. Nothing was requested for 460 ms (full-size snapshot and warp, then the
+    80 ms debounce, then synchronous stack redraws); Borders, Rivers & lakes and the composite
+    dem-merge waited for the DEM to land; long tasks came from a composite recompute on the
+    cleared DEM, four passes over 1M values in `_applyDemResult` / `drawHistogram`, and
+    repeated redraws. Now every request goes out at the change event
+    (`event-listeners-map.js::_switchProjection`), the warp runs at 600 px after them, stack
+    redraws coalesce per frame (`ui-helpers.js::emitStackUpdate`), and the stats are one pass
+    (`dem/dem-stats.js`). The preview ends when each layer has settled for the current pick
+    (`projection-preview.js::settlePreviewLayer`), not when a new canvas appears, so a layer
+    with nothing in the box (no rivers on Everest) no longer holds it. Not yet measured live;
+    `window.DEBUG_PROJ_TIMING = true` logs `[proj-timing]` per request.
+  - **Fixed 2026-10-14 (cold open and DEM switches):** Colombia's first open spent 29 s in
+    river_carve: 21 s rebuilding a missing full HydroRIVERS parquet that an order 3+ read never
+    uses (`geo2stl/hydrology.py::_read_region_parquets` now skips it), and ~8 s carving. The carve
+    is faster with output unchanged bit for bit: vectorised valley snapping
+    (`water_layers.py::snap_reaches_to_valley`), GeoJSON built from one ragged array
+    (`numpy2stl/src/numpy2stl/raster/burn.py::_ragged_mappings`), and a worker pool started before the reaches
+    are read (`water_layers.py::start_carve_pool`); Colombia's cold rivers step is now ~7.6 s plus
+    0.9 s for the DEM. `GET /api/terrain/dem` decoded the whole GeoTIFF on every switch (Colorado
+    4-5.7 s, Norway 4.3 s); it now cuts the projection's grid from `shared_base_grid`
+    (`geo2stl/dem.py::fetch_dem`, `shared_dim=`, 0.01-0.05 s) and reads ESA water at the shared
+    grid's scale, so no switch asks Earth Engine for a finer image (Norway Mercator: 7 s). The
+    shared grid's cap is a cell budget (`projections.py::shared_source_dim`), so Norway's cosine,
+    equidistant and Mercator no longer fall back to a per-projection carve (11-15 s each).
+    Still open: the DEM disk cache key holds the projection's source_dim
+    (`app/server/core/dem_cache.py`), so each new projection still writes its own entry; the DEM
+    route's grid now differs from the old direct decode by a mean 2-6 m (resampled twice).
 
 ## Europa: hollow seas and no rivers in Rivers & lakes (2026-10-14)
 

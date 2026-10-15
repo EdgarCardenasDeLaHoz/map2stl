@@ -21,6 +21,39 @@ instead of having tasks pasted in.
   street view, the GPU and data side).
 - Statuses: `suggested` (user to confirm), `todo`, `in-progress`, `review`, `done`.
 
+## Two local PCs (added 2026-10-14)
+
+Both PCs see the same working files through OneDrive, not through git, and the workspace rule in
+the top-level `CLAUDE.md` is explicit: **never two PCs editing the same project folder at once.**
+Two sessions writing the same OneDrive folder produce conflict copies and lose edits, and git
+cannot help because each PC has its own database under `~/.gitdirs/`.
+
+So "divide the work between the two computers" means one of these two arrangements, never
+simultaneous editing of the OneDrive copy:
+
+1. **Serialised (no setup).** One PC works at a time. Before switching: resume OneDrive, wait for
+   "Up to date", commit and push, then on the other PC `git fetch` and `git reset origin/<branch>`
+   (index only, never `--hard`) and check `git status` is clean.
+2. **Truly parallel (needs one-time setup).** The second PC works in a clone **outside** OneDrive
+   (for example `C:\dev\map2stl`), on its own branch, and the two PCs exchange work through
+   GitHub rather than through OneDrive. Only the OneDrive copy is the source of truth for the PC
+   that owns it; the clone's branch is merged back by a session on that PC.
+
+Arrangement 2 is the one that actually gives two machines at once, and it is what the streams
+below assume. Pick it before starting both streams.
+
+Machine labels used in the Notes column:
+
+| Label | Machine | Why work is pinned to it |
+|---|---|---|
+| `PC-D` | OneDrive at `D:\OneDrive` (DESKTOP-TMJM22C) | holds the 12 GB array cache, so city builds and any measurement against cached DEM, satellite or OSM data run here |
+| `PC-C` | OneDrive at `C:\Users\eac84\OneDrive` | holds `ocean_root` and the local tile store (`C:/Users/eac84/Desktop/...`, recorded in the F-KEYS plan), so the tile-store and machine-folder work runs here |
+
+Stream A (infrastructure, `PC-C`) and stream B (city-model geometry, `PC-D`) touch disjoint files.
+Within stream A the tasks are sequential: F-DATADIR and F-KEYS both change `app/paths.py`,
+`app/server/config.py`, `app/server/core/tile_store.py` and the per-PC config file, and F-DATADIR
+goes first because F-KEYS's `machine.json` becomes one layer of F-DATADIR's settings object.
+
 ## Merge process
 
 1. The agent pushes `cloud/<task-id>-<slug>` with the test counts in its last commit message.
@@ -82,3 +115,9 @@ instead of having tasks pasted in.
 | T44 | Satellite cross-check: per-tower and per-building heights from shadow length and building lean in the free Esri World Imagery (Cartagena scene 2026-02-10, 0.34 m, sun az 320 / el 58.1, lean tan 0.294 toward ~102 deg), as a second independent image to verify drone heights. Early test: shadow MAE 13.6 m (n=5), lean ~15 m (n=8). | local-panoramic | doing | | See [shadow heights](../research/shadow-heights.md) and the 2026-09-04 rejected hypothesis in [decisions/building-heights.md](../decisions/building-heights.md) (shadows at low latitude). |
 | T45 | Stage cache for elevated seeds: cache pano, SegFormer labels, depth, instances, pose and measurements per stage, keyed by input hash + stage version, in compact storage, so a later stage change re-runs only that stage. | local-panoramic | doing | | |
 | T46 | Pass tags to the photo pipeline's truth calls: `footprint_truth(tags_m=)` (T40) is not yet called with tags from the photo pipeline (`scripts/17_photo_pipeline.py`), so a flat 3D Tiles area can still be taken as truth there. | local-panoramic | todo | | Follow-up to T40. |
+| T47 | **Stream A.1** — [F-DATADIR](../plans/active/F-DATADIR-portable-data-dir.md): one data directory, one settings object, bounded disk. All seven steps of the plan. | local-map2stl | todo | | `PC-C`. Runs before T48 (same files). Approved 2026-10-14. Verify on `PC-D` afterwards, where the 12 GB cache and the 1.9 GB `output/` tree actually exist — the migration and the prune ceiling cannot be tested anywhere else. |
+| T48 | **Stream A.2** — [F-KEYS](../plans/active/F-KEYS-keys-and-folders-panel.md): keys and data folders sheet, loopback Earth Engine sign-in, machine paths to `~/.config/map2stl/machine.json`. | local-map2stl | todo | | `PC-C`, after T47. Needs `ocean_root` and the local tile store, which exist only on `PC-C`. The PNG mockups in `Code/claude/mockups/2026-10-14-keys/` still need the user's approval, and the loopback sign-in wants a manual spike first. Approved 2026-10-14. |
+| T49 | **Stream B.1** — [F-VIEW-SATPARTS](../plans/active/F-VIEW-SATPARTS-satellite-on-model-parts.md): drape the satellite image on the finished City Model's terrain, roads, railways, trails and green parts. | local-map2stl | todo | | `PC-D`. First of the user's 2026-10-14 realistic-City-Model order. Needs city builds against the cached data on `PC-D`. Approved 2026-10-14. |
+| T50 | **Stream B.2** — [F-PLINTH](../plans/active/F-PLINTH-building-plinths-on-slopes.md): flat pads under footprints on slopes, heights measured from the pad. | local-map2stl | todo | | `PC-D`, after T49. Second of the user's 2026-10-14 order. Approved 2026-10-14. |
+| T51 | [F-DESKTOP](../plans/active/F-DESKTOP-standalone-app.md): standalone installable application. | local-map2stl | suggested | | Blocked on T47 and on T48's Earth Engine sign-in. Either PC, but the installer must be smoke-tested on a machine with no Python — so not on a developer PC. |
+| T52 | [F-CLOUD](../plans/active/F-CLOUD-hosted-multi-user.md) phase 1 only: one persistent volume, remove the server-side tkinter picker, replace the client-settable absolute tile-store path with a server-side allowlist, cache the `/api/diagnostics` size sum. | local-map2stl | suggested | | Blocked on T47. Phase 1 improves the desktop build too, so it is worth doing even if hosting is never wanted. Phases 2-4 are not approved. |

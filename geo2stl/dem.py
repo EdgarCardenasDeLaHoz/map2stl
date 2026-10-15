@@ -264,7 +264,7 @@ def fetch_layer_data(
 
 
 SHARED_BASE_VERSION = 1   # bump when shared_base_grid's output changes
-_SHARED_BASE_MEMO: dict = {}          # key -> float64 grid, insertion order = age
+_SHARED_BASE_MEMO: dict = {}          # key -> float32 grid, insertion order = age
 _SHARED_BASE_MEMO_MAX = 4
 _SHARED_BASE_GUARD = threading.Lock()
 _SHARED_BASE_LOCKS: dict[str, list] = {}   # key -> [lock, callers holding or waiting]
@@ -285,8 +285,8 @@ def shared_base_grid(source: str, north: float, south: float, east: float, west:
     """The base elevation layer on the projection-independent shared grid.
 
     ``fetch_layer_data(source, ..., shared_source_dim(dim))`` fitted to
-    ``geo2stl.projections.shared_source_shape(dim)`` (float32 values in a float64
-    array), held in memory (the last :data:`_SHARED_BASE_MEMO_MAX` boxes) and, for
+    ``geo2stl.projections.shared_source_shape(dim)`` as float32 (half the memory
+    of the float64 copy it once was; same values, so the same carve hash), held in memory (the last :data:`_SHARED_BASE_MEMO_MAX` boxes) and, for
     OpenTopography sources (an immutable GeoTIFF per box), on disk. Each
     projection takes its own source grid from it with ``fit_grid`` instead of
     decoding the GeoTIFF again: Europa's SRTM15+ file (15272 x 9796 px, 376 MB)
@@ -318,14 +318,15 @@ def shared_base_grid(source: str, north: float, south: float, east: float, west:
                 return hit
             cached = read_array_cache("shared_base", key) if on_disk else None
             if cached is not None and cached[0].get("dem") is not None:
-                grid = np.asarray(cached[0]["dem"], dtype=np.float64)
+                grid = np.asarray(cached[0]["dem"], dtype=np.float32)
             else:
                 from geo2stl.perf import perf_step
                 with perf_step("shared_base", key=key, src=source, shape=list(shape)):
                     raw = fetch_layer_data(source, north, south, east, west, sdim, options)
-                    # float32 first: the river carve hashes this grid, and a memory
-                    # hit must hash the same as a disk hit.
-                    grid = fit_grid(np.asarray(raw, dtype=np.float32), shape).astype(np.float64)
+                    # float32, as the disk cache stores it: the river carve hashes
+                    # this grid (as float64 bytes, water_layers.river_carve_layers),
+                    # and a memory hit must hash the same as a disk hit.
+                    grid = fit_grid(np.asarray(raw, dtype=np.float32), shape)
                 if on_disk:
                     write_array_cache("shared_base", key, {"dem": grid})
             with _SHARED_BASE_GUARD:
@@ -434,6 +435,7 @@ def apply_water_and_depth(
     im: np.ndarray, bbox, *,
     depth_scale: float = 0.5, water_scale: float = 0.05, subtract_water: bool = True,
     water_dataset: str = "esa", sat_scale: float | None = None,
+    dtype=np.float32,
 ) -> tuple[np.ndarray, str | None]:
     """Depth scaling and water subtraction on a plate-carree DEM: ``(im, note)``.
 
@@ -449,8 +451,13 @@ def apply_water_and_depth(
 
     ``relief`` is the finite range of the grid after depth scaling; NaN no-data
     (OpenTopography) is left as NaN.
+
+    The result is a new *dtype* array (float32: the DEM response sends float32,
+    and a float64 copy of a large grid cost 18-107 ms). :func:`make_dem_image`
+    asks for float64: its output is the ``local`` source's raw grid, whose bytes
+    key the river carve cache (``water_layers.river_carve_layers``).
     """
-    im = np.array(im, dtype=np.float64, copy=True)
+    im = np.array(im, dtype=dtype, copy=True)
     finite = np.isfinite(im)
     below = finite & (im < 0)
     im[below] = im[below] * depth_scale
@@ -460,7 +467,8 @@ def apply_water_and_depth(
         water, note = water_fraction_for_dem(bbox, im.shape, dataset=water_dataset,
                                              sat_scale=sat_scale, elevation=im)
         if water is not None:
-            im = im - water * relief * water_scale
+            # In place, computed in float64 (water is float64) and stored as *dtype*.
+            im -= water * relief * water_scale
     else:
         above = finite & (im > 0)
         im[above] = im[above] + relief * water_scale
@@ -494,9 +502,12 @@ def make_dem_image(
     result = stitch_tiles_no_rasterio(target_bbox)
 
     # Depth scale and water subtraction: the shared block (apply_water_and_depth).
+    # float64 kept: this is the ``local`` layer's raw grid, and the river carve
+    # cache is keyed by its bytes (float32 arithmetic would move the last bit).
     im, _note = apply_water_and_depth(
         result, (N, S, E, W), depth_scale=depth_scale, water_scale=water_scale,
-        subtract_water=subtract_water, water_dataset=water_dataset, sat_scale=sat_scale)
+        subtract_water=subtract_water, water_dataset=water_dataset, sat_scale=sat_scale,
+        dtype=np.float64)
 
     if projection != "none":
         im, _ = project_coordinates(
@@ -556,6 +567,7 @@ def fetch_dem(
     maintain_dimensions: bool = True,
     water_dataset: str = "esa",
     notes: list[str] | None = None,
+    shared_dim: int | None = None,
 ) -> np.ndarray:
     """Fetch a plate-carrée DEM for *bbox* from any DEM source.
 
@@ -579,21 +591,42 @@ def fetch_dem(
             upsample with :func:`upsample_dem`).
         source: DEM source id.
         api_key: OpenTopography key; None means ``geo2stl.opentopo.get_api_key()``.
+        shared_dim: the target (projected) dim when *dim* is one projection's
+            source_dim. Then an OpenTopography grid is taken from
+            :func:`shared_base_grid` (the GeoTIFF decoded once per box, not once per
+            projection: Colorado's 352 MB file cost 4.7 s on every switch) when that
+            grid covers this one, and the water mask is read at the shared grid's
+            scale for every projection, so a switch reuses the cached ESA image
+            instead of asking Earth Engine for a finer one (Norway: 7 s).
     """
     if isinstance(bbox, dict):
         north, south, east, west = bbox["north"], bbox["south"], bbox["east"], bbox["west"]
     else:
         north, south, east, west = bbox
     bbox_t = (north, south, east, west)
+    sat_scale = None
+    shared_shape = None
+    if shared_dim is not None and not maintain_dimensions:
+        from geo2stl.projections import shared_source_shape
+        shared_shape = shared_source_shape(int(shared_dim), bbox_t)
+        w_m, h_m = bbox_size_m({"north": north, "south": south, "east": east, "west": west})
+        sat_scale = max(10, int(math.ceil(max(w_m, h_m, 1.0) / max(shared_shape))))
 
     def _finish(raw: np.ndarray) -> np.ndarray:
         im, note = apply_water_and_depth(
             raw, bbox_t, depth_scale=depth_scale, water_scale=water_scale,
-            subtract_water=subtract_water, water_dataset=water_dataset)
+            subtract_water=subtract_water, water_dataset=water_dataset,
+            sat_scale=sat_scale)
         if note and notes is not None:
             notes.append(note)
         return im
 
+    if source in OPENTOPO_DATASETS and shared_shape is not None:
+        from geo2stl.projections import fit_grid, projected_shape, shared_covers
+        shape = projected_shape(bbox_t, 'none', dim)
+        if shared_covers(shared_shape, shape):
+            base = shared_base_grid(source, north, south, east, west, int(shared_dim))
+            return _finish(fit_grid(np.asarray(base, dtype=np.float32), shape))
     if source in ("h5_local", *OPENTOPO_DATASETS):
         return _finish(fetch_layer_data(source, north, south, east, west, dim,
                                         api_key=api_key, notes=notes))
@@ -614,7 +647,7 @@ def fetch_dem(
             mh, mw = dim, max(1, int(dim * lon_r / lat_r))
         else:
             mw, mh = dim, max(1, int(dim * lat_r / lon_r))
-        return np.zeros((mh, mw), dtype=float)
+        return np.zeros((mh, mw), dtype=np.float32)
     return _finish(raw)
 
 
