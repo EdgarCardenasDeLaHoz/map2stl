@@ -96,6 +96,12 @@ function clearLayerCache() {
     window.appState.currentDemBbox = null;
     window.appState.selectedCityBuildingIndex = null;
     window._setDemEmptyState?.(true);
+    // The old DEM's request is what the export, composite and hydrology routes
+    // read dem_id from, so it must not outlive its DEM: without this a failed
+    // or cancelled load leaves them building the previous region.
+    window.appState.lastDemRequest = null;
+    window.appState.lastDemEmpty = null;
+    window.appState.generatedModelData = null;
     window.appState.originalDemValues = null;  // Reset so next Apply uses new region's data
     window.appState.curveDataVmin = null;  // Reset stable curve coordinate system
     window.appState.curveDataVmax = null;

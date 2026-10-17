@@ -8,6 +8,8 @@
  *     .generateKey(bbox)   — return the string cache key for a bbox
  *     .dedupe(bbox, fetchFn) — share one in-flight request across concurrent
  *                              callers for the same key (see below)
+ *     .findEsa(params)     — ESA land cover from a cached water-mask response with
+ *                            the same box, size and projection, or null
  */
 
 window.waterMaskCache = {
@@ -31,7 +33,12 @@ window.waterMaskCache = {
         const demH = bbox.demHeight || 0;
         const proj = bbox.projection || 'none';
         const ds = bbox.dataset || '';
-        return `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_sc${sc}_${demW}x${demH}_${proj}_${ds}`;
+        // dim, maintain_dimensions and clip_valid_region change the returned grid, so a
+        // change to any of them must miss (a resolution change used to return the old size).
+        const dim = bbox.dim ?? '';
+        const md = bbox.maintain_dimensions ?? '';
+        const clip = bbox.clip_valid_region ?? '';
+        return `${bbox.north.toFixed(4)}_${bbox.south.toFixed(4)}_${bbox.east.toFixed(4)}_${bbox.west.toFixed(4)}_sc${sc}_${demW}x${demH}_${proj}_${ds}_d${dim}_m${md}_c${clip}`;
     },
 
     get(bbox) {
@@ -66,5 +73,27 @@ window.waterMaskCache = {
         });
         this._inflight.set(key, promise);
         return promise;
+    },
+
+    /**
+     * The water-mask response carries ESA land cover on the same grid, so a land-cover
+     * request for the same box, size and projection can reuse it instead of a second
+     * Earth Engine call (F-SPEED #10). `params` is the water key without `dataset`;
+     * either dataset's response will do, since both carry the same ESA image.
+     */
+    findEsa(params) {
+        for (const dataset of ['esa', 'jrc']) {
+            const data = this.get({ ...params, dataset });
+            if (data?.esa_values_b64 && data.esa_dimensions) {
+                return {
+                    esa_values_b64: data.esa_values_b64,
+                    esa_dtype: data.esa_dtype,
+                    esa_dimensions: data.esa_dimensions,
+                    resolution_m: data.resolution_m,
+                    from_water_mask: true,
+                };
+            }
+        }
+        return null;
     },
 };

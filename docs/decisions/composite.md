@@ -5,6 +5,51 @@ rationale: [composite-dem-design.md](../reference/composite-dem-design.md). Rela
 [osm-water-hydrology.md](osm-water-hydrology.md) (rivers and lakes as composite sources),
 [frontend.md](frontend.md).
 
+### 2026-10-14 — The DEM route uses the shared grid, and its cap is a cell budget
+- **Decision:** `GET /api/terrain/dem` takes an OpenTopography grid from `shared_base_grid`
+  (`geo2stl/dem.py::fetch_dem(shared_dim=dim)`) and reads ESA water at the shared grid's scale for
+  every projection. The shared grid is capped at (2 x dim)² cells and 3 x dim on its longest side
+  (`geo2stl/projections.py::shared_source_dim`) instead of 2 x dim on its longest side. Big boxes
+  (>= 500,000 km²) start the carve worker pool before the reaches are read
+  (`geo2stl/water_layers.py::start_carve_pool`). No cache version bumped: a carve for a given key
+  is unchanged bit for bit; Norway's new shared shape is a new key.
+- **Why:** the DEM route decoded the GeoTIFF per projection (Colorado 4-5.7 s, Norway 4.3 s per
+  switch) and a finer per-projection ESA scale cost Norway an Earth Engine download (7 s).
+  Norway's Mercator grid (596 x 1438, 0.86M cells) passed the old side cap, so three projections
+  carved on their own (11-15 s). Norway cosine/equidistant pooled from the shared carve: 99.7 % of
+  old river pixels within 1 px on the source grid (97.7 % after the categorical projection);
+  Mercator identical.
+- **Rejected:** a fast per-projection first answer with the shared carve in the background
+  (option 3): not needed once the cold carve fit in ~8 s, and it doubles the work; raising the
+  side factor to 2.5 (Norway-specific; a cell budget bounds any box).
+- **Supersedes / superseded by:** amends the shared-grid entry below (its 2 x dim cap).
+- **Source:** issues.md "Edit map: changing the projection changed nothing visible"; tests in
+  `tests/test_shared_grid_carve.py`, `tests/test_water_mask_sea.py`.
+
+### 2026-10-14 — The base DEM and the river carve are computed once per box on a shared grid, not per projection
+- **Decision:** the composite and the rivers preview read a built-in base DEM once onto
+  `geo2stl/projections.py::shared_source_shape` (the largest projection's source grid, capped at
+  2 x dim; `geo2stl/dem.py::shared_base_grid`, memory LRU of 4, disk for OpenTopography, single
+  flight). Rivers are carved once on that grid and each projection pools the per-order stack down
+  to its own source grid by an exact partition max (`geo2stl/water_layers.py::pool_river_stack`;
+  `pool_deepest` for the composite's relative grid). `COMPOSITE_CACHE_VERSION` 9, rivers preview
+  print key v3; `RIVER_CARVE_VERSION` unchanged (a carve for a given key is unchanged).
+- **Why:** the source grid depends on the projection, so each switch changed the carve key
+  (shape and DEM hash) and re-ran everything. Europa at 600 px: composite 12.9 s and hydrology
+  14.4 s per switch (river_carve 9.9 s, DEM GeoTIFF decode 3.6 s per request). Now a new
+  projection with warm region caches: hydrology 0.14-0.26 s, composite 0.8-1.05 s. Against the
+  old per-projection carve, 99.4-99.9 % of river pixels lie within 1 px (cosine, sinusoidal,
+  none, lambert); Mercator, whose grid is the shared grid, is identical. The exact IoU is
+  0.40-0.55 because channels sit one pixel apart, not because they are lost.
+- **Rejected:** carve per projection with an LRU and single flight only (still ~10 s for each
+  new projection); `resize_relative`'s ceil-window minimum filter for the pooling (a factor just
+  above 1 becomes a 2-cell window and doubles river width); nearest resampling (drops 1-px
+  rivers); reprojecting the river vectors per projection (still a snap and burn per projection,
+  ~8 s).
+- **Supersedes / superseded by:** —
+- **Source:** issues.md "Edit map: changing the projection changed nothing visible"; tests in
+  `tests/test_shared_grid_carve.py`.
+
 ### 2026-09-06 — Both engines keep compositing and the export falls back to the browser's values
 - **Decision:** the browser keeps the live preview; the server composites at Apply and Export. An
   export uses the server spec only when every enabled channel has a server source; otherwise it

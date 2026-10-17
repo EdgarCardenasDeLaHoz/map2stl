@@ -2,6 +2,31 @@
 
 DEM sources, the DEM cache key, availability, and how empty or uncovered DEMs are reported. Related: [projections-raster.md](projections-raster.md), [mesh-pipeline.md](mesh-pipeline.md).
 
+### 2026-10-13 — Every DEM source subtracts water, and water subtraction is on by default
+- **Decision:** depth scaling and water subtraction have one definition,
+  `geo2stl/dem.py::apply_water_and_depth`, and `geo2stl/dem.py::fetch_dem` runs it on the grid
+  of every source (local tiles, `h5_local`, every OpenTopography dataset), not only `local`.
+  The water mask comes from `geo2stl/dem.py::water_fraction_for_dem`: ESA WorldCover (class 80
+  plus class 0) through `geo2stl/sat2stl.py::fetch_bbox_image` (disk cache first, then Earth
+  Engine, at no finer than Earth Engine's floor for the box, `geo2stl/dem.py::_ee_scale_floor`);
+  without it, the sea in the DEM itself (cells at or below 0 m connected to the edge,
+  `geo2stl/water_layers.py::ocean_mask`). When the mask is partial or missing the DEM response
+  carries a `source_note` (`WATER_NOTE_SEA_ONLY` / `WATER_NOTE_NONE`) and is not cached, so it
+  is redone once Earth Engine is set up. `fetch_local_dem` defaults to `subtract_water=True` and
+  the "mountain" preset sets `subtractWater: true`. The composite base layer
+  (`fetch_layer_data("local")`) stays raw elevation, and the composite water carve stays off.
+- **Why:** user, 2026-10-13, on Europa with SRTMGL1 and `subtract_water=true`: "I don't see that
+  the water is subtracted in the extrusion", and "that should be enabled by default". The
+  OpenTopography and h5 paths returned the raw grid, so `subtract_water`, `water_scale` and
+  `depth_scale` did nothing on them. Measured offline on Europa (cached SRTM15Plus GeoTIFF,
+  902 x 578 raw grid, no Earth Engine on this machine): 0 cells lowered before, 195,335 of
+  521,356 (37.5 %, the sea) after, by 358 m (5 % of the relief).
+- **Rejected:** stitching the local GEBCO store as a water source for OpenTopography boxes:
+  15″ and a continental stitch, too heavy for a fallback. Turning on the composite water carve:
+  a separate feature the user did not ask for.
+- **Supersedes / superseded by:** —
+- **Source:** tests `tests/test_dem_water_subtraction.py`.
+
 ### 2026-10-05 — Cosine is the default projection; the satellite image arrives on the DEM's grid
 - **Decision:** a region without a saved projection opens with cosine
   (`app/server/routers/settings.py::_default_region_settings`); regions that saved "none" keep
@@ -54,7 +79,7 @@ DEM sources, the DEM cache key, availability, and how empty or uncovered DEMs ar
 - **Decision:** `/api/terrain/dem` reports `source_dimensions` (grid size before projection). Any layer that must line up with the DEM rasterizes at that size and lets the server project exactly once. The projected size is an output, never an input.
 - **Why:** passing the already-projected width to the city raster applied the cosine factor twice (600 → 463 → 357 at Breckenridge): narrower and sheared.
 - **Also:** the composite accumulator refuses a channel whose shape differs instead of reading past it (`+= weight * undefined` had turned the rest of the array into NaN).
-- **Supersedes / superseded by:** —
+- **Supersedes / superseded by:** refined by [projections-raster.md, 2026-10-13 — Longest side after projection](projections-raster.md): the sampling size is now derived from `dim` so the projected grid's longest side is `dim`.
 - **Source:** decisions.md 2026-08-27 entry.
 
 ### 2026-08-27 — A source is available only if it has data, and an empty DEM is never cached

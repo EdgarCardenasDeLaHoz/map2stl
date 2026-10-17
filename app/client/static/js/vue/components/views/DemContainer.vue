@@ -33,8 +33,15 @@
                 <canvas class="layer-canvas hidden" id="layerTrailsCanvas"></canvas>
                 <!-- Single display canvas — shows the active view mode -->
                 <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
+                <!-- Layers ordered above the buildings (.osm-overlay, z-index 10) draw here -->
+                <canvas class="layer-canvas layer-top-overlay" id="stackViewCanvasTop" aria-hidden="true"></canvas>
                 <!-- Grid overlay — always on top, exempt from zoom transform -->
                 <canvas class="layer-canvas layer-grid-overlay" id="layerGridCanvas"></canvas>
+                <!-- Projection preview: shown while a new projection's layers load
+                     (modules/events/event-listeners-map.js, modules/dem/projection-preview.js) -->
+                <div id="projectionPreviewStatus" class="map-status-pill hidden" role="status" aria-live="polite">
+                  <span class="map-status-spin" aria-hidden="true"></span>Preview · loading layers…
+                </div>
               </div>
               <div class="layers-x-axis" id="layersXAxis"></div>
             </div>

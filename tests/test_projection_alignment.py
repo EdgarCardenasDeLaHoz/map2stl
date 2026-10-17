@@ -253,6 +253,17 @@ class TestB64RoundTrip:
         result = s._decode_grid_response(data, "vals_b64", "vals", 2, 2)
         np.testing.assert_array_equal(result, arr)
 
+    def test_uint8_round_trip_keeps_nan(self):
+        """b64_encode_u8 -> session decode keeps classes and NaN."""
+        from app.server.core.validation import b64_encode_u8
+        from app.session.terrain_session import TerrainSession
+        arr = np.array([[0.0, 1.0], [80.0, np.nan]], dtype=np.float32)
+        data = {"esa_values_b64": b64_encode_u8(arr), "esa_dtype": "uint8"}
+        s = TerrainSession.__new__(TerrainSession)
+        out = s._decode_grid_response(data, "esa_values_b64", "esa_values", 2, 2)
+        assert out.dtype == np.float32
+        np.testing.assert_array_equal(out, arr)  # NaN == NaN for assert_array_equal
+
     def test_decode_grid_response_falls_back_to_list(self):
         """_decode_grid_response falls back to plain list when b64 key missing."""
         from app.session.terrain_session import TerrainSession
@@ -280,8 +291,9 @@ class TestEndpointB64Keys:
         r = client.get(f"/api/terrain/water-mask?{self._QS}&sat_scale=100")
         data = r.json()
         h, w = data["water_mask_dimensions"]
+        assert data["water_mask_dtype"] == "uint8"
         raw = base64.b64decode(data["water_mask_values_b64"])
-        arr = np.frombuffer(raw, dtype=np.float32)
+        arr = np.frombuffer(raw, dtype=np.uint8)
         assert arr.shape[0] == h * w
 
     def test_hydrology_b64_decodable(self, client):

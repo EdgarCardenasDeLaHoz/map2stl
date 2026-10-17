@@ -189,7 +189,9 @@ class TestMeshOverride:
         churches = _fc({"geometry": CATHEDRAL["geometry"], "properties": {"height_m": 40}})
         model = _build(_fc(CATHEDRAL), self._override(), layers={"churches": churches})
         assert "churches" not in model.parts
-        assert model.report["layers"]["churches"]["landmark_replaced"] == 1
+        # The copy goes before the override sees it: city_model.drop_building_copies
+        # drops church outlines the buildings layer already has.
+        assert model.report["layers"]["churches"]["building_copies_dropped"] == 1
 
     def test_unknown_id_is_reported(self):
         model = _build(_fc(TALL), self._override())
@@ -281,3 +283,76 @@ def test_build_city_model_passes_overrides():
     model = build_city_model(np.full((150, 150), 500.0), BBOX, {"buildings": _fc(CATHEDRAL)},
                              z_mode="true", landmark_overrides=ov)
     assert model.report["landmarks"]["way/1"]["status"] == "applied"
+
+
+class TestHeightOverride:
+    """kind "height": OSM geometry with its top moved to a known height (scale_heights)."""
+
+    @staticmethod
+    def _ov(oid, h, **spec):
+        return {oid: {"kind": "height", "height_m": h, **spec}}
+
+    def test_scales_outline_and_parts(self):
+        # Tallest member is the 57 m pyramidal tower: x1.5 puts its apex at 85.5 m.
+        model = _build(BUILDINGS, self._ov("way/1", 85.5, source="survey"))
+        rep = model.report["landmarks"]["way/1"]
+        assert rep == {"kind": "height", "source": "survey", "status": "applied", "height_m": 85.5,
+                       "osm_height_m": 57.0, "scaled_features": 3}
+        assert model.report["merged"]["watertight"]
+        # Every height x1.5, so the built top (whatever the roof code makes of the
+        # pyramid) rises x1.5 above the ground too.
+        osm = _build(BUILDINGS, None)
+        top = lambda m: m.parts["buildings"].bounds[1, 2] - 3.0   # noqa: E731
+        assert top(model) == pytest.approx(1.5 * top(osm), rel=0.01)
+
+    def test_lowers_a_building(self):
+        feats = _fc(CATHEDRAL, TOWER, NAVE)
+        model, osm = _build(feats, self._ov("way/1", 19.0)), _build(feats, None)
+        top = lambda m: m.parts["buildings"].bounds[1, 2] - 3.0   # noqa: E731
+        assert top(model) == pytest.approx(top(osm) / 3.0, rel=0.01)
+
+    def test_flat_building_without_parts(self):
+        model = _build(_fc(TALL, SHORT), self._ov("way/5", 45.0))
+        assert model.report["landmarks"]["way/5"]["scaled_features"] == 1
+        zpm = model.scale.z_mm_per_m
+        assert model.parts["buildings"].bounds[1, 2] == pytest.approx(3.0 + 45.0 * zpm, abs=0.05)
+
+    def test_towers_layer_copy_does_not_show_through(self):
+        # The towers layer has no osm_id; its 100 m copy of the outline must not
+        # stand above the overridden 60 m building.
+        towers = _fc({"geometry": TALL["geometry"], "properties": {"height_m": 100.0}})
+        model = _build(_fc(TALL), self._ov("way/5", 60.0), layers={"towers": towers})
+        zpm = model.scale.z_mm_per_m
+        assert model.merged.bounds[1, 2] == pytest.approx(3.0 + 60.0 * zpm, abs=0.05)
+
+    def test_unknown_id_is_reported(self):
+        model = _build(_fc(TALL), self._ov("way/1", 30.0))
+        assert model.report["landmarks"]["way/1"]["status"] == "missing"
+
+    def test_scale_heights_scales_base_and_roof(self):
+        got = lm.scale_heights({"height_m": 20.0, "building:min_level": 2, "roof:height": "4 m",
+                                "roof:shape": "gabled"}, 2.0)
+        from city2stl.heights import METRES_PER_LEVEL
+        assert got["height_m"] == 40.0 and got["roof:height"] == 8.0
+        assert got["min_height"] == pytest.approx(2 * METRES_PER_LEVEL * 2.0)
+        assert "building:min_level" not in got and got["height_source"] == "landmark"
+        assert lm.scale_heights({}, 3.0)["height_m"] == lm.DEFAULT_HEIGHT_M * 3.0
+
+    def test_resolve_validates(self):
+        feats = BUILDINGS["features"]
+        got = lm.resolve_overrides({"way/1": {"kind": "height", "height_m": "45", "source": "x"}}, feats)
+        assert got["way/1"].height_m == 45.0 and got["way/1"].source == "x"
+        assert got["way/1"].spec["height_m"] == 45.0
+        for bad in (None, 0, -2, 1000, float("nan"), "tall"):
+            with pytest.raises(lm.LandmarkError, match="way/1.*height_m"):
+                lm.resolve_overrides({"way/1": {"kind": "height", "height_m": bad}}, feats)
+        # A height override needs no data of its own: an id the city data lacks
+        # is reported as missing at build time, not a failed build.
+        got = lm.resolve_overrides({"way/99": {"kind": "height", "height_m": 30}}, feats)
+        assert got["way/99"].height_m == 30.0
+
+    def test_coerce(self):
+        got = lm.coerce_overrides({"way/1": {"kind": "height", "height_m": 30}})
+        assert got["way/1"].kind == "height" and got["way/1"].height_m == 30.0
+        with pytest.raises(lm.LandmarkError):
+            lm.coerce_overrides({"way/1": {"kind": "height", "height_m": 5000}})

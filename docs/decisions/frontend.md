@@ -3,6 +3,102 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-14 — Every Edit-map grid starts on, and a true lat/lon grid shows the projection's distortion
+- **Decision:** the Edit map has three grids, all on by default (server
+  `app/server/routers/settings.py::get_default_settings` `view.pixel_grid_show`,
+  `view.real_grid_show`; page markup; Explore's grid in `map-globe.js` too). A region saved
+  with a grid off keeps it off (`app/client/static/js/modules/ui/presets.js`, `?? true` only when
+  the key is missing). The new true grid (`#showRealGrid`, amber) draws real meridians and
+  parallels through the region's projection
+  (`app/client/static/js/modules/dem/graticule.js::graticuleLines`, mirroring
+  `geo2stl/projections.py`), labelled on the map, about eight lines across what is on screen.
+  The straight grid is now laid on the height map's letterbox (`appState.demLayout`) with
+  parallels at the projection's true rows, and the Explore overlay shares the same mapping
+  (`dem-gridlines.js::drawGridlinesOverlay` via `projectedFrac`, which adds sinusoidal's
+  widest-row scale and the maintain-dimensions case it lacked).
+- **Why:** the user: "Add a grid option that maps the real grid to show the distortion in the
+  projection, have all grids be default on". The straight grid spanned the whole canvas, so its
+  labels missed the terrain. Mockup `Code/claude/mockups/2026-10-14-true-grid/grid.png`.
+- **Rejected:** bending the straight grid itself (it is the reference the distortion is read
+  against); a fixed degree step (Europa needs 10°, a city block 0.005°). Note: with Cosine and a
+  true-shape canvas (the default) the true grid lands on the straight one, since that projection
+  is an even resize; the bending shows in Sinusoidal, Cosine/Equidistant with fixed dimensions,
+  and as uneven parallel spacing in Mercator-family projections.
+- **Supersedes / superseded by:** —
+
+### 2026-10-14 — The Edit Layers rail owns layer visibility, opacity and order
+- **Decision:** every row of `app/client/static/js/vue/components/dem/EditLayersPanel.vue` has a
+  switch (Terrain included; Canvas none), the selected row shows a compact opacity slider, rows
+  drag or move with Alt+Up/Down, and the top of the list is drawn on top (a top canvas
+  `#stackViewCanvasTop` in `DemContainer.vue` keeps above-terrain layers visible). Terrain off
+  hides it in 2D only, never in print. Layers without a row ride with a host row
+  (`app/client/static/js/modules/layers/layer-stack-state.js::COMPANIONS`). Order, opacity and
+  visibility are saved per region as `view.layers`
+  (`app/client/static/js/modules/layers/stacked-layers.js::getLayerStackState`,
+  `applyLayerStackState`). The panels' duplicate "Layer order" and opacity controls are gone.
+- **Why:** user request (2026-10-14): one place for what shows and in which order, beginner
+  first. Mockup `Code/claude/mockups/2026-10-14-layers-rail/rail.png`.
+- **Rejected:** keeping the rack in the settings panel as well (two sources of the same state);
+  opacity on every row (crowds the rail); a global, not per-region, order.
+- **Supersedes / superseded by:** —
+
+### 2026-10-13 — mm/px is saved per region and starts at 1; an oversize model is split, not shrunk
+- **Decision:** `mmPerPixel` is part of each region's saved settings
+  (`app/client/static/js/modules/ui/presets.js::collectAllSettings`, `export.mm_per_pixel`,
+  default 1.0; a region saved without it loads at 1.0). A new DEM keeps that value; when the
+  model is then bigger than the bed, `ModelContainer.vue` turns Split on with the bed's grid.
+  Fill bed shrinks the model only when pressed; Reset puts mm/px back to 1.
+- **Why:** the user: a 600 px region "SHOULD be set to 1 px per mm so the outsize should be
+  600mm". The old load-time fill-bed shrank San Francisco to ~0.35 mm/px. Form answers on
+  2026-10-13: "Keep 1 mm/px, auto-split" and "Yes, save per region".
+- **Rejected:** fill the bed on every DEM load (old behaviour, guidelines §1.10 reading); warn
+  only and leave Split to the user.
+- **Supersedes / superseded by:** —
+
+### 2026-10-13 — Extrude defaults are the server's; view modes cover every part
+- **Decision:** markup, JS fallbacks and Reset buttons use the server's defaults
+  (`app/server/core/export_params.py`): base 5 mm, 1.0 mm/px, model height 20 mm, puzzle grid
+  3 × 3, city piece 200 mm. Auto-rotate orbits the camera (`model-viewer.js::_orbitBy`) instead of
+  turning the terrain mesh. Wireframe and Normals apply to every displayed mesh
+  (`_applyViewMode`). City layer edits refresh the quick view at once and rebuild the finished
+  model after a 1.5 s debounce (`refreshCityLayers`).
+- **Why:** the audit found three different values for four controls, and view modes that missed
+  the finished model's parts. User choices on 2026-10-13: "Server values", "Orbit the camera",
+  "Auto, debounced".
+- **Rejected:** OrbitControls.autoRotate: the page loads three.js core only, so the viewer's
+  own orbit code turns the camera; turning meshes, because parts, cut lines and the bed outline
+  would drift apart.
+- **Supersedes / superseded by:** —
+- **Source:** [Extrude audit](../history/audits/AUDIT-2026-10-13-extrude.md)
+
+### 2026-10-13 — The 3D view keeps the model's triangle winding; parts are flat-shaded
+- **Decision:** `city-fullmodel.js::toViewerFrame` maps model mm to the viewer frame without
+  touching the triangle order, and the finished model's parts use `flatShading: true`
+  (`model-viewer.js::_showCityFull`).
+- **Why:** (x, y, z) → (x, z, N − y) is a rotation (determinant +1), not a mirror. The old index
+  swap turned every part inside out: on Granada every part's signed volume went from positive
+  to negative (buildings +31,242 → −31,242), and front-face culling drew each solid's inner
+  faces, so buildings read as outlines without roofs. Flat shading because the parts are welded
+  solids: averaged normals smeared roof/wall corners into torn-looking shards.
+- **Rejected:** `side: THREE.DoubleSide` — hides wrong winding instead of fixing it, and lights
+  the inner faces.
+- **Supersedes / superseded by:** —
+- **Source:** [AUDIT-2026-10-13-extrude](../history/audits/AUDIT-2026-10-13-extrude.md).
+
+### 2026-10-13 — The 3D view draws the model's own terrain part, in muted colours
+- **Decision:** once the finished City Model is shown, the preview terrain is hidden and the
+  model's `terrain` part is drawn instead, coloured by height with the chosen colormap
+  (`model-viewer.js::_heightColors`). Part colours are muted (`city-fullmodel.js::PART_COLORS`;
+  terrain desaturated by `TERRAIN_DESAT`, dimmed by `TERRAIN_DIM`). The grid size and bed line
+  live in the viewer HUD (`_renderHud`), not as labels over the model.
+- **Why:** every layer's walls start below the ground (`city2stl/city_model.py::build_layer`),
+  and the preview terrain is not cut by them, so buried wall showed and the two terrains
+  z-fought. Saturated colours read as neon under lighting and hid the buildings (user picked
+  "Calmer colours" and "Move grid label to HUD").
+- **Rejected:** keeping the preview terrain and trimming walls in the client — the export would
+  no longer be what the viewer shows.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-05 — Canvas is the first row of the Layers list; Style and the terrain weight are gone
 - **Decision:** Canvas (the whole map and print) is a fixed row at the top of the Layers list
   with the same View / Fetch / Composite tabs (`stores/editLayers.ts::EDIT_LAYERS`,

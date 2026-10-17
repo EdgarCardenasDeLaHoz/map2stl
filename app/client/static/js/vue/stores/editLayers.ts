@@ -140,7 +140,13 @@ w().isEditLayerWanted = isEditLayerWanted;
 
 /** Show or hide a layer's preview on the canvas (loads it the first time). */
 export function setPreviewVisible(stack: string, on: boolean): void {
+  if (w().setLayerVisible) { w().setLayerVisible(stack, on); return; }
   const active = w().getActiveLayers?.() as Set<string> | undefined;
   if (!active) return;
   if (active.has(stack) !== on) w().setStackMode?.(stack);
+}
+
+/** Whether a layer's preview is on the map now. */
+export function isPreviewVisible(stack: string): boolean {
+  return !!(w().getActiveLayers?.() as Set<string> | undefined)?.has(stack);
 }

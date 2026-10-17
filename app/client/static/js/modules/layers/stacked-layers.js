@@ -12,7 +12,18 @@
  * Internal state kept in module scope (not on appState):
  *   stackZoom           — current zoom/pan transform {scale, offsetX, offsetY}
  *   stackZoomInitialized — guard against double event-listener attachment
+ *
+ * Layer order, opacity and visibility are owned by the Edit page's Layers rail
+ * (vue/components/dem/EditLayersPanel.vue) and saved per region as settings.view.layers
+ * (modules/ui/presets.js). The pure rules live in layer-stack-state.js.
  */
+import {
+    DEFAULT_LAYER_OPACITY, DEFAULT_LAYER_ORDER, groupOf, parseLayerState, serializeLayerState,
+} from './layer-stack-state.js';
+import { frameAspect, graticuleLines, niceDegreeStep, projectedFrac } from '../dem/graticule.js';
+import {
+    projectionPreviewFrame, projectionPreviewSource, settleProjectionPreview,
+} from '../dem/projection-preview.js';
 
 let stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
 let stackZoomInitialized = false;
@@ -47,9 +58,9 @@ window.setGridPixelMode = function setGridPixelMode(on) {
 };
 
 // All layer canvas IDs — render order (first = bottom, last = top).
-// Mutable so users can reorder via the UI.
+// Reordered in place by setLayerOrder (the Layers rail), so LAYER_STACK stays the same array.
 // NOTE: Water and Hydrology are combined into WaterHydrology for unified rendering
-let _layerOrder = ['Dem', 'WaterHydrology', 'Sat', 'SatImg', 'CityRaster', 'CityOverlay', 'Trails', 'MeshImport', 'CompositeDem', 'Borders'];
+const _layerOrder = [...DEFAULT_LAYER_ORDER];
 const LAYER_STACK = _layerOrder;  // alias kept for backward compat
 
 /**
@@ -75,7 +86,9 @@ const LAYER_CANVAS_IDS = {
  *
  * `ready()` reports whether the layer already holds something to draw, so
  * activating it costs a request only the first time; every loader here also
- * de-duplicates its own in-flight calls. Two layers are deliberately absent:
+ * de-duplicates its own in-flight calls. A layer whose fetch came back empty (no rivers, no
+ * trails in the box) counts as ready too: its status is 'loaded' with no canvas, and the
+ * projection switch (event-listeners-map.js) has usually fetched it already when the DEM lands. Two layers are deliberately absent:
  * `MeshImport` comes from a file the user uploads, and `CompositeDem` is built
  * from layers that are already loaded rather than fetched.
  */
@@ -85,7 +98,8 @@ const LAYER_AUTOLOAD = {
         load: () => window.loadDEM?.(),
     },
     WaterHydrology: {
-        ready: () => !!window.appState?.waterHydrologyCanvas,
+        ready: () => !!window.appState?.waterHydrologyCanvas
+            || window.appState?.layerStatus?.waterHydrology === 'loaded',
         load: () => window.loadWaterHydrology?.(),
     },
     Sat: {
@@ -109,7 +123,8 @@ const LAYER_AUTOLOAD = {
         load: () => window.loadBorders?.({ activate: false }),
     },
     Trails: {
-        ready: () => !!window.appState?.lastTrailsData,
+        ready: () => !!window.appState?.lastTrailsData
+            || window.appState?.layerStatus?.trails === 'loaded',
         // Already switched on by setStackMode, so it must not click itself again.
         load: () => window.loadTrails?.({ activate: false }),
     },
@@ -188,10 +203,12 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
     for (const mode of LAYER_STACK) {
         _freeLayerBuffer(mode);
     }
-    const display = document.getElementById('stackViewCanvas');
-    if (display && (display.width > 0 || display.height > 0)) {
-        const ctx = display.getContext('2d');
-        ctx.clearRect(0, 0, display.width, display.height);
+    for (const id of ['stackViewCanvas', 'stackViewCanvasTop']) {
+        const display = document.getElementById(id);
+        if (display && (display.width > 0 || display.height > 0)) {
+            const ctx = display.getContext('2d');
+            ctx.clearRect(0, 0, display.width, display.height);
+        }
     }
     // Reset zoom/pan so the new region starts at default view
     stackZoom = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -203,7 +220,7 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
 let _activeLayers = new Set(['Dem', 'CityOverlay']);
-let _layerOpacities = { Dem: 1, WaterHydrology: 0.75, Sat: 0.7, SatImg: 0.8, CityRaster: 0.7, CityOverlay: 0.85, Trails: 0.9, MeshImport: 0.8, CompositeDem: 1, Borders: 0.9 };
+let _layerOpacities = { ...DEFAULT_LAYER_OPACITY };
 
 // ─── Composite | Satellite split view ───────────────────────────────────────
 // A dual-pane alternative to the opacity-blended stack: draws the Composite
@@ -284,8 +301,15 @@ window.setStackMode = function setStackMode(mode) {
         if (entry && !entry.ready()) autoload = entry.load;
     }
 
-    // Update button active states
-    if (!_layerModeBtns) _layerModeBtns = document.querySelectorAll('#layerModeSelector .layer-mode-btn');
+    _afterVisibilityChange(mode, autoload);
+};
+
+/** Refresh the mode buttons, the rail and the map after a layer was shown or hidden. */
+function _afterVisibilityChange(mode, autoload) {
+    // The strip is a Vue v-for that can re-render, so query it again when it is stale.
+    if (!_layerModeBtns || !_layerModeBtns[0]?.isConnected) {
+        _layerModeBtns = document.querySelectorAll('#layerModeSelector .layer-mode-btn');
+    }
     _layerModeBtns.forEach(btn => {
         btn.classList.toggle('active', _activeLayers.has(btn.dataset.mode));
     });
@@ -301,12 +325,78 @@ window.setStackMode = function setStackMode(mode) {
             .then(() => window.updateStackedLayers?.())
             .catch(err => console.warn(`Auto-load failed for ${mode}:`, err));
     }
+}
+
+/**
+ * Show or hide one layer on the map (the Layers rail's switches). Unlike setStackMode it
+ * may hide the last layer: Terrain off leaves the map's background, never the print.
+ * @param {string} mode  layer key
+ * @param {boolean} on
+ * @param {{autoload?: boolean}} [opts]  autoload false: do not fetch a layer that has no data
+ *   (applying saved settings; _loadEmptyActiveLayers fetches it once the DEM arrives)
+ */
+window.setLayerVisible = function setLayerVisible(mode, on, opts = {}) {
+    if (!LAYER_STACK.includes(mode) || _activeLayers.has(mode) === !!on) return;
+    let autoload = null;
+    if (on) {
+        _activeLayers.add(mode);
+        const entry = LAYER_AUTOLOAD[mode];
+        if (opts.autoload !== false && entry && !entry.ready()) autoload = entry.load;
+    } else {
+        _activeLayers.delete(mode);
+        _freeLayerBuffer(mode);
+    }
+    _afterVisibilityChange(mode, autoload);
 };
 
-/** Set per-layer opacity (0–1) and refresh. */
+/**
+ * Set a layer's opacity on the map (0–1) and refresh. A rail row's companions
+ * (layer-stack-state.js COMPANIONS: the combined height map with Terrain, the city
+ * raster with Buildings & roads) take the same value.
+ */
 window.setLayerOpacity = function setLayerOpacity(mode, value) {
-    _layerOpacities[mode] = Math.max(0, Math.min(1, value));
+    const v = Math.max(0, Math.min(1, Number(value)));
+    if (!Number.isFinite(v)) return;
+    for (const k of groupOf(mode)) _layerOpacities[k] = v;
     if (mode === 'CityOverlay') _syncCityOverlayLayerState();
+    window.updateStackedLayers?.();
+};
+
+/** Return a copy of every layer's opacity on the map (0–1). */
+window.getLayerOpacities = function getLayerOpacities() {
+    return { ..._layerOpacities };
+};
+
+/**
+ * Replace the draw order (bottom → top). Unknown keys are ignored and missing ones keep
+ * their default slot, so a stale saved order cannot drop a layer.
+ */
+window.setLayerOrder = function setLayerOrder(order) {
+    const parsed = parseLayerState({ order })?.order;
+    if (!parsed || parsed.join() === _layerOrder.join()) return;
+    _layerOrder.splice(0, _layerOrder.length, ...parsed);
+    _notifyLayerStackChanged();
+    window.updateStackedLayers?.();
+};
+
+/** The rail's state for the region's settings: {order, opacity, visible}. */
+window.getLayerStackState = function getLayerStackState() {
+    return serializeLayerState(_layerOrder, _layerOpacities, _activeLayers);
+};
+
+/**
+ * Apply saved rail state (settings.view.layers). null puts the defaults back, so a region
+ * saved before 2026-10-14 does not inherit the previous region's order.
+ */
+window.applyLayerStackState = function applyLayerStackState(saved) {
+    const st = parseLayerState(saved) || { order: null, opacity: {}, visible: {} };
+    _layerOrder.splice(0, _layerOrder.length, ...(st.order || DEFAULT_LAYER_ORDER));
+    _layerOpacities = { ...DEFAULT_LAYER_OPACITY, ...st.opacity };
+    const quiet = { autoload: false };
+    for (const [k, on] of Object.entries(st.visible)) window.setLayerVisible(k, on, quiet);
+    if (!('Dem' in st.visible)) window.setLayerVisible('Dem', true, quiet);
+    _notifyLayerStackChanged();
+    _syncCityOverlayLayerState();
     window.updateStackedLayers?.();
 };
 
@@ -322,40 +412,12 @@ window.getActiveLayers = function getActiveLayers() {
 
 /**
  * Tell the UI that the render order or the active set has changed.
- *
- * The layer rack in LayerViewSection.vue rebuilds itself from getLayerOrder()
- * and getActiveLayers() on this event. It replaced a rack this module used to
- * render into a hidden div, which is why reordering worked in the engine but
- * could not be reached from the UI.
+ * The Layers rail (EditLayersPanel.vue) and the hidden mode strip (LayerViewSection.vue)
+ * re-read getLayerOrder() and getActiveLayers() on this event.
  */
 function _notifyLayerStackChanged() {
     window.dispatchEvent(new CustomEvent('layer-stack-changed'));
 }
-
-/**
- * Move a layer up or down in the render order.
- * Performs adjacent swaps until the layer passes the next active (visible) layer,
- * so reorder arrows feel intuitive among the visible subset.
- * @param {string} mode  — layer key (e.g. 'Hydrology')
- * @param {number} delta — direction: -1 = move toward bottom, +1 = move toward top
- */
-window.moveLayer = function moveLayer(mode, delta) {
-    let idx = _layerOrder.indexOf(mode);
-    if (idx < 0) return;
-    let swapped = false;
-    // Keep swapping in direction until we've passed at least one active layer
-    while (true) {
-        const next = idx + delta;
-        if (next < 0 || next >= _layerOrder.length) break;
-        const neighbor = _layerOrder[next];
-        [_layerOrder[idx], _layerOrder[next]] = [_layerOrder[next], _layerOrder[idx]];
-        idx = next;
-        if (_activeLayers.has(neighbor)) { swapped = true; break; }
-    }
-    if (!swapped) return;  // couldn't move past any active layer
-    _notifyLayerStackChanged();
-    window.updateStackedLayers?.();
-};
 
 function _syncCityOverlayLayerState() {
     const overlay = document.querySelector('#layersStack .osm-overlay');
@@ -372,8 +434,10 @@ function _syncCityOverlayLayerState() {
 
 /** Apply a CSS transform string to the display canvas and OSM overlay. */
 function _applyTransformCSS(xfm) {
-    const displayCanvas = document.getElementById('stackViewCanvas');
-    if (displayCanvas) { displayCanvas.style.transformOrigin = '0 0'; displayCanvas.style.transform = xfm; }
+    for (const id of ['stackViewCanvas', 'stackViewCanvasTop']) {
+        const displayCanvas = document.getElementById(id);
+        if (displayCanvas) { displayCanvas.style.transformOrigin = '0 0'; displayCanvas.style.transform = xfm; }
+    }
     const osmOverlay = document.querySelector('#layersStack .osm-overlay');
     if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
     if (window.appState) window.appState.stackZoom = stackZoom;
@@ -466,10 +530,33 @@ function formatCoord(val, isLat, interval) {
  * aspect ratio derived from the current DEM bbox.
  * Calls applyStackedTransform, drawLayerGrid, and renderCityOverlay.
  */
-window.updateStackedLayers = function updateStackedLayers() {
-    const demCanvas = document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`);
-    const satCanvas = document.querySelector('#satelliteImage canvas');
+/** The real rendered source canvas of each layer mode (null when that layer is not loaded). */
+const LAYER_SOURCES = {
+    Dem: () => document.querySelector(`#demImage ${window.DEM_CANVAS_SELECTOR}`),
+    WaterHydrology: () => window.appState?.waterHydrologyCanvas || null,
+    Sat: () => document.querySelector('#satelliteImage canvas'),
+    SatImg: () => window.appState?.satImgSourceCanvas || null,
+    CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
+    Trails: () => window.appState?.trailsSourceCanvas || null,
+    Borders: () => window.appState?.bordersSourceCanvas || null,
+    MeshImport: () => window.appState?.meshSourceCanvas || null,
+    CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
+};
 
+/**
+ * The real source canvas of every active layer, by mode (the projection preview snapshots
+ * these; modules/dem/projection-preview.js).
+ * @returns {Object<string, HTMLCanvasElement|null>}
+ */
+window.getLayerSourceCanvases = function getLayerSourceCanvases() {
+    const out = {};
+    for (const mode of LAYER_STACK) {
+        if (_activeLayers.has(mode) && LAYER_SOURCES[mode]) out[mode] = LAYER_SOURCES[mode]() || null;
+    }
+    return out;
+};
+
+window.updateStackedLayers = function updateStackedLayers() {
     const stack = document.getElementById('layersStack');
     if (!stack) return;
 
@@ -477,7 +564,12 @@ window.updateStackedLayers = function updateStackedLayers() {
     const stackWidth = stackRect.width || 600;
     const stackHeight = stackRect.height || 400;
 
-    const bbox = window.appState?.currentDemBbox ||
+    // While a projection preview stands in for the DEM, the frame takes the new projection's
+    // predicted raster shape (the reload has cleared the DEM and its box meanwhile).
+    // A released preview ends here once every layer it held has its real picture.
+    settleProjectionPreview(window.getLayerSourceCanvases());
+    const preview = projectionPreviewFrame();
+    const bbox = window.appState?.currentDemBbox || preview?.bbox ||
         (window.appState?.selectedRegion ? { ...window.appState.selectedRegion } : null);
 
     let targetWidth = stackWidth;
@@ -486,11 +578,8 @@ window.updateStackedLayers = function updateStackedLayers() {
     let targetY = 0;
 
     if (bbox) {
-        const latMid = (bbox.north + bbox.south) / 2;
-        const latCorrection = Math.cos(latMid * Math.PI / 180);
-        const bboxWidth = (bbox.east - bbox.west) * latCorrection;
-        const bboxHeight = bbox.north - bbox.south;
-        const bboxAspect = bboxWidth / bboxHeight;
+        const { projection, maintainDimensions } = window.getProjectionParams?.() || {};
+        const bboxAspect = frameAspect(bbox, preview || window.appState?.lastDemData, projection, maintainDimensions);
         const stackAspect = stackWidth / stackHeight;
 
         if (bboxAspect > stackAspect) {
@@ -509,18 +598,9 @@ window.updateStackedLayers = function updateStackedLayers() {
         window.appState.demLayout = { x: targetX, y: targetY, w: targetWidth, h: targetHeight };
     }
 
-    // Source canvas for each layer mode
-    const sourceMap = {
-        Dem: () => demCanvas,
-        WaterHydrology: () => window.appState?.waterHydrologyCanvas || null,
-        Sat: () => satCanvas,
-        SatImg: () => window.appState?.satImgSourceCanvas || null,
-        CityRaster: () => window.appState?.cityRasterSourceCanvas || null,
-        Trails: () => window.appState?.trailsSourceCanvas || null,
-        Borders: () => window.appState?.bordersSourceCanvas || null,
-        MeshImport: () => window.appState?.meshSourceCanvas || null,
-        CompositeDem: () => window.appState?.compositeDemSourceCanvas || null,
-    };
+    // Source canvas for each layer mode: the real one, or its projection preview until the
+    // real one for the newest projection has landed.
+    const sourceOf = (mode) => projectionPreviewSource(mode, LAYER_SOURCES[mode]?.() || null);
 
     // Pixel density of the stack: at least the layers' own resolution (up to 3x the
     // view). Drawing a 1000 px river grid into a 600 px canvas dropped rows and
@@ -529,7 +609,7 @@ window.updateStackedLayers = function updateStackedLayers() {
     let srcMax = 0;
     LAYER_STACK.forEach(mode => {
         if (!_activeLayers.has(mode) || mode === 'CityOverlay') return;
-        const src = sourceMap[mode]?.();
+        const src = sourceOf(mode);
         if (src?.width) srcMax = Math.max(srcMax, src.width / targetWidth, src.height / targetHeight);
     });
     const density = Math.min(3, Math.max(1, Math.ceil(srcMax), Math.ceil(window.devicePixelRatio || 1)));
@@ -565,31 +645,46 @@ window.updateStackedLayers = function updateStackedLayers() {
     LAYER_STACK.forEach(mode => {
         if (!_activeLayers.has(mode)) return;
         if (mode === 'CityOverlay') return;
-        const src = sourceMap[mode]?.();
+        const src = sourceOf(mode);
         const buffer = _getLayerBuffer(mode);
         if (src && buffer) drawLayerToTarget(buffer, src);
+        // No picture (yet): show nothing. A kept buffer holds the last picture at the last
+        // pixel density, and composited at a new density it lands in the wrong place.
+        else if (buffer?.width) { buffer.width = 0; buffer.height = 0; }
     });
 
-    // Composite all active layers onto the display canvas in render order
+    // Composite all active layers in render order. The buildings are their own canvas
+    // (.osm-overlay, above stackViewCanvas), so layers ordered above them go to
+    // stackViewCanvasTop, which sits above that overlay.
     const displayCanvas = document.getElementById('stackViewCanvas');
+    const topCanvas = document.getElementById('stackViewCanvasTop');
+    const cityIdx = _activeLayers.has('CityOverlay') ? LAYER_STACK.indexOf('CityOverlay') : LAYER_STACK.length;
     if (displayCanvas) {
         sizeCanvas(displayCanvas);
         const dCtx = displayCanvas.getContext('2d');
         dCtx.clearRect(0, 0, pxW, pxH);
+        let tCtx = null;
+        if (topCanvas) {
+            sizeCanvas(topCanvas);
+            tCtx = topCanvas.getContext('2d');
+            tCtx.clearRect(0, 0, pxW, pxH);
+        }
 
         if (_splitViewEnabled) {
             _drawSplitView(dCtx, pxW, pxH);
         } else {
             const masterOpacity = (document.getElementById('activeLayerOpacity')?.value ?? 100) / 100;
-            LAYER_STACK.forEach(mode => {
+            LAYER_STACK.forEach((mode, i) => {
                 if (!_activeLayers.has(mode)) return;
                 if (mode === 'CityOverlay') return;
                 const buffer = _getLayerBuffer(mode);
                 if (!buffer || buffer.width === 0 || buffer.height === 0) return;
-                dCtx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
-                dCtx.drawImage(buffer, 0, 0);
+                const ctx = (i > cityIdx && tCtx) ? tCtx : dCtx;
+                ctx.globalAlpha = masterOpacity * (_layerOpacities[mode] ?? 1);
+                ctx.drawImage(buffer, 0, 0);
             });
             dCtx.globalAlpha = 1;
+            if (tCtx) tCtx.globalAlpha = 1;
         }
     }
 
@@ -608,8 +703,15 @@ window.updateStackedLayers = function updateStackedLayers() {
 };
 
 /**
- * Draw a coordinate-accurate graticule on `#layerGridCanvas`.
- * Rendered in screen space (not subject to CSS zoom/pan transform).
+ * Draw the Edit map's grids on `#layerGridCanvas`, in screen space (not subject to the CSS
+ * zoom/pan transform), all mapped onto the height map's letterbox (appState.demLayout):
+ *   - pixel grid (#showPixelGrid): every N height-map pixels;
+ *   - straight grid (#showGridlines): straight lines with degree labels on the edges.
+ *     Parallels sit where the projection puts them; meridians are an even split of the
+ *     frame, which is exact unless the projection bends them;
+ *   - true grid (#showRealGrid): real meridians and parallels through the region's
+ *     projection (modules/dem/graticule.js), labelled on the map. Where it parts from the
+ *     straight grid is the projection's distortion.
  */
 window.drawLayerGrid = function drawLayerGrid() {
     const gridCanvas = document.getElementById('layerGridCanvas');
@@ -623,7 +725,11 @@ window.drawLayerGrid = function drawLayerGrid() {
     const gh = rect.height;
     if (gw === 0 || gh === 0) return;
 
-    const { currentDemBbox: bbox, lastDemData: demDataRef, demLayout: demLayoutRef } = window.appState || {};
+    // During a projection preview the DEM (and its box) is reloading: grid the preview's frame.
+    const preview = projectionPreviewFrame();
+    const { demLayout: demLayoutRef } = window.appState || {};
+    const bbox = window.appState?.currentDemBbox || preview?.bbox;
+    const demDataRef = preview || window.appState?.lastDemData;
     // Only the bounding box is required. The grid used to depend on
     // #layerDemCanvas having non-zero dimensions, but that buffer is only sized
     // while the Dem layer is active, so viewing Sat or Trails on their own left
@@ -636,11 +742,14 @@ window.drawLayerGrid = function drawLayerGrid() {
     const showGrid = document.getElementById('showGridlines')?.checked ?? true;
     const projection = document.getElementById('paramProjection')?.value || 'none';
     // Independent red pixel grid (DEM pixel space, user-set spacing, default 1000).
-    const pixelGridOn = document.getElementById('showPixelGrid')?.checked ?? false;
+    const pixelGridOn = document.getElementById('showPixelGrid')?.checked ?? true;
+    const realGridOn = document.getElementById('showRealGrid')?.checked ?? true;
+    const realGridColor = document.getElementById('realGridColor')?.value || '#ffd60a';
+    const maintainDimensions = document.getElementById('paramMaintainDimensions')?.checked ?? false;
     let pixelGridSpacing = parseInt(document.getElementById('pixelGridSpacing')?.value, 10);
     if (!Number.isFinite(pixelGridSpacing) || pixelGridSpacing < 1) pixelGridSpacing = 1000;
     const pixelGridColor = document.getElementById('pixelGridColor')?.value || '#ff0000';
-    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}|${projection}|${pixelGridOn}|${pixelGridSpacing}|${pixelGridColor}`;
+    const newKey = `${bbox.north}|${bbox.south}|${bbox.east}|${bbox.west}|${scale.toFixed(3)}|${Math.round(offsetX / 2)}|${Math.round(offsetY / 2)}|${densityCheck}|${gw}|${gh}|${_gridPixelMode}|${showGrid}|${projection}|${pixelGridOn}|${pixelGridSpacing}|${pixelGridColor}|${realGridOn}|${realGridColor}|${maintainDimensions}|${demLayoutRef ? `${demLayoutRef.x},${demLayoutRef.y},${demLayoutRef.w},${demLayoutRef.h}` : ''}`;
     if (newKey === _gridCacheKey) return;
     _gridCacheKey = newKey;
 
@@ -716,7 +825,59 @@ window.drawLayerGrid = function drawLayerGrid() {
         if (dimsLabel) dimsLabel.classList.add('hidden');
     }
 
+    /** The true grid: real meridians and parallels, clipped to the height map, labelled. */
+    function drawTrueGrid() {
+        if (!realGridOn) return;
+        const layout = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
+        // About eight lines across what is on screen, so zooming in refines the step.
+        const span = Math.max(bbox.north - bbox.south, bbox.east - bbox.west) / Math.max(1, scale);
+        const step = niceDegreeStep(span, 8);
+        const { lines } = graticuleLines(bbox, projection, { maintainDimensions, step, segments: 64 });
+        const sx = (p) => (layout.x + p.x * layout.w) * scale + offsetX;
+        const sy = (p) => (layout.y + p.y * layout.h) * scale + offsetY;
+        const left = Math.max(0, layout.x * scale + offsetX);
+        const top = Math.max(0, layout.y * scale + offsetY);
+        const right = Math.min(gw, (layout.x + layout.w) * scale + offsetX);
+        const bottom = Math.min(gh, (layout.y + layout.h) * scale + offsetY);
+        if (right <= left || bottom <= top) return;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, right - left, bottom - top);
+        ctx.clip();
+        ctx.strokeStyle = realGridColor;
+        ctx.lineWidth = 1.5;
+        for (const l of lines) {
+            ctx.beginPath();
+            l.pts.forEach((p, i) => (i ? ctx.lineTo(sx(p), sy(p)) : ctx.moveTo(sx(p), sy(p))));
+            ctx.stroke();
+        }
+        // Labels: a meridian at its lowest visible point, a parallel at its leftmost one.
+        ctx.font = '600 11px system-ui, sans-serif';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillStyle = realGridColor;
+        const inView = (x, y) => x >= left && x <= right && y >= top && y <= bottom;
+        for (const l of lines) {
+            let best = null;
+            for (const p of l.pts) {
+                const x = sx(p), y = sy(p);
+                if (!inView(x, y)) continue;
+                if (!best || (l.kind === 'meridian' ? y > best.y : x < best.x)) best = { x, y };
+            }
+            if (!best) continue;
+            const w = ctx.measureText(l.label).width;
+            const tx = l.kind === 'meridian' ? Math.min(best.x + 3, right - w - 2) : Math.max(best.x + 4, left + 2);
+            const ty = l.kind === 'meridian' ? Math.min(best.y - 5, bottom - 5) : Math.max(best.y - 4, top + 12);
+            ctx.strokeText(l.label, tx, ty);
+            ctx.fillText(l.label, tx, ty);
+        }
+        ctx.restore();
+    }
+
     if (!showGrid) {
+        drawTrueGrid();
         return;
     }
     const gridColor = 'rgba(255, 255, 255, 0.2)';
@@ -794,52 +955,21 @@ window.drawLayerGrid = function drawLayerGrid() {
 
     } else {
         // ── Lat/lon coordinate mode (default) ───────────────────────────────
-        const lonRange = bbox.east - bbox.west;
-        const latRange = bbox.north - bbox.south;
+        // Straight lines on the height map's letterbox. A parallel's height comes from the
+        // projection (every projection here maps a latitude to one row); a meridian is the
+        // even split of the frame. The true grid draws the meridians a projection bends.
+        const lonRange = (bbox.east - bbox.west) || 1;
+        const latRange = (bbox.north - bbox.south) || 1;
+        const layout = demLayoutRef || { x: 0, y: 0, w: cw, h: ch };
+        const at = projectedFrac(bbox, projection, maintainDimensions);
 
-        // Projection-aware coordinate transforms
-        const projection = document.getElementById('paramProjection')?.value || 'none';
-        const toRad = d => d * Math.PI / 180;
+        /** @param {number} lon @returns {number} Canvas x */
+        const lonToX = (lon) => (layout.x + (lon - bbox.west) / lonRange * layout.w) * scale + offsetX;
+        /** @param {number} lat @returns {number} Canvas y */
+        const latToY = (lat) => (layout.y + at(lat, bbox.west).y * layout.h) * scale + offsetY;
 
-        // Mercator helpers
-        const _mercY = l => Math.log(Math.tan(Math.PI / 4 + toRad(Math.max(-85, Math.min(85, l))) / 2));
-        const mercN = _mercY(Math.min(85, bbox.north));
-        const mercS = _mercY(Math.max(-85, bbox.south));
-        const mercRange = mercN - mercS;
-
-        // Cosine/Lambert helpers
-        const midLat = (bbox.north + bbox.south) / 2;
-        const cosMiddle = Math.cos(toRad(midLat));
-        const contentW = (projection === 'cosine' || projection === 'lambert')
-            ? Math.max(1, cw * cosMiddle) : cw;
-        const xOff = (cw - contentW) / 2;
-
-        // Sinusoidal: midLon for centering
-        const midLon = (bbox.east + bbox.west) / 2;
-
-        /** @param {number} lon @param {number} [lat] - needed for sinusoidal @returns {number} Canvas x */
-        function lonToX(lon, lat) {
-            if (projection === 'sinusoidal') {
-                const cosLat = Math.cos(toRad(lat ?? midLat));
-                const xFrac = 0.5 + (lon - midLon) / lonRange * cosLat;
-                return xFrac * cw * scale + offsetX;
-            }
-            if (projection === 'cosine' || projection === 'lambert') {
-                return (xOff + (lon - bbox.west) / lonRange * contentW) * scale + offsetX;
-            }
-            return (lon - bbox.west) / lonRange * cw * scale + offsetX;
-        }
-
-        /** @param {number} lat @returns {number} Canvas y pixel */
-        function latToY(lat) {
-            if (projection === 'mercator') {
-                return (mercN - _mercY(lat)) / mercRange * ch * scale + offsetY;
-            }
-            return (bbox.north - lat) / latRange * ch * scale + offsetY;
-        }
-
-        const pxPerLon = (contentW * scale) / lonRange;
-        const pxPerLat = (ch * scale) / latRange;
+        const pxPerLon = (layout.w * scale) / lonRange;
+        const pxPerLat = (layout.h * scale) / latRange;
 
         const targetLines = Math.max(2, densityCheck);
         const lonInterval = niceGeoInterval(gw, pxPerLon, targetLines);
@@ -847,72 +977,33 @@ window.drawLayerGrid = function drawLayerGrid() {
 
         // Longitude (vertical) grid lines — batch label insertions via DocumentFragment
         const xFrag = xAxis ? document.createDocumentFragment() : null;
-        const visLonWest = bbox.west + (-2 - offsetX) / (cw * scale) * lonRange;
-        const visLonEast = bbox.west + (gw + 2 - offsetX) / (cw * scale) * lonRange;
-        const lonStart = Math.ceil((Math.max(bbox.west, visLonWest) - 1e-9) / lonInterval) * lonInterval;
-        const lonEnd = Math.min(bbox.east, visLonEast) + 1e-9;
-        for (let lon = lonStart; lon <= lonEnd; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
-            if (projection === 'sinusoidal') {
-                // Sinusoidal: vertical gridlines are curves — draw as polyline
-                if (showGrid) {
-                    ctx.strokeStyle = gridColor;
-                    ctx.beginPath();
-                    let first = true;
-                    for (let sy = 0; sy <= gh; sy += 3) {
-                        const lat = bbox.north - ((sy - offsetY) / (ch * scale)) * latRange;
-                        const x = lonToX(lon, lat);
-                        if (first) { ctx.moveTo(x, sy); first = false; }
-                        else ctx.lineTo(x, sy);
-                    }
-                    ctx.stroke();
-                }
-                // Tick + label at midpoint latitude
-                const xMid = lonToX(lon, midLat);
-                ctx.strokeStyle = tickColor;
-                ctx.beginPath(); ctx.moveTo(xMid, 0); ctx.lineTo(xMid, 6); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(xMid, gh); ctx.lineTo(xMid, gh - 6); ctx.stroke();
-                if (xFrag) {
-                    const span = document.createElement('span');
-                    span.className = 'axis-tick';
-                    span.style.left = xMid + 'px';
-                    span.textContent = formatCoord(lon, false, lonInterval);
-                    xFrag.appendChild(span);
-                }
-            } else {
-                // Non-sinusoidal: straight vertical lines
-                const x = lonToX(lon);
-                if (x < -2 || x > gw + 2) continue;
-                if (showGrid) {
-                    ctx.strokeStyle = gridColor;
-                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
-                }
-                ctx.strokeStyle = tickColor;
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 6); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
-                if (xFrag) {
-                    const span = document.createElement('span');
-                    span.className = 'axis-tick';
-                    span.style.left = x + 'px';
-                    span.textContent = formatCoord(lon, false, lonInterval);
-                    xFrag.appendChild(span);
-                }
+        const lonStart = Math.ceil((bbox.west - 1e-9) / lonInterval) * lonInterval;
+        for (let lon = lonStart; lon <= bbox.east + 1e-9; lon = Math.round((lon + lonInterval) * 1e8) / 1e8) {
+            const x = lonToX(lon);
+            if (x < -2 || x > gw + 2) continue;
+            ctx.strokeStyle = gridColor;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, gh); ctx.stroke();
+            ctx.strokeStyle = tickColor;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 6); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x, gh); ctx.lineTo(x, gh - 6); ctx.stroke();
+            if (xFrag) {
+                const span = document.createElement('span');
+                span.className = 'axis-tick';
+                span.style.left = x + 'px';
+                span.textContent = formatCoord(lon, false, lonInterval);
+                xFrag.appendChild(span);
             }
         }
         if (xAxis && xFrag) xAxis.appendChild(xFrag);
 
         // Latitude (horizontal) grid lines — batch label insertions via DocumentFragment
         const yFrag = yAxis ? document.createDocumentFragment() : null;
-        const visLatNorth = bbox.north - (-2 - offsetY) / (ch * scale) * latRange;
-        const visLatSouth = bbox.north - (gh + 2 - offsetY) / (ch * scale) * latRange;
-        const latStart = Math.ceil((Math.max(bbox.south, visLatSouth) - 1e-9) / latInterval) * latInterval;
-        const latEnd = Math.min(bbox.north, visLatNorth) + 1e-9;
-        for (let lat = latStart; lat <= latEnd; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
+        const latStart = Math.ceil((bbox.south - 1e-9) / latInterval) * latInterval;
+        for (let lat = latStart; lat <= bbox.north + 1e-9; lat = Math.round((lat + latInterval) * 1e8) / 1e8) {
             const y = latToY(lat);
             if (y < -2 || y > gh + 2) continue;
-            if (showGrid) {
-                ctx.strokeStyle = gridColor;
-                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
-            }
+            ctx.strokeStyle = gridColor;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(gw, y); ctx.stroke();
             ctx.strokeStyle = tickColor;
             ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(6, y); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(gw, y); ctx.lineTo(gw - 6, y); ctx.stroke();
@@ -927,6 +1018,7 @@ window.drawLayerGrid = function drawLayerGrid() {
         if (yAxis && yFrag) yAxis.appendChild(yFrag);
     }
 
+    drawTrueGrid();
     if (yAxis) yAxis.style.height = gh + 'px';
 };
 

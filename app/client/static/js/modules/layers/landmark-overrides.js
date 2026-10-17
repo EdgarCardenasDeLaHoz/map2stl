@@ -7,10 +7,24 @@
  *   {kind: 'osm'}                                   the tag-driven building (default)
  *   {kind: 'ndsm', provider: 'auto'|name, resolution_m?}
  *   {kind: 'mesh', upload_id, fit?, rotation_deg?, scale?, offset_m?, vertical?, height_m?, up_axis?}
+ *   {kind: 'height', height_m, source?}            OSM geometry, top at height_m (parts scaled)
  * (server: city2stl/landmarks.py).
  */
 
-const OVERRIDE_KINDS = ['osm', 'ndsm', 'mesh'];
+const OVERRIDE_KINDS = ['osm', 'ndsm', 'mesh', 'height'];
+
+/** A height override must be above 0 and below this (m), as the server checks. */
+export const MAX_HEIGHT_M = 1000;
+
+/**
+ * True when `h` is a usable height override (finite, 0 < h < MAX_HEIGHT_M).
+ * @param {*} h
+ */
+export function validHeight(h) {
+    if (h == null || h === '') return false;
+    const n = Number(h);
+    return Number.isFinite(n) && n > 0 && n < MAX_HEIGHT_M;
+}
 
 export const CATEGORY_LABELS = {
     worship: 'Place of worship',
@@ -33,6 +47,7 @@ export function overridesForBuild(overrides) {
         if (!id || !spec || typeof spec !== 'object') continue;
         if (spec.kind === 'ndsm') out[id] = spec;
         else if (spec.kind === 'mesh' && spec.upload_id) out[id] = spec;
+        else if (spec.kind === 'height' && validHeight(spec.height_m)) out[id] = spec;
     }
     return Object.keys(out).length ? out : null;
 }
@@ -58,6 +73,7 @@ export function draftFromSpec(spec) {
         vertical: s.vertical === 'fit' ? 'fit' : 'true',
         height_m: Number.isFinite(+s.height_m) && +s.height_m > 0 ? +s.height_m : null,
         up_axis: ['z', 'y'].includes(s.up_axis) ? s.up_axis : 'auto',
+        source: typeof s.source === 'string' ? s.source : '',
     };
 }
 
@@ -82,14 +98,21 @@ export function specFromDraft(d) {
         if (d.vertical === 'fit' && d.height_m) spec.height_m = d.height_m;
         return spec;
     }
+    if (d.kind === 'height') {
+        const spec = { kind: 'height', height_m: Number(d.height_m) };
+        const note = String(d.source || '').trim();
+        if (note) spec.source = note;
+        return spec;
+    }
     return { kind: 'osm' };
 }
 
-/** Short label of a stored override for the list ("OSM", "nDSM · rediam_mdhn", "Mesh · x.glb"). */
+/** Short label of a stored override for the list ("OSM", "nDSM · rediam_mdhn", "Mesh · x.glb", "Height · 45 m"). */
 export function overrideLabel(spec) {
     if (!spec || spec.kind === 'osm' || !spec.kind) return 'OSM';
     if (spec.kind === 'ndsm') return `nDSM · ${spec.provider || 'auto'}`;
     if (spec.kind === 'mesh') return `Mesh · ${spec.filename || spec.upload_id || '?'}`;
+    if (spec.kind === 'height') return `Height · ${validHeight(spec.height_m) ? +(+spec.height_m).toFixed(1) : '?'} m`;
     return spec.kind;
 }
 

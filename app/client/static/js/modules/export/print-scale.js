@@ -40,7 +40,7 @@ export function bboxDiagonalKm(bbox) {
  * @param {number} p.mmPerPx       #mmPerPixel
  * @param {'auto'|'true'|'fit'} [p.zMode='auto']   #exportZMode
  * @param {number} [p.exaggeration=1]              #exportExaggeration
- * @param {number} [p.fitHeightMm=30]              #exportModelHeight
+ * @param {number} [p.fitHeightMm=20]              #exportModelHeight
  * @param {number} [p.elevMin=0]   lowest DEM elevation (m), used by fit mode
  * @param {number} [p.elevMax=0]   highest DEM elevation (m), used by fit mode
  * @returns {null | {mPerPx:number, mPerMm:number, scaleDenominator:number,
@@ -53,7 +53,7 @@ export function bboxDiagonalKm(bbox) {
  */
 export function modelScale({
     bbox, cols, rows, mmPerPx,
-    zMode = 'auto', exaggeration = 1, fitHeightMm = 30, elevMin = 0, elevMax = 0,
+    zMode = 'auto', exaggeration = 1, fitHeightMm = 20, elevMin = 0, elevMax = 0,
 }) {
     if (!bbox || !(cols > 0) || !(rows > 0) || !(mmPerPx > 0)) return null;
     const latMid = ((bbox.north + bbox.south) / 2) * Math.PI / 180;

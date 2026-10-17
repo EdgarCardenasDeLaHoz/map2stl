@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-05_
+_Last updated: 2026-10-14_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,112 @@ _Last updated: 2026-10-05_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Edit map: changing the projection changed nothing visible (fixed 2026-10-14)
+
+- **Symptom:** picking another projection in Edit › Canvas re-fetched every layer, but the map kept
+  the same shape.
+- **Cause:** `stacked-layers.js::updateStackedLayers` letterboxed the height map to the bbox's
+  cosine-corrected shape whatever the projection, so each projected raster (Mercator 573×600,
+  Sinusoidal 600×435) was stretched back into one frame.
+- **Fix:** `graticule.js::frameAspect` uses the raster's own aspect when a projection is set and
+  "Keep fixed canvas shape" is off; tests in `tests/js/graticule.test.js`.
+- **Still open:**
+  - Two tabs on one region overwrite each other's settings: each autosave PUTs the whole blob, so
+    a stale tab puts the old projection back (seen as interleaved PUTs from two connections).
+  - ~~The change re-fetches every layer (about 15 s for Europa) with no preview meanwhile.~~
+    **Fixed 2026-10-14:** the loaded layers are warped into the new projection in the browser at
+    once (`modules/dem/projection-preview.js`, under 0.2 s for Europa) with a "Preview · loading
+    layers…" pill; each layer swaps to its real data as it lands. Still not warped: the city
+    building overlay and the hover tooltip (hidden until the DEM lands).
+  - **Fixed 2026-10-14 (server side):** the real data now lands fast too. Each projection sampled
+    its own source grid, so a switch re-decoded the DEM GeoTIFF (3.6 s per request) and re-carved
+    every river (river_carve 9.9 s; composite 12.9 s, hydrology 14.4 s). The base DEM is now read
+    once onto a projection-independent shared grid (`geo2stl/dem.py::shared_base_grid`) and the
+    rivers are carved once on it, then pooled per projection without losing 1-px channels
+    (`geo2stl/water_layers.py::pool_river_stack`, `pool_deepest`). A new projection with warm
+    region caches: hydrology 0.14-0.26 s, composite 0.8-1.05 s. Carve masks agree with the old
+    per-projection carve to within 1 px for 99 % of river pixels. Still open: the final
+    categorical (nearest) `project_grid` can drop thin N-S rivers where a projection stretches x;
+    lakes are still fetched per projection.
+  - **Fixed 2026-10-14 (client side):** a switch took 3.3-5.3 s on 1000 px Colombia, and Everest
+    held the pill 31 s. Nothing was requested for 460 ms (full-size snapshot and warp, then the
+    80 ms debounce, then synchronous stack redraws); Borders, Rivers & lakes and the composite
+    dem-merge waited for the DEM to land; long tasks came from a composite recompute on the
+    cleared DEM, four passes over 1M values in `_applyDemResult` / `drawHistogram`, and
+    repeated redraws. Now every request goes out at the change event
+    (`event-listeners-map.js::_switchProjection`), the warp runs at 600 px after them, stack
+    redraws coalesce per frame (`ui-helpers.js::emitStackUpdate`), and the stats are one pass
+    (`dem/dem-stats.js`). The preview ends when each layer has settled for the current pick
+    (`projection-preview.js::settlePreviewLayer`), not when a new canvas appears, so a layer
+    with nothing in the box (no rivers on Everest) no longer holds it. Not yet measured live;
+    `window.DEBUG_PROJ_TIMING = true` logs `[proj-timing]` per request.
+  - **Fixed 2026-10-14 (cold open and DEM switches):** Colombia's first open spent 29 s in
+    river_carve: 21 s rebuilding a missing full HydroRIVERS parquet that an order 3+ read never
+    uses (`geo2stl/hydrology.py::_read_region_parquets` now skips it), and ~8 s carving. The carve
+    is faster with output unchanged bit for bit: vectorised valley snapping
+    (`water_layers.py::snap_reaches_to_valley`), GeoJSON built from one ragged array
+    (`numpy2stl/src/numpy2stl/raster/burn.py::_ragged_mappings`), and a worker pool started before the reaches
+    are read (`water_layers.py::start_carve_pool`); Colombia's cold rivers step is now ~7.6 s plus
+    0.9 s for the DEM. `GET /api/terrain/dem` decoded the whole GeoTIFF on every switch (Colorado
+    4-5.7 s, Norway 4.3 s); it now cuts the projection's grid from `shared_base_grid`
+    (`geo2stl/dem.py::fetch_dem`, `shared_dim=`, 0.01-0.05 s) and reads ESA water at the shared
+    grid's scale, so no switch asks Earth Engine for a finer image (Norway Mercator: 7 s). The
+    shared grid's cap is a cell budget (`projections.py::shared_source_dim`), so Norway's cosine,
+    equidistant and Mercator no longer fall back to a per-projection carve (11-15 s each).
+    Still open: the DEM disk cache key holds the projection's source_dim
+    (`app/server/core/dem_cache.py`), so each new projection still writes its own entry; the DEM
+    route's grid now differs from the old direct decode by a mean 2-6 m (resampled twice).
+
+## Europa: hollow seas and no rivers in Rivers & lakes (2026-10-14)
+
+The Edit-tab 2D "Rivers & lakes" layer on Europa showed water only as a 20-40 px band along
+the coasts (the open sea showed bathymetry colours, -1552 m at 64.8 N 2.6 E) and no river.
+
+- **Hollow sea.** The rivers preview had been cached without its water surface, so the layer
+  fell back to `/api/terrain/water-mask`, which counted only ESA WorldCover class 80. ESA maps
+  land tiles only: class 80 is a coastal strip, the open sea is its no-data (0), and the DEM sea
+  fallback is dead on a PC without the local GEBCO store (`ocean_root`). **Fixed:** water =
+  80 or 0 (`geo2stl/sat2stl.py::esa_water`, as `dem.water_fraction_for_dem` already did); the
+  water-mask cache key is now `v: 2`.
+- **No rivers.** pyarrow 26 needs NumPy 2 (numpy is pinned to 1.26), so every HydroRIVERS
+  parquet build and read failed, returned None, and looked like a box without rivers. The
+  river carve cache, the preview JSON cache and the composite cache all kept that. **Fixed:**
+  `requirements.txt` pins `pyarrow[s3]>=14,<26`; a failed region raises
+  `geo2stl/hydrology.py::HydroRiversUnavailable` (the composite skips and retries the layer);
+  `water_layers.py::river_carve_layers` never caches an empty carve;
+  `app/server/routers/terrain.py::_print_payload_complete` keeps incomplete previews out of
+  the cache; `COMPOSITE_CACHE_VERSION` 8 drops composites cut without rivers.
+- **Still open:** the running server must be restarted to load the fix and the pyarrow 25 DLL
+  (then delete `site-packages/~yarrow`, left by the in-use upgrade). The legacy
+  `terrain.py::_hydrorivers_layers` path (no `dem_source`) still caches `water=None` as zeros.
+  This PC has no `ocean_root` store, so the DEM sea fallback never runs here.
+
+## Active bugs — Extrude tab audit (2026-10-13)
+
+Source and full list: [history/audits/AUDIT-2026-10-13-extrude.md](history/audits/AUDIT-2026-10-13-extrude.md).
+All its bugs and risks were fixed on 2026-10-13, as was Granada Cathedral printing as one
+prism (`city2stl/city_model.py::drop_building_copies`). Still open: its Design section (duplicate
+controls, old form style, jargon, view controls in the panel, per-part show/hide and colour).
+
+- **Towers on the Alhambra walls are still buried (2026-10-14).** Walls and fortifications now
+  print as ground-following outline rings (`city2stl/city_model.py::split_on_ground`,
+  [decision](decisions/roofs-landmarks.md)); 83 of 85 precinct buildings stand clear. Torre de la
+  Bruja (way/92528760, 10 m) and Torre de las Damas (way/196500564, 12 m) sit on the 12 m wall
+  with heights at or below it, so the wall covers them. Needs a real height for them (landmark
+  override) or a rule that a building on a wall stands on the wall top.
+- **Cached cities need a refetch for unmerged landmarks.** `CITY_PIPELINE_VERSION` 5 marks
+  version-4 payloads buildings-only stale; until the buildings layer is refetched, named
+  buildings stay merged (Granada: 26 into "Palacio de Carlos V").
+
+Found in the live check the same day:
+- **Error toast covers the 3D view controls.** On a machine without Earth Engine
+  authentication, the "Failed to load: Earth Engine is not authenticated" toast sits over the
+  Wireframe / Normals / Auto-rotate row at the bottom of the Extrude panel, and it comes back after
+  being dismissed (each new composite request raises it again). Seen on Granada, 1014×922 window.
+  **Fixed 2026-10-14:** the stack is centred in the gap between the side panels
+  (`app/client/static/js/modules/core/ui-helpers.js::toastLane`), a message already shown is not
+  stacked again, and a closed error stays closed until the page reloads (`showToast`).
 
 ## Active bugs — from the full code audit (2026-10-05)
 
@@ -78,6 +184,27 @@ the rest below.
   CDN (`app/client/templates/index.html`). See F-FE1.
 
 ## Active data limitations
+
+### 0h. The local SRTM h5 store is sparse; missing tiles were a silent flat 0 (2026-10-14)
+- `strm_h5/strm_data.h5` holds 94 tiles (of ~870 SRTM land tiles). "Amazon" (N15 S-19
+  E-45 W-85, `h5_local`) needs 56 and the store has 12 (the Andes), so 44 tiles came back as
+  0: one flat basin with a few rectangles of relief, cached like a good result.
+- **Fixed 2026-10-14:** `geo2stl/dem.py::fetch_h5_dem` reports missing tiles (`coverage=`),
+  and `geo2stl/dem.py::_fetch_h5_with_fallback` fills them from `_h5_fill_source`: the local
+  GeoTIFF folder (GEBCO, `config.json` `ocean_root`), else OpenTopography SRTMGL3 (SRTM15Plus
+  for boxes over 4.05M km²; a failure is not retried for 15 min). With no fallback the gap
+  stays 0 and `source_note` says "Incomplete coverage" (and the grid is not cached). DEM cache
+  schema v5 (`app/server/core/dem_cache.py`) drops the old gap-filled entries.
+- Still open: `config.json` `ocean_root` points at the other PC's GEBCO folder (per-PC
+  folders: F-KEYS); `h5_local` is meant for city boxes (<15 km) but accepts a continent and
+  then reads 12 tiles at 90 m only to average them to ~2.5 km; composite layers
+  (`fetch_layer_data` without `notes`) only log the coverage warning.
+
+### 0g. Without Earth Engine, the DEM lowers only the sea (2026-10-13)
+- Water subtraction reads lakes and rivers from ESA WorldCover, which needs Earth Engine (or a
+  cached image). This machine is not authenticated, so `/api/terrain/dem` lowers only the sea
+  found in the elevation data and says so in `source_note`
+  (`geo2stl/dem.py::water_fraction_for_dem`). Fix: authenticate Earth Engine (Keys panel).
 
 ### 0e. Google 3D Tiles has no buildings over Cartagena (surveyed 2026-08-28)
 - Outside Google's photorealistic cities, the endpoint serves a global base mesh with no

@@ -43,6 +43,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -116,6 +117,62 @@ def resize_relative(layer: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
         layer = ndimage.minimum_filter(layer, size=(max(fy, 1), max(fx, 1)), mode="nearest")
     return cv2.resize(layer.astype(np.float32), (w, h),
                       interpolation=cv2.INTER_NEAREST).astype(np.float64)
+
+
+def _partition_reduce(arr: np.ndarray, shape: tuple[int, int], ufunc) -> np.ndarray:
+    """Reduce the last two axes of *arr* onto *shape* by *ufunc* over a partition.
+
+    Each source cell belongs to exactly one target cell (``floor(i * h / H)``), so
+    a one-cell channel lands in one target cell: it never vanishes (as with
+    nearest) and never doubles in width (as a ``ceil(H / h)`` window filter does
+    when the factor is just over 1). Requires ``H >= h`` and ``W >= w``.
+    """
+    H, W = arr.shape[-2:]
+    h, w = int(shape[0]), int(shape[1])
+    out = arr
+    if H != h:
+        starts = np.searchsorted((np.arange(H) * h) // H, np.arange(h))
+        out = ufunc.reduceat(out, starts, axis=-2)
+    if W != w:
+        starts = np.searchsorted((np.arange(W) * w) // W, np.arange(w))
+        out = ufunc.reduceat(out, starts, axis=-1)
+    return out
+
+
+def pool_deepest(layer: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """A relative-depth grid (negative m) pooled down to *shape*, deepest kept.
+
+    The single-grid form of :func:`pool_river_stack` (the same partition, by
+    minimum); a target larger on an axis falls back to :func:`resize_relative`.
+    """
+    layer = np.asarray(layer, dtype=np.float64)
+    h, w = int(shape[0]), int(shape[1])
+    if layer.shape == (h, w):
+        return layer
+    if layer.shape[0] >= h and layer.shape[1] >= w:
+        return _partition_reduce(layer, (h, w), np.minimum)
+    return resize_relative(layer, (h, w))
+
+
+def pool_river_stack(stack: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+    """A per-order depth stack (positive m, ``(k, H, W)``) pooled down to *shape*.
+
+    Every target cell keeps the deepest reach of each order among the source
+    cells it covers (:func:`_partition_reduce`), so the carve computed once on
+    the shared grid (``geo2stl.projections.shared_source_shape``) serves every
+    projection's smaller source grid with no river lost or widened. A target
+    larger than the stack on an axis is not pooled but taken nearest.
+    """
+    stack = np.asarray(stack)
+    h, w = int(shape[0]), int(shape[1])
+    if stack.shape[-2:] == (h, w):
+        return stack
+    if stack.shape[-2] >= h and stack.shape[-1] >= w:
+        return _partition_reduce(stack, (h, w), np.maximum)
+    import cv2
+    return np.stack([cv2.resize(np.asarray(s, dtype=np.float32), (w, h),
+                                interpolation=cv2.INTER_NEAREST) for s in stack]) \
+        if len(stack) else np.zeros((0, h, w), dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------
@@ -195,10 +252,14 @@ def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: flo
     least-cost 8-connected path inside the corridor of that radius around it,
     cost ``1 + (z - local floor) / SNAP_COST_M``. End points shared by reaches
     move to the same cell, so a network stays connected.
+
+    Everything but the path search runs over all parts at once (densifying, the
+    end points, building the lines): one GEOS or numpy call each instead of one
+    per part. Colombia at 1000 px (10k snapped parts) went from 10 s to ~4 s.
     """
+    import shapely
     from scipy import ndimage
-    from shapely.geometry import LineString, MultiLineString
-    from skimage.graph import route_through_array
+    from skimage.graph import MCP_Geometric
 
     dem = np.asarray(dem, dtype=np.float64)
     h, w = dem.shape
@@ -210,80 +271,115 @@ def snap_reaches_to_valley(geoms, dem: np.ndarray, width_m: float, height_m: flo
     px_x, px_y = width_m / w, height_m / h
     px = min(px_x, px_y)
     radius_m = np.broadcast_to(np.asarray(radius_m, dtype=np.float64), (len(geoms),))
+
+    # A part shorter than 2 px is returned as is; decide that for all reaches in
+    # one call - at the Amazon's 3 km/px only ~8k of 315k reaches are long
+    # enough, and looping over the rest in Python cost ~35 s.
+    out = list(geoms)
+    arr = np.empty(len(out), dtype=object)
+    arr[:] = out
+    long_enough = np.flatnonzero(shapely.length(arr) >= 2 * px)
+    if not len(long_enough):
+        return out
+    parts, owner = shapely.get_parts(arr[long_enough], return_index=True)
+    keep = ~shapely.is_empty(parts)
+    parts, owner = parts[keep], long_enough[owner[keep]]
+    lengths = shapely.length(parts)
+    rps = np.maximum(1, np.round(radius_m[owner] / px).astype(np.int64))
+    snap = lengths >= 2 * px                    # shorter parts stay as they are
+
+    # Densify every snapped part in one GEOS call: n points per part, spaced as
+    # np.linspace(0, length, n) (k * step, the last one exactly the length).
+    sp = np.flatnonzero(snap)
+    n = np.maximum(2, np.ceil(2 * lengths[sp] / px).astype(np.int64))
+    ends = np.cumsum(n)
+    starts = ends - n
+    seg = np.repeat(np.arange(len(sp)), n)
+    k = np.arange(int(ends[-1]) if len(sp) else 0) - starts[seg]
+    dist = k * (lengths[sp] / (n - 1))[seg]
+    dist[ends - 1] = lengths[sp]
+    dense = shapely.get_coordinates(shapely.line_interpolate_point(parts[sp][seg], dist))
+    rows_all = np.clip((height_m - dense[:, 1]) / px_y - 0.5, 0, h - 1)
+    cols_all = np.clip(dense[:, 0] / px_x - 0.5, 0, w - 1)
+
+    # End points: the lowest cell within the radius, plus a small price per pixel
+    # moved so an end point on a flat floor stays put instead of sliding up or
+    # down the valley. Offsets in row-major order, so ties go to the same cell
+    # as an argmin over the clipped window did.
+    end_r = np.empty((len(sp), 2), dtype=np.int64)
+    end_c = np.empty((len(sp), 2), dtype=np.int64)
+    for j, idx in enumerate((starts, ends - 1)):
+        r0 = np.round(rows_all[idx]).astype(np.int64)   # round half to even, as round()
+        c0 = np.round(cols_all[idx]).astype(np.int64)
+        for rp in np.unique(rps[sp]):
+            sel = np.flatnonzero(rps[sp] == rp)
+            dy, dx = np.mgrid[-rp:rp + 1, -rp:rp + 1]
+            d2 = (dy ** 2 + dx ** 2).ravel()
+            disc = d2 <= rp * rp
+            dy, dx, pen = dy.ravel()[disc], dx.ravel()[disc], np.sqrt(d2[disc])
+            rr = r0[sel, None] + dy
+            cc = c0[sel, None] + dx
+            inside = (rr >= 0) & (rr < h) & (cc >= 0) & (cc < w)
+            z = np.where(inside, sm[np.clip(rr, 0, h - 1), np.clip(cc, 0, w - 1)]
+                         + SNAP_END_M_PER_PX * pen, np.inf)
+            best = np.argmin(z, axis=1)
+            end_r[sel, j] = rr[np.arange(len(sel)), best]
+            end_c[sel, j] = cc[np.arange(len(sel)), best]
+
     floors: dict[int, np.ndarray] = {}
-
-    def to_px(xy):
-        xy = np.asarray(xy, dtype=np.float64)[:, :2]
-        return (np.clip((height_m - xy[:, 1]) / px_y - 0.5, 0, h - 1),
-                np.clip(xy[:, 0] / px_x - 0.5, 0, w - 1))
-
-    def lowest_near(r, c, rp):
-        r, c = int(round(r)), int(round(c))
-        r0, r1, c0, c1 = max(r - rp, 0), min(r + rp + 1, h), max(c - rp, 0), min(c + rp + 1, w)
-        yy, xx = np.mgrid[r0:r1, c0:c1]
-        d2 = (yy - r) ** 2 + (xx - c) ** 2
-        # Lowest ground, with a small price per pixel moved so an end point on a
-        # flat floor stays put instead of sliding up or down the valley.
-        win = np.where(d2 <= rp * rp, sm[r0:r1, c0:c1] + SNAP_END_M_PER_PX * np.sqrt(d2),
-                       np.inf)
-        k = int(np.argmin(win))
-        return r0 + k // win.shape[1], c0 + k % win.shape[1]
-
-    def snap_part(line, rp):
-        if line.length < 2 * px:
-            return line
-        # One GEOS call for all points (a Python loop of line.interpolate cost 41 s
-        # over Colombia's 2,125 snapped reaches).
-        dense = shapely.get_coordinates(shapely.line_interpolate_point(
-            line, np.linspace(0.0, line.length, max(2, int(np.ceil(2 * line.length / px))))))
-        rows, cols = to_px(dense)
+    path_xy: list[np.ndarray] = []
+    path_of: list[int] = []
+    for q, i in enumerate(sp):
+        rp = int(rps[i])
+        rows, cols = rows_all[starts[q]:ends[q]], cols_all[starts[q]:ends[q]]
         floor = floors.get(rp)
         if floor is None:
             floor = floors[rp] = ndimage.minimum_filter(sm, size=2 * rp + 1, mode="nearest")
-        start = lowest_near(rows[0], cols[0], rp)
-        end = lowest_near(rows[-1], cols[-1], rp)
-        r0 = max(int(min(rows.min(), start[0], end[0])) - rp - 1, 0)
-        r1 = min(int(max(rows.max(), start[0], end[0])) + rp + 2, h)
-        c0 = max(int(min(cols.min(), start[1], end[1])) - rp - 1, 0)
-        c1 = min(int(max(cols.max(), start[1], end[1])) + rp + 2, w)
+        (sr, er), (sc, ec) = end_r[q], end_c[q]
+        r0 = max(int(min(rows.min(), sr, er)) - rp - 1, 0)
+        r1 = min(int(max(rows.max(), sr, er)) + rp + 2, h)
+        c0 = max(int(min(cols.min(), sc, ec)) - rp - 1, 0)
+        c1 = min(int(max(cols.max(), sc, ec)) + rp + 2, w)
         off_line = np.ones((r1 - r0, c1 - c0), dtype=bool)
         off_line[np.round(rows).astype(int) - r0, np.round(cols).astype(int) - c0] = False
         corridor = ndimage.distance_transform_edt(off_line) <= rp
         cost = 1.0 + (sm[r0:r1, c0:c1] - floor[r0:r1, c0:c1]) / SNAP_COST_M
         cost = np.where(corridor, cost, 1e6)
-        path, _ = route_through_array(cost, (start[0] - r0, start[1] - c0),
-                                      (end[0] - r0, end[1] - c0),
-                                      fully_connected=True, geometric=True)
-        path = np.asarray(path, dtype=np.float64) + [r0, c0]
+        # route_through_array without its wrappers (same class, same calls).
+        mcp = MCP_Geometric(cost, fully_connected=True)
+        end = (int(er) - r0, int(ec) - c0)
+        mcp.find_costs([(int(sr) - r0, int(sc) - c0)], [end])
+        path = np.asarray(mcp.traceback(end), dtype=np.float64) + [r0, c0]
         if len(path) < 2:
-            return line
-        return LineString(np.column_stack([(path[:, 1] + 0.5) * px_x,
-                                           height_m - (path[:, 0] + 0.5) * px_y]))
-
-    import shapely
-
-    # A part shorter than 2 px is returned as is (snap_part); decide that for all
-    # reaches in one call - at the Amazon's 3 km/px only ~8k of 315k reaches are
-    # long enough, and looping over the rest in Python cost ~35 s.
-    out = list(geoms)
-    arr = np.empty(len(out), dtype=object)
-    arr[:] = out
-    long_enough = np.flatnonzero(shapely.length(arr) >= 2 * px)
-    for i in long_enough:
-        geom, rad = out[i], radius_m[i]
-        if geom is None or geom.is_empty:
             continue
-        rp = max(1, int(round(float(rad) / px)))
-        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
-        snapped = [snap_part(part, rp) for part in parts if not part.is_empty]
-        out[i] = snapped[0] if len(snapped) == 1 else MultiLineString(snapped)
+        path_xy.append(np.column_stack([(path[:, 1] + 0.5) * px_x,
+                                        height_m - (path[:, 0] + 0.5) * px_y]))
+        path_of.append(int(i))
+
+    new_parts = parts.copy()
+    if path_xy:
+        new_parts[path_of] = shapely.linestrings(
+            np.concatenate(path_xy),
+            indices=np.repeat(np.arange(len(path_xy)), [len(p) for p in path_xy]))
+    # Reassemble per reach: one part -> that line, several -> a MultiLineString.
+    counts = np.bincount(owner, minlength=len(out))
+    single = counts[owner] == 1
+    for i, g in zip(owner[single], new_parts[single], strict=True):
+        out[i] = g
+    multi = ~single
+    if multi.any():
+        mo = owner[multi]
+        uniq, inv = np.unique(mo, return_inverse=True)
+        merged = shapely.multilinestrings(new_parts[multi], indices=inv)
+        for i, g in zip(uniq, merged, strict=True):
+            out[i] = g
     return out
 
 
 def river_depth_by_order(gdf, north: float, south: float, east: float, west: float,
                           shape: tuple[int, int], *, width_scale: float = 1.0,
                           dem: np.ndarray | None = None,
-                          snap: bool = True) -> tuple[np.ndarray, np.ndarray]:
+                          snap: bool = True, pool=None) -> tuple[np.ndarray, np.ndarray]:
     """(orders, stack): river depth (positive m) burnt separately per Strahler order.
 
     ``stack[k]`` holds the deepest reach of order ``orders[k]`` at each cell (0
@@ -298,6 +394,8 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
     half a pixel) and burnt at its depth; where reaches overlap the deeper wins.
     With *dem* (the grid being carved, of *shape*) and *snap*, each reach is
     first moved onto the valley floor (:func:`snap_reaches_to_valley`).
+    *pool* is an already started carve pool (:func:`start_carve_pool`) to build in
+    when there are enough reaches; the caller shuts it down.
     """
 
     h, w = int(shape[0]), int(shape[1])
@@ -351,7 +449,7 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
     orders = np.unique(reach_order)
     ctx = (np.asarray(dem, dtype=np.float64) if do_snap else None, width_m, height_m, h, w, px_m)
     stack, kept = _carve_parallel(lines, ok, np.asarray(radius, dtype=np.float64), snap_r,
-                                  reach_order, vals, orders, ctx)
+                                  reach_order, vals, orders, ctx, pool=pool)
     if not kept.any():
         return empty
     orders, stack = orders[kept > 0], stack[kept > 0]
@@ -366,24 +464,16 @@ def river_depth_by_order(gdf, north: float, south: float, east: float, west: flo
 CARVE_PARALLEL_MIN = 50_000
 CARVE_WORKERS = 4
 
-_CARVE_CTX = None
-
-
-def _carve_init(ctx):
-    global _CARVE_CTX
-    _CARVE_CTX = ctx
-
-
 def _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx=None):
     """Snap, simplify, buffer and burn one set of reaches into a per-order stack.
 
     Returns (stack ``(len(orders), h, w)`` float32, kept count per order). *lines* may be
     shapely geometries or WKB (from a worker); *ctx* is (dem or None, width_m, height_m,
-    h, w, px_m), or the worker's initializer context.
+    h, w, px_m).
     """
     import shapely
     from numpy2stl.raster import burn_polygons
-    dem, width_m, height_m, h, w, px_m = ctx if ctx is not None else _CARVE_CTX
+    dem, width_m, height_m, h, w, px_m = ctx
     lines = np.asarray(lines, dtype=object)
     if len(lines) and isinstance(lines[0], (bytes, bytearray)):
         lines = shapely.from_wkb(lines)
@@ -409,45 +499,102 @@ def _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx=None)
     return stack, kept
 
 
-def _carve_worker(args):
-    return _carve_chunk(*args)
+#: Boxes of at least this many km² start the carve pool before the reaches are read
+#: (:func:`start_carve_pool`): its workers spend ~1.5 s importing shapely, scikit-image
+#: and rasterio, which then overlaps the ~2 s HydroRIVERS read. Colombia (4.9M km²)
+#: has 126k reaches of order 3+; a 500k km² box is around the 50k-reach mark.
+CARVE_PREWARM_KM2 = 500_000
 
 
-def _carve_parallel(lines, ok, radius, snap_r, reach_order, vals, orders, ctx):
-    """_carve_chunk over all reaches: in CARVE_WORKERS processes above CARVE_PARALLEL_MIN
-    reaches (chunks combined by max, which is what one pass computes), else in this one.
-    Falls back to one pass if the pool cannot start."""
-    n = len(lines)
-    workers = min(CARVE_WORKERS, max(1, (os.cpu_count() or 2) - 2))
+def _carve_workers() -> int:
+    return min(CARVE_WORKERS, max(1, (os.cpu_count() or 2) - 2))
+
+
+def _main_importable() -> bool:
     # Spawned workers re-import the main module: a script piped through stdin or an
     # interactive session has none to import, and its pool would never start.
     import sys
     main = sys.modules.get("__main__")
-    importable_main = bool(getattr(main, "__file__", None) or getattr(main, "__spec__", None))
-    if n < CARVE_PARALLEL_MIN or workers < 2 or not importable_main:
-        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
-    from concurrent.futures import ProcessPoolExecutor
+    return bool(getattr(main, "__file__", None) or getattr(main, "__spec__", None))
 
-    import shapely
-    wkb = shapely.to_wkb(lines)
-    # Interleaved chunks: neighbouring reaches (similar sizes) spread over the workers.
-    parts = [np.arange(i, n, workers) for i in range(workers)]
+
+@contextmanager
+def _one_blas_thread():
+    """BLAS/OpenMP threads = 1 in the environment that spawned workers inherit."""
     saved = {v: os.environ.get(v) for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")}
+    os.environ.update({v: "1" for v in saved})
     try:
-        os.environ.update({v: "1" for v in saved})   # inherited by the spawned workers
-        with ProcessPoolExecutor(workers, initializer=_carve_init, initargs=(ctx,)) as pool:
-            results = list(pool.map(_carve_worker, [
-                (wkb[ix], ok[ix], radius[ix], snap_r[ix], reach_order[ix], vals[ix], orders)
-                for ix in parts]))
-    except Exception as exc:  # noqa: BLE001 - a broken pool must not lose the carve
-        logger.warning("river carve: worker pool failed (%s); one pass instead", exc)
-        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
+        yield
     finally:
         for v, old in saved.items():
             if old is None:
                 os.environ.pop(v, None)
             else:
                 os.environ[v] = old
+
+
+def _carve_warm() -> None:
+    """Import what _carve_chunk needs, so a started pool's first chunk runs at once."""
+    import rasterio.features  # noqa: F401
+    import scipy.ndimage  # noqa: F401
+    import shapely  # noqa: F401
+    import skimage.graph  # noqa: F401
+    from numpy2stl.raster import burn_polygons  # noqa: F401
+
+
+def start_carve_pool():
+    """A carve process pool whose workers are already importing, or None.
+
+    Processes are spawned as tasks are submitted, so one warm-up task per worker
+    starts them all now. The caller passes it to :func:`river_depth_by_order` and
+    shuts it down (``shutdown(wait=False, cancel_futures=True)``).
+    """
+    workers = _carve_workers()
+    if workers < 2 or not _main_importable():
+        return None
+    from concurrent.futures import ProcessPoolExecutor
+    try:
+        with _one_blas_thread():
+            pool = ProcessPoolExecutor(workers)
+            for _ in range(workers):
+                pool.submit(_carve_warm)
+    except Exception as exc:  # noqa: BLE001 - no pool only means a cold one later
+        logger.warning("river carve: could not start the worker pool (%s)", exc)
+        return None
+    return pool
+
+
+def _carve_worker(args):
+    return _carve_chunk(*args)
+
+
+def _carve_parallel(lines, ok, radius, snap_r, reach_order, vals, orders, ctx, pool=None):
+    """_carve_chunk over all reaches: in CARVE_WORKERS processes above CARVE_PARALLEL_MIN
+    reaches (chunks combined by max, which is what one pass computes), else in this one.
+    Uses *pool* when given (left running for the caller to shut down), else its own.
+    Falls back to one pass if the pool cannot start."""
+    n = len(lines)
+    workers = pool._max_workers if pool is not None else _carve_workers()
+    if n < CARVE_PARALLEL_MIN or workers < 2 or (pool is None and not _main_importable()):
+        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
+    from concurrent.futures import ProcessPoolExecutor
+
+    import shapely
+    wkb = shapely.to_wkb(lines)
+    # Interleaved chunks: neighbouring reaches (similar sizes) spread over the workers.
+    # The context (DEM and frame, ~8 MB at 1000 px) goes with each chunk, so a pool
+    # started before the DEM was known can run them.
+    tasks = [(wkb[ix], ok[ix], radius[ix], snap_r[ix], reach_order[ix], vals[ix], orders, ctx)
+             for ix in (np.arange(i, n, workers) for i in range(workers))]
+    try:
+        if pool is not None:
+            results = list(pool.map(_carve_worker, tasks))
+        else:
+            with _one_blas_thread(), ProcessPoolExecutor(workers) as own:
+                results = list(own.map(_carve_worker, tasks))
+    except Exception as exc:  # noqa: BLE001 - a broken pool must not lose the carve
+        logger.warning("river carve: worker pool failed (%s); one pass instead", exc)
+        return _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx)
     stack = np.maximum.reduce([r[0] for r in results])
     kept = np.sum([r[1] for r in results], axis=0)
     return stack, kept
@@ -566,8 +713,22 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
             "snap": snap, "dem": dem_hash, "base": b, "v": RIVER_CARVE_VERSION,
             "scale_m": options.get("scale_m")})
 
+    def cached(b):
+        # An empty carve is never reused: entries written while the river source
+        # was failing (pyarrow broken, 2026-10-14) kept every river off Europa.
+        k = key(b)
+        with _CARVE_GUARD:
+            mem = _CARVE_MEMO.get(k)
+        if mem is not None:
+            return mem
+        hit = read_array_cache("river_carve", k)
+        if hit is None or not len(hit[0]["orders"]):
+            return None
+        _carve_memo_put(k, hit)
+        return hit
+
     for b in range(max(min_order, 1), 0, -1):
-        hit = read_array_cache("river_carve", key(b))
+        hit = cached(b)
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
     b = max(1, min(min_order, RIVER_BASE_ORDER))
@@ -575,21 +736,45 @@ def river_carve_layers(name, fetch, north, south, east, west, dim, options, base
     # the same carve together (Colombia at 800 px) and both built it, ~35 s each
     # side by side. The second caller waits, then reads the cache.
     with _carve_lock(key(b)):
-        hit = read_array_cache("river_carve", key(b))
+        hit = cached(b)
         if hit is not None:
             return hit[0]["orders"], hit[0]["stack"]
         from geo2stl.perf import perf_step
-        with perf_step("river_carve", key=key(b), src=name, shape=list(shape)):
-            gdf = fetch(north, south, east, west, {**options, "min_order": b})
-            orders, stack = river_depth_by_order(
-                gdf, north, south, east, west, shape,
-                width_scale=float(options.get("width_scale", 1.0)), dem=base, snap=snap)
-        write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+        _, width_m, height_m = _metric_frame(north, south, east, west)
+        pool = start_carve_pool() if width_m * height_m / 1e6 >= CARVE_PREWARM_KM2 else None
+        try:
+            with perf_step("river_carve", key=key(b), src=name, shape=list(shape),
+                           prewarm=pool is not None):
+                gdf = fetch(north, south, east, west, {**options, "min_order": b})
+                orders, stack = river_depth_by_order(
+                    gdf, north, south, east, west, shape,
+                    width_scale=float(options.get("width_scale", 1.0)), dem=base, snap=snap,
+                    pool=pool)
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=False, cancel_futures=True)
+        if len(orders):
+            write_array_cache("river_carve", key(b), {"orders": orders, "stack": stack})
+            # Kept as the cache stores it (float32), so a memory hit and a disk hit agree.
+            _carve_memo_put(key(b), ({"orders": orders.astype(np.float32),
+                                      "stack": stack.astype(np.float32, copy=False)}, {}))
     return orders, stack
 
 
 _CARVE_GUARD = threading.Lock()
 _CARVE_LOCKS: dict[str, list] = {}    # cache key -> [lock, callers holding or waiting]
+#: The last few carves in memory: a projection switch pools the same shared-grid
+#: carve again, and reading its .npz back cost ~0.2 s each time (Europa, 7 orders).
+_CARVE_MEMO: OrderedDict = OrderedDict()
+_CARVE_MEMO_MAX = 4
+
+
+def _carve_memo_put(key: str, hit) -> None:
+    with _CARVE_GUARD:
+        _CARVE_MEMO[key] = hit
+        _CARVE_MEMO.move_to_end(key)
+        while len(_CARVE_MEMO) > _CARVE_MEMO_MAX:
+            _CARVE_MEMO.popitem(last=False)
 
 
 @contextmanager
@@ -619,6 +804,7 @@ def _river_source(name: str, fetch):
 
     provider.__name__ = f"river_layer_source_{name}"
     provider.terrain_relative = True
+    provider.shared_grid = True     # carve once on the shared grid, pool per projection
     return provider
 
 

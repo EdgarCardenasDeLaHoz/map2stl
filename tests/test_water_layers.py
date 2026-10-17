@@ -293,7 +293,9 @@ def test_composite_reports_lakes_as_still_water(composite_env, monkeypatch):
         if saved is not None:
             _LAYER_SOURCES["lakes"] = saved
     still = water["still"]
-    assert still.shape == (64, 64) and still[5:10, 5:10].all() and still.sum() == 25
+    # The box is 0.05 deg x 0.1 deg, so with projection 'none' the grid is 32 x 64
+    # (dim = the longest side after projection, 2026-10-13).
+    assert still.shape == (32, 64) and still[5:10, 5:10].all() and still.sum() == 25
 
 
 def test_preview_marks_the_river_vertices(composite_env):
@@ -314,7 +316,8 @@ def test_preview_marks_the_river_vertices(composite_env):
         _LAYER_SOURCES.pop("unit_slope", None)
     data = json.loads(resp.body)
     rows = {data["vertices"][i][1] for i in data["water_idx"]}
-    assert data["water_idx"] and rows <= {30, 31, 32}
+    # Row 31.5 of 64 on a 32 x 64 grid (the box is 2:1 in degrees): row 15.
+    assert data["water_idx"] and rows <= {14, 15, 16}
     assert max(data["water_pct"]) == 100
 
 
@@ -409,11 +412,11 @@ def test_failing_optional_layer_is_skipped_not_fatal(composite_env, monkeypatch)
 
 def test_composite_keeps_the_projected_dem_grid(composite_env):
     """The composite's grid is the projected base grid, as /api/terrain/dem
-    returns it: a cosine projection narrows the longitude side below dim, and
-    the composite used to stretch it back to dim (Apply to DEM widened the
-    model by 1/cos(lat) and interpolated every cell)."""
+    returns it: projected_shape, whose longest side is dim (user decision
+    2026-10-13). The composite once stretched a cosine-narrowed grid back to
+    dim on one axis only (Apply to DEM widened the model by 1/cos(lat))."""
     from app.server.routers.composite import compute_composite_dem
-    from geo2stl.projections import project_grid
+    from geo2stl.projections import project_grid, projected_shape, source_shape
 
     bbox = {"north": 60.5, "south": 60.0, "east": 11.0, "west": 10.0}   # 2:1 in degrees
     register_layer_source("unit_tilted", lambda n, s, e, w, dim, o: np.tile(
@@ -424,9 +427,12 @@ def test_composite_keeps_the_projected_dem_grid(composite_env):
             projection="cosine", split_carve=True)
     finally:
         _LAYER_SOURCES.pop("unit_tilted", None)
-    expected = project_grid(np.tile(np.linspace(0, 100, 64), (32, 1)), 60.5, 60.0, 11.0, 10.0,
-                            "cosine", True, categorical=False)
-    assert base.shape == expected.shape and max(base.shape) < 64
+    box = (60.5, 60.0, 11.0, 10.0)
+    want = projected_shape(box, "cosine", 64)
+    expected = project_grid(np.tile(np.linspace(0, 100, 64), source_shape(64, box, "cosine")[:1]
+                                    + (1,)), *box, "cosine", True, categorical=False,
+                            target_dim=64)
+    assert base.shape == expected.shape == want and max(base.shape) == 64
     assert carve.shape == base.shape
 
 
@@ -562,4 +568,12 @@ def test_parallel_carve_matches_one_pass(monkeypatch):
     o2, s2 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem)
     assert np.array_equal(o1, o2)
     assert np.array_equal(s1, s2)
+    # A pool started before the reaches were read (river_carve_layers on a big box).
+    pool = wl.start_carve_pool()
+    assert pool is not None
+    try:
+        o3, s3 = wl.river_depth_by_order(gdf, N, S, E, W, (h, w), dem=dem, pool=pool)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    assert np.array_equal(o1, o3) and np.array_equal(s1, s3)
     assert (s1 > 0).sum() > 100

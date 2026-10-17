@@ -70,15 +70,19 @@ def resolve_dem(data: dict) -> tuple[list, int, int] | None:
     # on the way out. Returning it as-is meant the mesh and every export were
     # built from the unprojected grid - a different shape from the map the user
     # was looking at whenever a projection was selected, which is the default.
+    # ``target_dim`` gives the same exact shape the route returned: ``dim`` is
+    # the longest side after projection (user decision 2026-10-13).
+    from app.server.core.dem_cache import normalize_dem_settings
+    from geo2stl.projections import project_grid
     projection = dem.get("projection") or "none"
-    if projection != "none":
-        from geo2stl.projections import project_grid
-        clip = dem.get("clip_valid_region", True)
-        dem_arr = project_grid(
-            dem_arr.astype("float32"), north, south, east, west, projection,
-            bool(clip), categorical=False,
-            maintain_dimensions=bool(dem.get("maintain_dimensions", False)),
-        )
+    norm = normalize_dem_settings(dem)
+    clip = dem.get("clip_valid_region", True)
+    dem_arr = project_grid(
+        dem_arr.astype("float32"), north, south, east, west, projection,
+        bool(clip), categorical=False,
+        maintain_dimensions=norm["maintain_dimensions"],
+        target_dim=norm["dim"],
+    )
 
     h, w = dem_arr.shape
     logger.info("DEM resolved from cache for export (key %s, %dx%d, %s)",

@@ -23,6 +23,12 @@ where they do not, the user can replace one building, identified by its OSM id
   clipped exactly to the footprint (:func:`ndsm_solid`): a TIN over the footprint
   outline plus the raster cell centres inside it, heights sampled bilinearly
   (gaps filled from the nearest measured cell), closed down to the skirt floor.
+* ``{"kind": "height", "height_m": ..., "source": "<optional note>"}`` -- the OSM
+  building as drawn, with its top at ``height_m`` metres above the ground
+  (:func:`scale_heights`): every member's height, ``min_height`` and numeric
+  ``roof:height`` is multiplied by ``height_m`` / the tallest member's height, so
+  roof shapes and parts keep their proportions. For OSM ``height=10`` placeholders
+  on towers whose real height is known (Alhambra: Torre de Comares ~45 m).
 
 ``kind == "osm"`` (or no entry) keeps the tag-driven building.
 
@@ -33,7 +39,10 @@ the request with a clear message before any geometry is built;
 the solids in while the buildings layer is built. Parts (``building:part``) and
 other extrude-layer features lying mostly (≥ 50 %) inside an overridden footprint
 are removed with it, so a replaced cathedral does not keep its OSM towers or a
-second copy from the ``churches`` layer.
+second copy from the ``churches`` layer. A height override rescales those parts
+instead of removing them; later layers (``towers``, ``churches``, whose features
+carry no ``osm_id``) still lose their copies lying inside it, so a copy at the
+old OSM height does not show through.
 
 :func:`list_landmarks` is the Landmarks panel's list (``POST /api/cities/landmarks``).
 """
@@ -62,7 +71,11 @@ SEAT_OVERLAP_MM = 0.05
 MIN_NDSM_COVERAGE = 0.3
 #: Margin (m) added around a footprint when fetching its nDSM.
 NDSM_MARGIN_M = 5.0
-OVERRIDE_KINDS = ("osm", "mesh", "ndsm")
+OVERRIDE_KINDS = ("osm", "mesh", "ndsm", "height")
+#: A height override must be above 0 and below this (m).
+MAX_HEIGHT_M = 1000.0
+#: The height ``city_model`` extrudes a building without ``height_m`` to.
+DEFAULT_HEIGHT_M = 10.0
 
 WORSHIP_BUILDINGS = {"cathedral", "church", "chapel", "mosque", "temple", "synagogue", "shrine",
                      "basilica", "monastery"}
@@ -234,6 +247,18 @@ class LandmarkOverride:
     ndsm: np.ndarray | None = None
     transform: object | None = None     # rasterio.Affine
     source: str = ""
+    height_m: float | None = None       # kind "height": the building's new top
+
+
+def override_height_m(spec: dict) -> float:
+    """A height override's ``height_m`` as a float; LandmarkError unless 0 < h < MAX_HEIGHT_M."""
+    try:
+        h = float(spec.get("height_m"))
+    except (TypeError, ValueError):
+        raise LandmarkError("a height override needs height_m (metres above the ground)") from None
+    if not math.isfinite(h) or not 0 < h < MAX_HEIGHT_M:
+        raise LandmarkError(f"height_m must be above 0 and below {MAX_HEIGHT_M:g} m (got {h:g})")
+    return h
 
 
 def load_mesh(path: str | Path):
@@ -301,6 +326,17 @@ def resolve_overrides(specs: dict | None, features: list[dict], *,
             raise LandmarkError(f"landmark {oid}: unknown override kind {kind!r}")
         if kind == "osm":
             continue
+        if kind == "height":
+            try:
+                spec["height_m"] = override_height_m(spec)
+            except LandmarkError as exc:
+                raise LandmarkError(f"landmark {oid}: {exc}") from exc
+        if kind == "height":
+            # Needs no footprint data of its own: a building the city data lacks is
+            # reported as missing by LandmarkPlan.take instead of failing the build.
+            out[oid] = LandmarkOverride(oid, kind, spec, source=str(spec.get("source") or kind),
+                                        height_m=spec["height_m"])
+            continue
         feats = landmark_features(features, oid)
         if not feats:
             raise LandmarkError(f"landmark {oid}: no building with this OSM id in the city data")
@@ -343,11 +379,14 @@ def _resolve_ndsm(oid: str, spec: dict, feats: list[dict], fetch) -> LandmarkOve
 
 def coerce_overrides(overrides: dict | None) -> dict[str, LandmarkOverride]:
     """``{osm_id: LandmarkOverride | dict}`` -> resolved overrides (dicts must carry
-    ``mesh`` or ``ndsm`` + ``transform`` already loaded)."""
+    ``mesh`` or ``ndsm`` + ``transform`` already loaded, or a valid ``height_m``)."""
     out = {}
     for oid, ov in (overrides or {}).items():
         if isinstance(ov, LandmarkOverride):
             out[oid] = ov
+        elif isinstance(ov, dict) and ov.get("kind") == "height":
+            out[oid] = LandmarkOverride(oid, "height", ov, source=str(ov.get("source") or "height"),
+                                        height_m=override_height_m(ov))
         elif isinstance(ov, dict) and ov.get("kind") in ("mesh", "ndsm"):
             out[oid] = LandmarkOverride(oid, ov["kind"], ov, mesh=ov.get("mesh"),
                                         ndsm=ov.get("ndsm"), transform=ov.get("transform"),
@@ -503,6 +542,29 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
     return out
 
 
+def scale_heights(props: dict, k: float) -> dict:
+    """A copy of one feature's properties with every height scaled by ``k``.
+
+    ``height_m`` (``DEFAULT_HEIGHT_M`` when missing, as ``city_model`` extrudes
+    it), the base (``min_height`` / ``building:min_level``, written back as
+    ``min_height``) and a numeric ``roof:height``. ``height_source`` becomes
+    ``"landmark"``.
+    """
+    from city2stl.heights import min_height_from_tags, parse_length_m
+
+    out = dict(props)
+    out["height_m"] = (_height(props) or DEFAULT_HEIGHT_M) * k
+    base = min_height_from_tags(props)
+    if base > 0:
+        out["min_height"] = base * k
+        out.pop("building:min_level", None)
+    roof = parse_length_m(props.get("roof:height"))
+    if roof is not None:
+        out["roof:height"] = roof * k
+    out["height_source"] = "landmark"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Plan: swap overridden buildings while build_on_terrain builds its layers
 # ---------------------------------------------------------------------------
@@ -514,8 +576,10 @@ class LandmarkPlan:
     that layer's model-mm polygons. On the buildings layer it pulls out every
     overridden building (by ``osm_id``) plus the parts / features lying mostly
     inside it, and returns the override's solids in their place; a failing
-    override leaves the OSM building as it was and is reported. Later extrude
-    layers lose features lying mostly inside a replaced footprint.
+    override leaves the OSM building as it was and is reported. A height
+    override keeps those features, rescaled (:func:`scale_heights`), and adds no
+    solid. Later extrude layers lose features lying mostly inside an overridden
+    footprint.
     """
 
     def __init__(self, overrides: dict):
@@ -550,6 +614,7 @@ class LandmarkPlan:
                 self.report[oid] = {"kind": self.overrides[oid].kind, "status": "missing",
                                     "reason": "no building with this OSM id in the model"}
         solids: list[Mesh] = []
+        props = list(props)
         removed = np.zeros(len(polys), bool)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         for oid, ks in groups.items():
@@ -560,6 +625,15 @@ class LandmarkPlan:
             lo, hi = terrain.ranges_under(list(shapely.get_parts(fp)))
             z_floor, ground_hi = max(float(lo.min()) - 0.2, 0.0), float(hi.max())
             heights = [h for h in (_height(props[k]) for k in np.flatnonzero(mine)) if h is not None]
+            if ov.kind == "height":
+                old = max(heights) if heights else DEFAULT_HEIGHT_M
+                for k in np.flatnonzero(mine):
+                    props[k] = scale_heights(props[k], ov.height_m / old)
+                self.footprints[oid] = fp
+                self.report[oid] = {"kind": ov.kind, "source": ov.source, "status": "applied",
+                                    "height_m": round(ov.height_m, 2), "osm_height_m": round(old, 2),
+                                    "scaled_features": int(mine.sum())}
+                continue
             try:
                 if ov.kind == "mesh":
                     got = [mesh_solid(ov, fp, terrain, z_floor, ground_hi, z_per_m,

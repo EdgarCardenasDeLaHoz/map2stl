@@ -6,10 +6,12 @@ from typing import Any
 
 # 3: building parts and their outlines are no longer dissolved together.
 # 4: buildings carry osm_id, name, building, amenity, historic, tourism (landmarks).
-CITY_PIPELINE_VERSION = 4
+# 5: named / historic buildings and towers are not dissolved into their neighbours
+#    (city2stl.heights.keeps_own_footprint).
+CITY_PIPELINE_VERSION = 5
 #: Payload versions whose only defect is the buildings layer: re-fetching that
 #: layer brings them up to date, the other cached layers are still good.
-BUILDINGS_ONLY_STALE_VERSIONS = frozenset({3})
+BUILDINGS_ONLY_STALE_VERSIONS = frozenset({3, 4})
 
 
 def building_features(payload: dict[str, Any]) -> list[dict[str, Any]]:

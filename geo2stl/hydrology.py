@@ -590,13 +590,28 @@ _RIVERS_MEMO_MAX = 3
 _RIVERS_LOCK = threading.Lock()
 
 
+class HydroRiversUnavailable(RuntimeError):
+    """A HydroRIVERS region could not be built or read: a failure, not "no rivers"."""
+
+
 def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
-    """Concatenated bbox reads of the regions' parquet files, or None when empty."""
+    """Concatenated bbox reads of the regions' parquet files, or None when empty.
+
+    Raises :class:`HydroRiversUnavailable` when a region's parquet cannot be built
+    or read. Returning None there made a broken install (pyarrow 26 against
+    numpy 1.26) look like a box without rivers, and every cache froze that
+    (Europa, 2026-10-14); raised, the composite skips the layer and retries.
+    """
     import geopandas as gpd
 
     gdfs = []
+    failed = []
     for region in regions:
-        if _ensure_region_parquet(region) is None:
+        # An order 3+ read needs only that file: rebuilding a missing full parquet
+        # from the shapefile first cost Colombia's first open 21 s (2026-10-14).
+        ready = use_o3 and _parquet_is_valid(_region_parquet_path(region, order3plus=True))
+        if not ready and _ensure_region_parquet(region) is None:
+            failed.append(region)
             continue
         pq = _region_parquet_path(region, order3plus=use_o3)
         if not pq.exists():
@@ -613,7 +628,11 @@ def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
         except Exception as e:
             logger.error(
                 "HydroRIVERS parquet read failed for '%s': %s", region, e)
+            failed.append(region)
 
+    if failed:
+        raise HydroRiversUnavailable(
+            f"HydroRIVERS region(s) {', '.join(failed)} unavailable (see the server log)")
     if not gdfs:
         return None
 
@@ -755,28 +774,58 @@ def rasterize_hydrorivers_orders(
     keep = ~shapely.is_empty(arr)
     buffered = arr[keep]
     order_arr = order_arr[keep]
+    wide = wide[keep]
     dt_prep = _time.perf_counter() - t_prep
     logger.info("  vectorized simplify+buffer: %.2fs, %d shapes",
                 dt_prep, len(buffered))
 
-    # Highest Strahler order per pixel: lowest order first, higher orders overwrite.
     t_rast = _time.perf_counter()
-    orders = np.zeros((dim, dim), dtype=np.uint8)
-    for o in sorted(set(int(x) for x in order_arr)):
-        mask = order_arr == o
-        try:
-            layer = burn_polygons(list(buffered[mask]), (dim, dim),
-                                  bounds=(west, south, east, north), values=float(o),
-                                  mode="set", all_touched=True, dtype=np.float32)
-            orders[layer > 0] = o
-        except Exception as e:
-            logger.warning("HydroRIVERS rasterize order %d: %s", o, e)
+    try:
+        orders = _burn_orders(buffered, order_arr, wide, dim, (west, south, east, north))
+    except Exception as e:
+        logger.warning("HydroRIVERS rasterize: %s", e)
+        orders = np.zeros((dim, dim), dtype=np.uint8)
     dt_rast = _time.perf_counter() - t_rast
     dt_total = _time.perf_counter() - t0
     logger.info("rasterize_hydrorivers done: %d river pixels at %dx%d, "
                 "total=%.2fs (prep=%.2fs, rasterize=%.2fs)",
                 int(np.count_nonzero(orders)), dim, dim, dt_total, dt_prep, dt_rast)
     return orders
+
+
+def _burn_orders(shapes, order_arr, wide, dim: int, bounds) -> np.ndarray:
+    """(dim, dim) uint8 grid of the highest order per pixel, in one rasterize pass.
+
+    Shapes are drawn in ascending order (stable), so a higher order overwrites a
+    lower one: the same grid as one burn per order (``all_touched``, row 0 north).
+    The buffer width rises with the order, so the *wide* (buffered polygon) reaches
+    are exactly the highest orders and drawing the lines first, then the polygons,
+    keeps that order. Each group is converted to GeoJSON on its own: polygons take
+    numpy2stl's ragged-array path, which a mixed list falls off (a single mixed
+    ``burn_polygons`` was 2.23 s against 1.85 s for the per-order passes on 89k
+    Colombia reaches at dim 2048; this is 1.65 s).
+    """
+    import shapely
+    idx = np.argsort(order_arr, kind="stable")
+    idx = idx[shapely.is_geometry(shapes[idx])]          # burn_polygons skipped None too
+    shapes, order_arr, wide = shapes[idx], order_arr[idx], wide[idx]
+    try:
+        from affine import Affine
+        from numpy2stl.raster.burn import _as_geojson_pairs
+        from rasterio.features import rasterize
+    except ImportError:
+        return burn_polygons(list(shapes), (dim, dim), bounds=bounds,
+                             values=order_arr.astype(np.float64), mode="max",
+                             all_touched=True, dtype=np.uint8)
+    if not len(shapes):
+        return np.zeros((dim, dim), dtype=np.uint8)
+    pairs = []
+    for group in (~wide, wide):
+        pairs += _as_geojson_pairs(list(zip(shapes[group], order_arr[group].tolist(), strict=True)))
+    west, south, east, north = (float(v) for v in bounds)
+    aff = Affine((east - west) / dim, 0.0, west, 0.0, -(north - south) / dim, north)
+    return rasterize(pairs, out_shape=(dim, dim), transform=aff, fill=0,
+                     all_touched=True, dtype=np.uint8)
 
 
 def order_depth_grid(orders: np.ndarray, depression_base: float = -5.0,
@@ -892,9 +941,15 @@ class HydrologyService:
 HYDROLOGY_LAYER = HydrologyService()
 
 
-def water_surface_mask(north, south, east, west, shape) -> np.ndarray | None:
+def water_surface_mask(north, south, east, west, shape,
+                       fetch_dim: int | None = None) -> np.ndarray | None:
     """Open water on a (rows, cols) grid over the bbox: sea and lakes, for the
     union with the river lines (row 0 north). None when no source is available.
+
+    ``fetch_dim`` is the longest side to sample ESA at. Callers pass the water
+    layer's shared source size (``routers/terrain.py::_layer_source_dim``) so
+    every projection, and the water-mask route, read one Earth Engine image
+    instead of one per projection shape. Without it the scale follows ``shape``.
 
     Union of
       * ESA WorldCover permanent water (class 80) and its no-data (0), which is
@@ -915,7 +970,11 @@ def water_surface_mask(north, south, east, west, shape) -> np.ndarray | None:
         from geo2stl.sat2stl import fetch_water_mask
 
         wm, ht = bbox_size_m({"north": north, "south": south, "east": east, "west": west})
-        scale = max(30, int(max(wm / w, ht / h)))
+        if fetch_dim:
+            # ceil, as the water-mask route does, so both land on the same scale
+            scale = max(30, int(np.ceil(max(wm, ht) / fetch_dim)))
+        else:
+            scale = max(30, int(max(wm / w, ht / h)))
         _, esa, _ = fetch_water_mask(north, south, east, west, scale, "esa")
         if esa is not None and esa.size:
             esa_water = ((esa == 80) | (esa == 0)).astype(np.uint8)

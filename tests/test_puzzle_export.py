@@ -10,7 +10,16 @@ import trimesh
 
 from app.server.core.export import generate_puzzle
 from app.server.core.export_tasks import ExportTask
-from app.server.core.puzzle import plan_grid
+from app.server.core.puzzle import (
+    CHAMFER_MM,
+    CORNER_RADIUS_MM,
+    DEFAULT_CLEARANCE_MM,
+    FIT_TEST_CLEARANCES_MM,
+    cut_pieces,
+    fit_test_mesh,
+    knob_size,
+    plan_grid,
+)
 
 
 def _make_dem_data(height=50, width=60, peak=500.0):
@@ -68,7 +77,7 @@ class TestGeneratePuzzle:
         from app.server.core.export_params import _parse_export_params
 
         data = _puzzle_request(cols=3, rows=2, height=60, width=90, clearance_mm=0.0,
-                               engrave_ids=False)
+                               corner_radius_mm=0.0, chamfer_mm=0.0, engrave_ids=False)
         whole = _prepare_export_mesh(_parse_export_params(data), data)
         task = _run(data)
         assert task.status == "complete", task.message
@@ -112,6 +121,57 @@ class TestPuzzleRouter:
         resp = client.post("/api/export/start", json=data)
         assert resp.status_code == 200
         assert "task_id" in resp.json()
+
+
+class TestPrintability:
+    """FDM fit defaults: 0.45 mm clearance, 0.5 mm corner radius, 0.4 mm bottom chamfer."""
+
+    def test_defaults_reach_the_cut(self):
+        from app.server.core.export import puzzle_spec
+        from app.server.core.puzzle import Heightfield
+
+        z = np.full((61, 91), 6.0)
+        hf = Heightfield(z_mm=z, mm_per_px=1.0, max_error=0.05)
+        pieces, info = cut_pieces(puzzle_spec({"split_cols": 3, "split_rows": 2,
+                                               "engrave_ids": False}), heightfield=hf)
+        assert (info["clearance_mm"], info["corner_radius_mm"], info["chamfer_mm"]) == (
+            DEFAULT_CLEARANCE_MM, CORNER_RADIUS_MM, CHAMFER_MM)
+        assert info["volume"]["open_pieces"] == []
+        for v, _ in pieces.values():   # the bevel pulls the bottom ring in by the chamfer
+            v = np.asarray(v)
+            bottom, mid = v[v[:, 2] < 1e-6], v[np.abs(v[:, 2] - CHAMFER_MM) < 1e-6]
+            assert len(mid) and bottom[:, 0].min() > mid[:, 0].min() + CHAMFER_MM / 2
+
+    def test_zero_turns_them_off(self):
+        from app.server.core.puzzle import Heightfield
+
+        hf = Heightfield(z_mm=np.full((61, 91), 6.0), mm_per_px=1.0, max_error=0.05)
+        pieces, _ = cut_pieces({"cols": 3, "rows": 2, "engrave": False, "clearance_mm": 0,
+                                "corner_radius_mm": 0, "chamfer_mm": 0}, heightfield=hf)
+        total = sum(trimesh.Trimesh(v, f).volume for v, f in pieces.values())
+        assert total == pytest.approx(90 * 60 * 6.0, rel=1e-6)
+
+    def test_notched_tab_spans_most_of_the_edge(self):
+        edges = np.array([0.0, 100.0, 200.0])
+        w, d = knob_size(edges, edges, {"knob_shape": "notched", "clearance_mm": 0.3})
+        assert (round(w, 6), d) == (58.8, 15.0)
+        w, d = knob_size(edges, edges, {"knob_shape": "dovetail"})
+        assert (w, d) == (30.0, 15.0)
+        # notched is the default
+        assert knob_size(edges, edges, {}) == knob_size(edges, edges, {"knob_shape": "notched"})
+
+    @pytest.mark.parametrize("shape", ["dovetail", "classic", "rectangular", "notched"])
+    def test_fit_test_coupon_is_one_closed_joint_per_clearance(self, shape):
+        mesh = fit_test_mesh({"knob_shape": shape})
+        bodies = mesh.split(only_watertight=True)
+        assert len(bodies) == 2 * len(FIT_TEST_CLEARANCES_MM)
+        assert mesh.extents[0] < 220 and mesh.extents[1] < 220     # one Ender bed
+
+    def test_fit_test_endpoint_returns_an_stl(self, client):
+        r = client.post("/api/export/fit-test", json={"knob_shape": "notched"})
+        assert r.status_code == 200
+        mesh = trimesh.load(io.BytesIO(r.content), file_type="stl")
+        assert len(mesh.split(only_watertight=True)) == 2 * len(FIT_TEST_CLEARANCES_MM)
 
 
 def test_volume_check_reports_kept_fraction_and_open_pieces():

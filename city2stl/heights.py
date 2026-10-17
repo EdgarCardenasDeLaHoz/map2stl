@@ -133,10 +133,32 @@ _ROOF_COLS = [
 LANDMARK_TAG_COLS = ["osm_id", "name", "building", "amenity", "historic", "tourism"]
 
 
+def keeps_own_footprint(row) -> bool:
+    """True for a building :func:`_reduce_buildings` must not merge into a neighbour.
+
+    A named or ``historic`` building, or a tower (``tower:type``,
+    ``man_made=tower``, ``building=tower``), is a landmark of its own: merged,
+    it lost its osm_id, name and height to the largest member of its group
+    (Granada: 26 touching 10 m halls and towers of the Nasrid palaces - Mexuar,
+    Torre de Comares, Banos Reales - became "Palacio de Carlos V"; user,
+    2026-10-14: "Keep named separate"). ``row`` is a mapping of tag columns;
+    absent columns count as untagged.
+    """
+    get = row.get
+    if not _is_missing(get("name")) or not _is_missing(get("historic")):
+        return True
+    if not _is_missing(get("tower:type")):
+        return True
+    return (str(get("man_made") or "").strip().lower() == "tower"
+            or str(get("building") or "").strip().lower() == "tower")
+
+
 def _reduce_buildings(gdf):
     """
     Reduce building polygon count by merging only buildings that physically
-    touch or overlap and share the same rounded height.
+    touch or overlap and share the same rounded height. Landmarks (named,
+    ``historic`` or towers: :func:`keeps_own_footprint`) are never merged and
+    keep their own tags.
 
     Uses a spatial-graph approach: build an adjacency graph from intersecting
     pairs, find connected components, and dissolve each component separately.
@@ -162,6 +184,10 @@ def _reduce_buildings(gdf):
 
         # Build adjacency: find pairs that touch/overlap using spatial index
         sindex = gdf.sindex
+        cols = [c for c in ("name", "historic", "tower:type", "man_made", "building")
+                if c in gdf.columns]
+        alone = ([keeps_own_footprint(r) for r in gdf[cols].to_dict("records")]
+                 if cols else [False] * n)
         parent = list(range(n))
 
         def find(i):
@@ -176,9 +202,11 @@ def _reduce_buildings(gdf):
                 parent[pi] = pj
 
         for i, geom in enumerate(gdf.geometry):
+            if alone[i]:
+                continue
             candidates = list(sindex.query(geom, predicate='intersects'))
             for j in candidates:
-                if j <= i:
+                if j <= i or alone[j]:
                     continue
                 if gdf.at[i, 'height_m'] == gdf.at[j, 'height_m']:
                     union(i, j)

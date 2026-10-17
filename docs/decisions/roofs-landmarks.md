@@ -7,6 +7,88 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
 [../research/roof-shape-research.md](../research/roof-shape-research.md); classifier reference:
 [../reference/roof-shape-model.md](../reference/roof-shape-model.md).
 
+### 2026-10-14 — Wall and fortification polygons print as their outline ring, in ground-following pieces
+- **Decision:** `walls` and `fortifications` polygons (`city2stl/city_model.py::RING_LAYERS`)
+  become their outline ring, buffered by the layer's line width, in
+  `city2stl/city_model.py::feature_polygons`; `towers` polygons stay filled. Both layers'
+  footprints, rings and line walls alike, are then cut into `WALL_PIECE_MM` (2 mm) grid pieces
+  (`city2stl/city_model.py::split_on_ground`) in `build_layer` and `layer_preflight`, each
+  extruded on the ground under it; pieces keep the whole wall's height and slenderness cap.
+  Both constants are in `_polygon_constants`, so polygon and solid caches change with them.
+  `drop_building_copies` is unchanged: a fortification polygon that copies a building is
+  still dropped before the ring is made.
+- **Why:** Granada's Alhambra precinct is one fortification polygon. Filled, it printed as one
+  slab 63 m above the lowest ground under it (51 m of relief), burying 84 of the 85 buildings
+  inside and 24 of 25 towers. A ring alone still stood 52 m tall, because an extruded footprint's
+  top is the highest ground under the whole footprint plus its height. With ring plus pieces the
+  worst piece stands 18 m above its own ground; 83 of 85 buildings and 23 of 25 towers stand
+  clear. User choice: "Outline ring only".
+- **Rejected:** keep the polygon filled and lower it (still a slab over the buildings); ring
+  without pieces (52 m wall on a slope); pieces for every extruded layer (a building's flat roof
+  must stay one flat top).
+- **Supersedes / superseded by:** —
+- **Source:** Granada cache `cache/osm/d30b834cb6bcc839289b3c717601da32`; tests
+  `tests/test_city_model.py::TestWallRings`.
+
+### 2026-10-14 — Named, historic and tower buildings are not merged into their neighbours
+- **Decision:** `city2stl/heights.py::_reduce_buildings` skips any building for which
+  `city2stl/heights.py::keeps_own_footprint` is true (`name`, `historic` or `tower:type` set, or
+  `man_made=tower`, or `building=tower`): it keeps its own geometry, `osm_id`, tags and height.
+  Unnamed touching buildings of the same rounded height still merge. `CITY_PIPELINE_VERSION`
+  went 4 to 5 (`city2stl/cache_policy.py`), with 4 in `BUILDINGS_ONLY_STALE_VERSIONS`, so a
+  cached city refetches only its buildings layer.
+- **Why:** in Granada 26 touching 10 m halls and towers of the Nasrid palaces (Mexuar, Torre de
+  Comares, Baños Reales, ...) were dissolved into one polygon carrying "Palacio de Carlos V"'s
+  id and tags, so landmark overrides and heights could not reach them. User choice: "Keep named
+  separate".
+- **Rejected:** merging only buildings of identical tags (still loses the osm_id of all but
+  one); no merging at all (unnamed rows of terraced houses are the reason the merge exists).
+- **Supersedes / superseded by:** —
+- **Source:** tests `tests/test_enhance_heights.py::TestReduceBuildingsKeepsLandmarks`.
+
+### 2026-10-14 — A "height" landmark override rescales the OSM building to a known top height
+- **Decision:** override kind `"height"` (`{"kind": "height", "height_m", "source"?}`,
+  `city2stl/landmarks.py::OVERRIDE_KINDS`) keeps the OSM building and its parts as drawn and
+  multiplies every member's `height_m`, `min_height` (from `building:min_level` if needed) and
+  numeric `roof:height` by `height_m` / the tallest member's height
+  (`city2stl/landmarks.py::scale_heights`, applied in `LandmarkPlan.take`). Members are those
+  `take` already groups: features with the `osm_id` plus features lying ≥ 50 % inside. The
+  footprint is registered like a replaced one, so `towers` / `churches` / `fortifications` copies
+  inside it are dropped (those layers carry no `osm_id`, so they cannot be matched by id; the
+  2026-10-13 copy rule below already drops most of them). `height_m` must be > 0 and < 1000 m
+  (`override_height_m`), checked on save (`app/server/core/landmarks.py::validate_spec`), in
+  `resolve_overrides` and in `coerce_overrides`. The Landmarks panel offers it as "Height" with a
+  metres field and an optional source note.
+- **Why:** OSM tags most Alhambra towers `height=10` (Torre de Comares is ~45 m from its outer
+  base, Torre de la Vela ~27 m); the user chose landmark overrides to fix this per region.
+  Scaling keeps gabled/pyramidal roofs and part layouts in proportion and makes the given value
+  the building's top, which is what published heights describe. The built top scales exactly
+  by the factor (tests compare against the plain OSM build, since the roof code does not put a
+  pyramid apex at full `height_m`).
+- **Rejected:** flat top at `height_m` dropping roof tags — loses the roof shapes OSM has and
+  flattens part layouts; setting only the outline's height — parts keep their old heights and
+  show through or float; the Buildings panel's per-index height edits
+  (`modules/layers/building-heights.js::buildingsWithOverrides`) — keyed by feature index, lost on
+  refetch, not stored per region, one feature without its parts.
+- **Supersedes / superseded by:** —
+
+### 2026-10-13 — Churches, towers and fortifications drop the outlines the buildings layer already has
+- **Decision:** `city2stl/city_model.py::build_on_terrain` drops a `churches`, `towers` or
+  `fortifications` polygon that lies at least `REPLACE_OVERLAP` (50 %) inside the buildings
+  layer's footprints (`drop_building_copies`, index from `building_cover`), when the buildings
+  layer is on. The report counts them as `building_copies_dropped`. Outline leftovers between
+  building parts are kept (`assemble_parts` unchanged).
+- **Why:** those queries return the same outlines as the buildings layer, without
+  `building:part` data, so each became one flat block at the outline's height. Granada
+  Cathedral printed as a single 45 m prism over its 41 parts (16.5–50 m). On Granada's cache
+  the rule drops 46 of 46 churches, 40 of 43 towers and 8 of 10 fortifications; every church
+  has a building outline with full tags under it. The user asked to keep the outline remainder
+  between parts.
+- **Rejected:** drop the outline remainder in `assemble_parts` (user: keep leftovers);
+  rebuilding the footprint index per layer (22.6 s on Granada vs 2.9 s once).
+- **Supersedes / superseded by:** —
+- **Source:** [Extrude audit](../history/audits/AUDIT-2026-10-13-extrude.md)
+
 ### 2026-09-27 — A roof that cannot be closed falls back to flat at mid-roof, never fails the build
 - **Decision:** `city2stl/city_model.py::_roofed` catches Triangle errors from
   `city2stl/roofs.py::building_solids` (and any non-manifold roof solid) and emits a flat prism at

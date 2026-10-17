@@ -8,6 +8,7 @@
  *   downloadSTL()                     — POST to /api/export/stl → download
  *   downloadModel(format)             — POST to /api/export/{format} → download
  *   downloadCrossSection()            — POST to /api/export/crosssection → download
+ *   downloadFitTest()                 — POST to /api/export/fit-test → puzzle fit-test STL
  *   cancelExport()                    — abandon the in-flight export (client-side)
  *   runPreflight(format)              — POST /api/export/preflight with the body the
  *                                       'city' / 'puzzle' export would send → {data, error}
@@ -258,19 +259,32 @@ function _bedMm() {
     return [bed.w, bed.h];
 }
 
+/**
+ * A numeric field value, or `fallback` when it is not a number (or, with
+ * `positive`, not above zero). `parseFloat(x) || fallback` also replaced a
+ * legitimate 0: a 0 mm clearance was exported as 0.3 mm.
+ */
+function _numOr(raw, fallback, positive = false) {
+    const v = parseFloat(raw);
+    return Number.isFinite(v) && (!positive || v > 0) ? v : fallback;
+}
+
 /** Knob, engraving and layout options shared by both puzzle routes. */
 function _puzzleOptions() {
-    const num = (id, fallback) => parseFloat(document.getElementById(id)?.value) || fallback;
+    const num = (id, fallback) => _numOr(document.getElementById(id)?.value, fallback);
     return {
-        knob_width_mm: num('splitKnobWidth', 20),
-        knob_depth_mm: num('splitKnobDepth', 8),
-        knob_shape: document.getElementById('splitKnobShape')?.value || 'classic',
-        clearance_mm: num('splitClearance', 0.3),
+        // 0 is valid for all three: a 0 knob size means "scale to the piece"
+        // (app/server/core/puzzle.py), a 0 clearance a press fit.
+        knob_width_mm: num('splitKnobWidth', 0),
+        knob_depth_mm: num('splitKnobDepth', 0),
+        knob_shape: document.getElementById('splitKnobShape')?.value || 'notched',
+        clearance_mm: num('splitClearance', 0.45),
     };
 }
 
 /** Request fields of the terrain puzzle (flat names, app/server/core/export.py:puzzle_spec). */
 function _puzzleExtra() {
+    // A 0 x N grid is not a puzzle, so 0 falls back here too.
     const cols = parseInt(document.getElementById('splitCols')?.value, 10) || 3;
     const rows = parseInt(document.getElementById('splitRows')?.value, 10) || 3;
     return {
@@ -308,7 +322,7 @@ function _cityExtra() {
     if (extra.layers.buildings?.enabled !== false && landmarks) extra.landmark_overrides = landmarks;
     if (document.getElementById('cityPuzzleEnabled')?.checked) {
         extra.puzzle = {
-            piece_mm: parseFloat(document.getElementById('cityPieceMm')?.value) || 200,
+            piece_mm: _numOr(document.getElementById('cityPieceMm')?.value, 200, true),
             ..._puzzleOptions(),
             engrave: document.getElementById('puzzleEngrave')?.checked ?? true,
             layout: document.getElementById('puzzleLayout')?.checked ?? false,
@@ -488,26 +502,27 @@ function downloadCrossSection() {
     const cutAxis = document.getElementById('crossSectionAxis')?.value || 'lat';
     const cutValue = parseFloat(document.getElementById('crossSectionValue')?.value);
     if (isNaN(cutValue)) { window.showToast('Enter a cut coordinate first', 'warning'); return; }
-    const thickness = parseFloat(document.getElementById('crossSectionThickness')?.value) || 5;
+    const thickness = _numOr(document.getElementById('crossSectionThickness')?.value, 5, true);
     const statusEl = document.getElementById('crossSectionStatus');
     if (statusEl) statusEl.textContent = 'Generating…';
 
     const name = _regionName();
-    const md = window.appState.generatedModelData;
 
-    const ds = _demSettings();
+    // The same body as the model export (DEM settings + build fields: mm_per_pixel,
+    // z_mode, exaggeration, model/base height, median, sea-level cap), so the server
+    // cuts the slab from the heightfield the model was built from. It used to send
+    // three heights and no mm/px or vertical mode: the slab came out at 1 mm/px in
+    // Fit mode whatever the model used.
+    const params = _exportParams();
     fetch('/api/export/crosssection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            ...ds,
-            north: ds.bbox.north, south: ds.bbox.south,
-            east: ds.bbox.east, west: ds.bbox.west,
+            ...params,
+            north: params.bbox.north, south: params.bbox.south,
+            east: params.bbox.east, west: params.bbox.west,
             cut_axis: cutAxis,
             cut_value: cutValue,
-            model_height: md.modelHeight,
-            base_height: md.baseHeight,
-            exaggeration: md.exaggeration,
             thickness_mm: thickness,
             name
         })
@@ -533,11 +548,35 @@ function downloadCrossSection() {
 // Expose on window
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Download the puzzle fit-test coupon: one two-piece joint per clearance
+ * (0.2 to 0.5 mm), cut with the chosen knob shape. Needs no region.
+ */
+async function downloadFitTest() {
+    try {
+        const resp = await fetch('/api/export/fit-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_puzzleOptions()),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${resp.status}`);
+        }
+        _triggerDownload(await resp.blob(), 'puzzle_fit_test.stl');
+        window.showToast?.('Fit test ready: print it, then use the clearance that fits', 'success', 5000);
+    } catch (e) {
+        console.error('Fit test error:', e);
+        window.showToast?.('Fit test failed: ' + e.message, 'error', 6000);
+    }
+}
+
 window._setExportButtonsEnabled = _setExportButtonsEnabled;
 window._demSettings = _demSettings;
 window.downloadSTL = downloadSTL;
 window.downloadModel = downloadModel;
 window.downloadCrossSection = downloadCrossSection;
+window.downloadFitTest = downloadFitTest;
 window.exportCityModel = exportCityModel;
 // The City Model export request, as exportCityModel sends it: the viewer builds the same
 // one in the background (model-viewer.js::_scheduleFullModel), so a download hits the cache.

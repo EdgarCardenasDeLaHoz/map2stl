@@ -87,10 +87,12 @@
  * (POST /api/layers/mesh/library/{rel_path}/location, apply_to_city).
  */
 import CollapsibleSection from '../shared/CollapsibleSection.vue';
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useAppStore } from '../../stores/app';
 
 type Pack = { slug: string; city: string; scorable: boolean; placeable: boolean; verdict: string | null };
 
+const store = useAppStore();
 const api = () => (window as any).api;
 const toast = (msg: string, kind = 'info') => (window as any).showToast?.(msg, kind);
 
@@ -274,6 +276,19 @@ loadPacks();
 onBeforeUnmount(() => {
   stopPolling();
   clearMapLayer();
+});
+
+// A placement belongs to the region it was run for: drop it, and its map
+// outline, as soon as another region is selected.
+watch(() => (store as any).selectedRegion?.name, () => {
+  stopPolling();
+  clearMapLayer();
+  running.value = false;
+  task.value = null;
+  result.value = null;
+  errorMsg.value = '';
+  relPath.value = '';
+  slug.value = '';
 });
 </script>
 

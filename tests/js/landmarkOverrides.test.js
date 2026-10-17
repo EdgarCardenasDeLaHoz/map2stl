@@ -3,11 +3,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+    MAX_HEIGHT_M,
     draftFromSpec,
     meshBounds,
     overrideLabel,
     overridesForBuild,
     specFromDraft,
+    validHeight,
 } from '../../app/client/static/js/modules/layers/landmark-overrides.js';
 
 describe('overridesForBuild', () => {
@@ -55,5 +57,27 @@ describe('labels and bounds', () => {
         expect(b.max).toEqual([10, 2, 4]);
         expect(b.center).toEqual([4, 1, 2]);
         expect(b.size).toBe(12);
+    });
+});
+
+describe('height overrides', () => {
+    it('validates the height', () => {
+        expect(validHeight(45)).toBe(true);
+        expect(validHeight('27.5')).toBe(true);
+        for (const h of [0, -3, MAX_HEIGHT_M, NaN, null, '', 'abc']) expect(validHeight(h)).toBe(false);
+    });
+    it('round-trips with an optional source note', () => {
+        const spec = { kind: 'height', height_m: 45, source: 'https://example.org/comares' };
+        expect(specFromDraft(draftFromSpec(spec))).toEqual(spec);
+        const bare = specFromDraft({ ...draftFromSpec({ kind: 'height' }), height_m: 27, source: '  ' });
+        expect(bare).toEqual({ kind: 'height', height_m: 27 });
+    });
+    it('is sent with the build only when valid', () => {
+        expect(overridesForBuild({ 'way/1': { kind: 'height', height_m: 45 }, 'way/2': { kind: 'height' },
+            'way/3': { kind: 'height', height_m: 5000 } })).toEqual({ 'way/1': { kind: 'height', height_m: 45 } });
+    });
+    it('labels it', () => {
+        expect(overrideLabel({ kind: 'height', height_m: 45 })).toBe('Height · 45 m');
+        expect(overrideLabel({ kind: 'height', height_m: 27.25 })).toBe('Height · 27.3 m');
     });
 });

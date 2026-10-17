@@ -78,8 +78,11 @@ scikit-image==0.26.0
 # Without it the pipeline runs as before (SegFormer masks and depth steps only).
 
 # Building height — Overture Maps GeoParquet via S3 (Open Buildings provider)
-# Install: pip install pyarrow[s3]>=14 fsspec>=2023.1 s3fs>=2023.1
-pyarrow[s3]>=14
+# Also HydroRIVERS (geo2stl/hydrology.py reads its GeoParquet cache).
+# Install: pip install pyarrow[s3]>=14,<26 fsspec>=2023.1 s3fs>=2023.1
+# <26: pyarrow 26 needs NumPy 2 and numpy is pinned to 1.26 above; with 26 every
+# HydroRIVERS fetch failed and no river was drawn or carved (Europa, 2026-10-14).
+pyarrow[s3]>=14,<26
 fsspec>=2023.1
 s3fs>=2023.1
 

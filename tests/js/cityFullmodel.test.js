@@ -4,7 +4,7 @@
  * numpy2stl.io.write_parts_file (tests/test_model_parts.py).
  */
 import { describe, it, expect } from 'vitest';
-import { parseModelParts, partColor, toViewerFrame } from '../../app/client/static/js/modules/export/city-fullmodel.js';
+import { parseModelParts, partColor, staleParts, toViewerFrame } from '../../app/client/static/js/modules/export/city-fullmodel.js';
 
 function partsFile(parts) {
     let header = new TextEncoder().encode(JSON.stringify({
@@ -44,7 +44,27 @@ describe('toViewerFrame', () => {
         toViewerFrame(part, { scale: 0.5, xOffset: 1, zOffset: 2, rows: 11, mmPerPx: 2 });
         expect([...part.positions.slice(0, 3)]).toEqual([4 * 0.5 - 1, 3 * 0.5, 0 * 0.5 - 2]);
         expect(part.positions[5]).toBe(20 * 0.5 - 2);                 // south edge
-        expect([...part.indices]).toEqual([0, 2, 1]);                  // mirrored: winding reversed
+        expect([...part.indices]).toEqual([0, 1, 2]);                  // a rotation: winding kept
+    });
+
+    it('keeps a closed solid outward-facing (positive signed volume)', () => {
+        // unit cube, outward counter-clockwise triangles in model mm
+        const v = [0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1];
+        const f = [0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7];
+        const vol = ({ positions: p, indices: t }) => {
+            let s = 0;
+            for (let i = 0; i < t.length; i += 3) {
+                const [a, b, c] = [t[i] * 3, t[i + 1] * 3, t[i + 2] * 3];
+                s += p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1])
+                   - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c])
+                   + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c]);
+            }
+            return s / 6;
+        };
+        const part = { positions: new Float32Array(v), indices: new Uint32Array(f) };
+        expect(vol(part)).toBeCloseTo(1);
+        toViewerFrame(part, { scale: 1, xOffset: 0, zOffset: 0, rows: 3, mmPerPx: 1 });
+        expect(vol(part)).toBeCloseTo(1);
     });
 });
 
@@ -52,7 +72,41 @@ describe('partColor', () => {
     it('gives buildings the Edit map colour and other parts their own', () => {
         expect(partColor('buildings', '#123456')).toBe('#123456');
         expect(partColor('churches', '#123456')).toBe('#123456');
-        expect(partColor('roads')).toBe('#cc8844');
+        expect(partColor('roads')).toBe('#b08b6a');
         expect(partColor('something new')).toBe('#bbbbbb');
+    });
+});
+
+describe('staleParts', () => {
+    const built = {
+        buildings: { enabled: true, mode: 'extrude', height_scale: 1 },
+        roads: { enabled: true, mode: 'raised', offset_mm: 0.4 },
+    };
+
+    it('hides nothing when the layers are as built', () => {
+        expect(staleParts(built, structuredClone(built)).size).toBe(0);
+    });
+
+    it('hides the parts of layers turned off', () => {
+        const now = structuredClone(built);
+        now.roads.enabled = false;
+        expect([...staleParts(built, now)]).toEqual(['roads']);
+    });
+
+    it('keeps a changed surface layer until the rebuild', () => {
+        const now = structuredClone(built);
+        now.roads.offset_mm = 1;
+        expect(staleParts(built, now).size).toBe(0);
+    });
+
+    it('hides changed buildings, which the quick view stands in for', () => {
+        const now = structuredClone(built);
+        now.buildings.height_scale = 2;
+        expect([...staleParts(built, now)]).toEqual(['buildings']);
+    });
+
+    it('never hides the terrain or parts without a layer row', () => {
+        expect(staleParts(built, {}).size).toBe(0);
+        expect(staleParts(undefined, undefined).size).toBe(0);
     });
 });

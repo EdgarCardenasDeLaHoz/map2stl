@@ -65,7 +65,7 @@
             <!-- ═══ MODEL ═══ -->
             <section class="mcard">
               <div class="mcap">Model
-                <button type="button" class="mcap-link" title="Fill the bed, true-scale height, 10 mm base"
+                <button type="button" class="mcap-link" title="Fill the bed, true-scale height, 5 mm base"
                         @click="resetModel">Reset</button></div>
 
               <div class="mrow">
@@ -80,7 +80,10 @@
                   <option value="custom">Custom…</option>
                 </select>
               </div>
-              <div id="bedCustomRow" class="mrow" style="display:none;">
+              <!-- Shown from the select's own value (bedValue), not by a change listener:
+                   onMounted restores a saved "Custom…" before setupEventListeners attaches,
+                   so a listener-driven row stayed hidden on reload. -->
+              <div v-show="bedValue === 'custom'" id="bedCustomRow" class="mrow">
                 <span class="mname">Bed (mm)</span>
                 <span>
                   <input type="number" id="bedCustomW" class="ctrl-input-sm mnum" @input="onBedChange" value="220" min="50" max="1000" aria-label="Bed width (mm)">
@@ -94,7 +97,7 @@
                   <span class="mval">{{ widthMm ? Math.round(widthMm) + ' mm' : '—' }}
                     <button type="button" class="mlink" title="Size the model to fill the printer bed" @click="fillBed">Fill bed</button></span></div>
                 <!-- Writes #mmPerPixel (width ÷ DEM columns); the exact mm/px is under Vertical & surface. -->
-                <input id="modelWidthSlider" type="range" class="mrange" min="30" :max="widthMax" step="1"
+                <input id="modelWidthSlider" type="range" class="mrange" :min="widthMin" :max="widthMax" step="1"
                        :value="Math.round(widthMm || 0)" :disabled="!demCols"
                        @input="onWidthInput" @change="onWidthChange">
               </div>
@@ -112,7 +115,7 @@
 
               <div class="mctl">
                 <div class="mlbl"><label for="exportBaseHeight">Base</label><span class="mval">{{ baseText }}</span></div>
-                <input type="range" id="exportBaseHeight" class="mrange" value="10" min="0" max="30" step="0.5"
+                <input type="range" id="exportBaseHeight" class="mrange" value="5" min="0" max="30" step="0.5"
                        title="Solid base plate under the terrain">
               </div>
 
@@ -158,13 +161,14 @@
               <div class="mcap">Vertical &amp; surface</div>
               <div class="param-grid">
                 <label for="mmPerPixel" title="Horizontal scale: millimetres per DEM pixel. Width above sets it.">Resolution (mm/px)</label>
-                <input type="number" id="mmPerPixel" value="0.35" min="0.05" max="20" step="0.01" class="ctrl-input-sm">
+                <!-- Ranges come from FIELD_RANGE, which the Width and Height sliders share. -->
+                <input type="number" id="mmPerPixel" value="1.0" :min="FIELD_RANGE.mmPerPx.min" :max="FIELD_RANGE.mmPerPx.max" step="0.01" class="ctrl-input-sm">
 
                 <label for="exportExaggeration" title="Vertical exaggeration multiplier (1 = true scale). Height above sets it.">Exaggeration</label>
-                <input type="number" id="exportExaggeration" value="1.0" step="0.1" min="0.1" max="10" class="ctrl-input-sm">
+                <input type="number" id="exportExaggeration" value="1.0" :step="FIELD_RANGE.exaggeration.step" :min="FIELD_RANGE.exaggeration.min" :max="FIELD_RANGE.exaggeration.max" class="ctrl-input-sm">
 
                 <label for="exportModelHeight" title="Relief height in mm when the vertical scale is Fit (and Auto on regions over 20 km diagonal).">Fit height (mm)</label>
-                <input type="number" id="exportModelHeight" value="30" min="1" max="200" step="1" class="ctrl-input-sm">
+                <input type="number" id="exportModelHeight" value="20" :min="FIELD_RANGE.fitHeight.min" :max="FIELD_RANGE.fitHeight.max" :step="FIELD_RANGE.fitHeight.step" class="ctrl-input-sm">
 
                 <label for="exportZMode" title="Auto: true scale x exaggeration when the region diagonal is under 20 km (buildings and terrain share it), otherwise the relief is fitted to Fit height.">Vertical</label>
                 <select id="exportZMode" class="ctrl-input-sm" style="width:auto;">
@@ -227,7 +231,7 @@
                 <label for="cityPuzzleEnabled" title="City regions: cut the merged model into interlocking jigsaw pieces">City puzzle:</label>
                 <input id="cityPuzzleEnabled" type="checkbox">
                 <label for="cityPieceMm" title="Largest piece size; the grid is chosen so pieces fit (your bed)">max</label>
-                <input id="cityPieceMm" type="number" value="210" min="30" max="1000" step="10" style="width:56px;"
+                <input id="cityPieceMm" type="number" value="200" min="30" max="1000" step="10" style="width:56px;"
                        @input="onPieceInput"> mm
               </div>
               <div v-if="bedFit" class="mhint" :class="bedFit.fits ? 'ok' : 'warn'">
@@ -237,30 +241,36 @@
               </div>
               <div id="puzzleParams">
                 <div class="param-group">
-                  <label title="Number of columns in the puzzle grid">Columns (X):</label>
-                  <input type="number" id="splitCols" value="4" min="1" max="20">
+                  <label for="splitCols" title="Number of columns in the puzzle grid">Columns (X):</label>
+                  <input type="number" id="splitCols" value="3" min="1" max="20">
                 </div>
                 <div class="param-group">
-                  <label title="Number of rows in the puzzle grid">Rows (Y):</label>
-                  <input type="number" id="splitRows" value="4" min="1" max="20">
+                  <label for="splitRows" title="Number of rows in the puzzle grid">Rows (Y):</label>
+                  <input type="number" id="splitRows" value="3" min="1" max="20">
                 </div>
                 <div class="param-group">
-                  <label title="Width of the tongue on each shared edge (mm)">Knob width (mm):</label>
-                  <input type="number" id="splitKnobWidth" value="20" min="2" max="200" step="1">
+                  <label for="splitKnobWidth" title="Width of the tongue on each shared edge (mm). Blank: 30% of the smallest piece">Knob width (mm):</label>
+                  <input type="number" id="splitKnobWidth" value="" placeholder="Auto" min="0" max="200" step="1">
                 </div>
                 <div class="param-group">
-                  <label title="How far the tongue reaches into the neighbouring piece (mm)">Knob depth (mm):</label>
-                  <input type="number" id="splitKnobDepth" value="8" min="1" max="50" step="0.5">
+                  <label for="splitKnobDepth" title="How far the tongue reaches into the neighbouring piece (mm). Blank: 15% of the smallest piece">Knob depth (mm):</label>
+                  <input type="number" id="splitKnobDepth" value="" placeholder="Auto" min="0" max="50" step="0.5">
                 </div>
                 <div class="param-group">
-                  <label title="Gap taken off the groove side so printed pieces fit (mm)">Clearance (mm):</label>
-                  <input type="number" id="splitClearance" value="0.3" min="0" max="2" step="0.05">
+                  <label for="splitClearance" title="Gap taken off the groove side so printed pieces fit (mm). 0.45 suits a 0.4 mm nozzle; print the fit test to check yours">Clearance (mm):</label>
+                  <input type="number" id="splitClearance" value="0.45" min="0" max="2" step="0.05">
+                </div>
+                <div class="mhint">
+                  Pieces too tight or too loose? Print a small test joint at 0.2 to 0.5 mm.
+                  <button id="puzzleFitTestBtn" type="button" class="btn btn-xs" style="margin-left:4px;"
+                          title="Download an STL with one two-piece joint per clearance, each labelled underneath">Fit test</button>
                 </div>
                 <div class="param-group">
-                  <label for="splitKnobShape" title="Tongue outline: classic rounded knob, dovetail, or a plain rectangular tab">Knob shape:</label>
+                  <label for="splitKnobShape" title="Tongue outline: notched (one wide tab across most of the edge: sturdiest, but it does not lock), dovetail (locks), classic rounded knob, or a plain rectangular tab">Knob shape:</label>
                   <select id="splitKnobShape" class="ctrl-input-sm" style="width:auto;">
-                    <option value="classic" selected>Classic (rounded)</option>
+                    <option value="notched" selected>Notched (wide tab)</option>
                     <option value="dovetail">Dovetail</option>
+                    <option value="classic">Classic (rounded)</option>
                     <option value="rectangular">Rectangular</option>
                   </select>
                 </div>
@@ -292,7 +302,7 @@
                 </label>
               </div>
               <div id="exportLabelTextRow" style="display:none;margin-top:6px;">
-                <input type="text" id="exportLabelText" placeholder="Label text (blank = region name)" class="ctrl-input" style="width:100%;box-sizing:border-box;">
+                <input type="text" id="exportLabelText" aria-label="Label text" placeholder="Label text (blank = region name)" class="ctrl-input" style="width:100%;box-sizing:border-box;">
               </div>
               <div id="exportContoursParams" style="display:none;margin-top:6px;">
                 <div class="param-grid">
@@ -317,22 +327,23 @@
             <section v-show="ui.shows('crossSection')" class="mcard" id="crossSectionSection">
               <div class="mcap">Cross-section</div>
               <div class="param-group">
-                <label title="Cut along a latitude or longitude line">Cut along:</label>
+                <label for="crossSectionAxis" title="Cut along a latitude or longitude line">Cut along:</label>
                 <select id="crossSectionAxis">
                   <option value="lat">Latitude (horizontal)</option>
                   <option value="lon">Longitude (vertical)</option>
                 </select>
               </div>
               <div class="param-group">
-                <label title="Exact coordinate value for the cut">Cut at:</label>
+                <label for="crossSectionValue" title="Exact coordinate value for the cut">Cut at:</label>
                 <input type="number" id="crossSectionValue" step="0.0001" placeholder="e.g. 40.7128" style="width:120px;">
-                <button id="crossSectionMidBtn" class="btn btn-xs" style="margin-left:4px;">Mid</button>
+                <button id="crossSectionMidBtn" type="button" class="btn btn-xs" style="margin-left:4px;"
+                        title="Cut through the middle of the region">Mid</button>
               </div>
               <div class="param-group">
-                <label title="Thickness of the slab in mm">Slab depth (mm):</label>
+                <label for="crossSectionThickness" title="Thickness of the slab in mm">Slab depth (mm):</label>
                 <input type="number" id="crossSectionThickness" value="5" min="2" max="20" step="1" style="width:60px;">
               </div>
-              <button id="downloadCrossSectionBtn" class="btn btn-secondary btn-sm" style="margin-top:6px;">
+              <button id="downloadCrossSectionBtn" type="button" class="btn btn-secondary btn-sm" style="margin-top:6px;">
                 ✂️ Download cross-section STL
               </button>
               <div id="crossSectionStatus" class="mhint"></div>
@@ -434,7 +445,7 @@ const scale = computed(() => {
     mmPerPx: _num('mmPerPixel', 1),
     zMode: (_val('exportZMode') || 'auto') as 'auto' | 'true' | 'fit',
     exaggeration: _num('exportExaggeration', 1),
-    fitHeightMm: _num('exportModelHeight', 30),
+    fitHeightMm: _num('exportModelHeight', 20),
     elevMin: d.vmin ?? 0,
     elevMax: d.vmax ?? 0,
   });
@@ -490,9 +501,23 @@ const fitText = computed(() => {
     : `⚠ Bigger than the ${bedName.value} bed: lower the width, or split into ${f.cols} × ${f.rows} pieces`;
 });
 
+// Ranges of the Vertical & surface fields. The Width and Height sliders write those
+// fields, so they use the same ranges: a slider narrower than its field could not
+// show (and snapped back on touch) a value the field accepts.
+const FIELD_RANGE = {
+  mmPerPx: { min: 0.05, max: 20 },
+  exaggeration: { min: 0.1, max: 10, step: 0.1 },
+  fitHeight: { min: 1, max: 200, step: 1 },
+} as const;
+// Defaults shared with the server (app/server/core/export_params.py::ExportContext).
+const DEFAULT_FIT_HEIGHT_MM = 20;
+const DEFAULT_BASE_MM = 5;
+
 // ── Width (writes mm/px) ─────────────────────────────────────────────────────
 const widthDraft = ref<number | null>(null);
 const widthMm = computed(() => widthDraft.value ?? scale.value?.widthMm ?? 0);
+// The narrowest model the mm/px field allows (its min x DEM columns).
+const widthMin = computed(() => Math.max(1, Math.ceil(FIELD_RANGE.mmPerPx.min * (demCols.value || 0))));
 const widthMax = computed(() => {
   const b = _bed();
   return Math.max(4 * Math.max(b.w, b.h), Math.ceil(scale.value?.widthMm ?? 0));
@@ -516,11 +541,11 @@ function fillBed() {
 const fitting = computed(() => scale.value?.zMode === 'fit');
 const heightDraft = ref<number | null>(null);
 const heightRange = computed(() => (fitting.value
-  ? { min: 5, max: 100, step: 1, title: 'Height of the relief (highest minus lowest point) in mm' }
-  : { min: 0.5, max: 5, step: 0.1, title: 'Vertical exaggeration: 1 = true scale' }));
+  ? { ...FIELD_RANGE.fitHeight, title: 'Height of the relief (highest minus lowest point) in mm' }
+  : { ...FIELD_RANGE.exaggeration, title: 'Vertical exaggeration: 1 = true scale' }));
 const heightValue = computed(() => {
   void formTick.value;
-  return fitting.value ? _num('exportModelHeight', 30) : _num('exportExaggeration', 1);
+  return fitting.value ? _num('exportModelHeight', DEFAULT_FIT_HEIGHT_MM) : _num('exportExaggeration', 1);
 });
 const heightText = computed(() => {
   const v = heightDraft.value ?? heightValue.value;
@@ -535,13 +560,14 @@ function onHeightChange(e: Event) {
 
 const baseText = computed(() => {
   void formTick.value;
-  return `${parseFloat(_val('exportBaseHeight') ?? '10')} mm`;
+  return `${parseFloat(_val('exportBaseHeight') ?? String(DEFAULT_BASE_MM))} mm`;
 });
 
 function resetModel() {
-  fillBed();
-  _setField(fitting.value ? 'exportModelHeight' : 'exportExaggeration', fitting.value ? '30' : '1');
-  _setField('exportBaseHeight', '10');
+  _setField('mmPerPixel', '1');
+  _setField(fitting.value ? 'exportModelHeight' : 'exportExaggeration',
+    fitting.value ? String(DEFAULT_FIT_HEIGHT_MM) : '1');
+  _setField('exportBaseHeight', String(DEFAULT_BASE_MM));
 }
 
 // ── Split into pieces ────────────────────────────────────────────────────────
@@ -602,10 +628,13 @@ const BED_KEY = 'map2stl_bed';
 // The bed sets the default City Model piece size (shorter side less 10 mm)
 // until the user types their own; after that a bed change leaves it alone.
 const pieceTouched = ref(false);
+// The select's value as Vue state; #bedCustomRow is shown from it (v-show).
+const bedValue = ref(DEFAULT_BED);
 function onPieceInput(e: Event) {
   if (e.isTrusted) pieceTouched.value = true;
 }
 function onBedChange() {
+  bedValue.value = _val('bedSizeSelect') || DEFAULT_BED;
   if (!pieceTouched.value) _setField('cityPieceMm', String(defaultPieceMm(_bed())));
   try {
     localStorage.setItem(BED_KEY, JSON.stringify(
@@ -625,11 +654,16 @@ onMounted(() => {
   onBedChange();
 });
 
-// Defaults that work (guidelines §1.10): mm/px is not saved per region, so each new DEM
-// is sized to fill the bed, unless the model is being split into pieces on purpose.
+// mm/px is saved per region (presets.js, 1 mm per pixel by default). A new DEM keeps it: a
+// model bigger than the bed is split into pieces, not shrunk (user, 2026-10-13); Fill bed
+// shrinks it on request.
 watch(() => store.lastDemData, (d: any) => {
   if (!d?.width || !d?.height || splitOn.value) return;
-  fillBed();
+  const f = bedFit.value;
+  if (!f || f.fits) return;
+  _setChecked(isCity.value ? 'cityPuzzleEnabled' : 'puzzleEnabled', true);
+  if (!isCity.value) useBedGrid();
+  formTick.value++;
 });
 
 // City Model layers. Defaults mirror city2stl.city_model.DEFAULT_LAYERS; the export

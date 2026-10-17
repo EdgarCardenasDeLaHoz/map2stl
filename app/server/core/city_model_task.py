@@ -22,8 +22,9 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     panel's height overrides match its features). Defaults 3 m / 5 m² /
                     "full" = the panel defaults; "coarse" raises min_area as
                     /api/cities does. See city_osm_params().
-    landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"osm", ...}} buildings replaced by
-                    an uploaded mesh or a surveyed nDSM solid (city2stl.landmarks;
+    landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"height"|"osm", ...}} buildings replaced by
+                    an uploaded mesh or a surveyed nDSM solid, or rescaled to a known
+                    height (city2stl.landmarks;
                     resolved before the build, a bad mesh / no survey data fails the
                     task with the reason; report.json "landmarks" says what applied)
     puzzle          {piece_mm | cols+rows | col_edges_mm+row_edges_mm, knob_width_mm,

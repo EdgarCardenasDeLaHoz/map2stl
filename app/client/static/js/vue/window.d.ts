@@ -2,8 +2,17 @@
 // These are populated at runtime and accessed via optional chaining.
 
 interface Window {
-    // Map layer opacity control (map-layers.js)
+    // Map layer stack (modules/layers/stacked-layers.js), driven by the Layers rail
     setLayerOpacity?: (mode: string, opacity: number) => void;
+    getLayerOpacities?: () => Record<string, number>;
+    getLayerOrder?: () => string[];
+    setLayerOrder?: (order: string[]) => void;
+    getActiveLayers?: () => Set<string>;
+    setLayerVisible?: (mode: string, on: boolean, opts?: { autoload?: boolean }) => void;
+    getLayerStackState?: () => { order: string[]; opacity: Record<string, number>; visible: Record<string, boolean> };
+    applyLayerStackState?: (saved: unknown) => void;
+    // Debounced region-settings save (modules/ui/presets.js)
+    scheduleSettingsAutoSave?: () => void;
 
     // Sidebar state management (app.js / view-management.js)
     setSidebarState?: (mode: string) => void;

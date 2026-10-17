@@ -50,6 +50,9 @@ def _default_region_settings() -> dict:
             "rescale_max": None,
             "gridlines_show": True,
             "gridlines_count": 10,
+            # Every grid starts on (user 2026-10-14). Display only: they never print.
+            "pixel_grid_show": True,
+            "real_grid_show": True,
             "elevation_curve": None,
             "elevation_curve_points": [],
             "elevation_curve_vmin": None,
@@ -83,7 +86,7 @@ def _default_region_settings() -> dict:
             "split_cols": 4,
             "knob_width_mm": 20.0,
             "knob_depth_mm": 8.0,
-            "clearance_mm": 0.3,
+            "clearance_mm": 0.45,
         },
         "city": {
             "layers": ["buildings", "roads", "waterways"],

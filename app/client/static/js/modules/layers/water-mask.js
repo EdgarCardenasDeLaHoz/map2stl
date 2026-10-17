@@ -163,7 +163,9 @@ let _esaAbortController = null;
 
 /**
  * Fetch ESA WorldCover land-cover data independently from the water mask.
- * Calls `/api/terrain/esa-land-cover` and renders to `#satelliteImage`.
+ * Reuses the ESA grid of a cached water-mask response with the same box, size and
+ * projection (`waterMaskCache.findEsa`); otherwise calls `/api/terrain/esa-land-cover`.
+ * Renders to `#satelliteImage`.
  */
 async function loadEsaLandCover() {
     if (_esaAbortController) _esaAbortController.abort();
@@ -188,11 +190,18 @@ async function loadEsaLandCover() {
 
     const params = new URLSearchParams({ north, south, east, west, dim, projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans });
 
+    // A water mask loaded for this box, size and projection already carries the ESA grid.
+    const reused = window.waterMaskCache?.findEsa({
+        ...bbox, dim, projection, maintain_dimensions: maintainDims, clip_valid_region: clipNans,
+    });
+
     window.setLayerStatus?.('landCover', 'loading');
-    window.showToast('Loading ESA land cover...', 'info');
+    if (!reused) window.showToast('Loading ESA land cover...', 'info');
 
     try {
-        const { data, error: esaErr } = await window.api.dem.esaLandCover(params, signal);
+        const { data, error: esaErr } = reused
+            ? { data: reused, error: null }
+            : await window.api.dem.esaLandCover(params, signal);
         if (esaErr) {
             window.setLayerStatus?.('landCover', 'error');
             window.showToast('Failed to load ESA land cover: ' + esaErr, 'error');

@@ -1,6 +1,6 @@
 # Map Projections
 
-_Last updated: 2026-09-28_
+_Last updated: 2026-10-13_
 
 All projections are implemented in `geo2stl/projections.py`.
 The active entry point is `geo2stl/projections.py::project_coordinates`; the app calls it through
@@ -150,8 +150,30 @@ project_coordinates(
     maintain_dimensions=False,    # False (default since F-PROJ-DIMS) = true aspect ratio, True = same shape as input
     fill_value=np.nan,            # value for pixels outside valid projection area
     clip_nans=False,              # strip columns with any NaN after projection
+    target_dim=None,              # longest side AFTER projection; output is exactly projected_shape
 )
 ```
+
+### Output size: `dim` is the longest side after projection
+
+User decision 2026-10-13 ([projections-raster.md](../decisions/projections-raster.md), "Longest side
+after projection"). One rule, four helpers in `geo2stl/projections.py`:
+
+| Helper | Returns |
+|---|---|
+| `projected_shape(bbox, projection, dim, md)` | The exact output `(rows, cols)`; longest side = `dim`. `none` and `maintain_dimensions` use the raw degree aspect. |
+| `source_dim(dim, bbox, projection, md)` | The plate-carrée size to sample at, so the projection only shrinks: with `R` = rows/cols ratio after vs before, `s = max(rows, cols / R)`, result `ceil(max(s, s·R))`. Equals `dim` for `none` / `md`. |
+| `source_shape(dim, bbox, projection, md)` | The raw grid: `projected_shape(bbox, "none", source_dim(...))`. |
+| `fit_grid(arr, shape, categorical)` | Resize onto a shape (INTER_AREA down, LINEAR up, NEAREST for classes). |
+
+Every raster route follows the same order: fetch at `source_dim`, fit the raw grid to `source_shape`
+(the DEM; layers rasterise at `source_dim`), then `project_grid(..., target_dim=dim)` — also for
+`projection="none"`. With `target_dim` the output is forced to `projected_shape`, so the DEM, water,
+ESA, satellite, hydrology, trails, borders, city raster and composite land on the identical grid
+whatever size each layer was sampled at, and `clip_nans` is skipped (the shape is fixed).
+
+SanFranciso (37.66–37.82 N, 0.22° wide, cosine, dim 600): 474 × 428 before, 600 × 541 after
+(sampled at 759 px). At 1 mm/px the print is 600 mm on its long side.
 
 `maintain_dimensions=False` is the pipeline default (F-PROJ-DIMS, 2026-07-19) — output reflects the projection's true geographic aspect ratio, so switching projections visibly changes the canvas/mesh shape. Every projection function computes its output shape deterministically from `(input_shape, bbox)`, so independently-projected layers (DEM, water, ESA, city, hydrology) for the same bbox/dim/projection still land on identical shapes — see `geo2stl/projections.py::verify_layer_alignment` for a runtime/test guard, and `geo2stl/projections.py::expected_aspect_ratio` for the shared formula. Set `maintain_dimensions=True` (client: the "Keep fixed canvas shape across projections" checkbox next to the projection dropdown) to opt into the old fixed-shape behavior — same output shape as input, no NaN gaps, predictable mesh size, but the rendered aspect ratio no longer changes with projection.
 
@@ -235,7 +257,10 @@ request (bbox + projection) → cache miss → fetch (plate carrée) → write c
 ```
 
 - Switching projection on the same bbox is a cache hit plus a projection.
-- `projection` and `clip_valid_region` are **not** in the keys. (HTTP routes and saved settings call
+- `projection` and `clip_valid_region` are **not** in the keys, but the sampling size is:
+  the DEM key carries `sd` (`source_dim`, which depends on the projection's aspect change) and the
+  layer caches key on the size they rasterised at, so cosine and equidistant share an entry while
+  `none` and cosine do not. (HTTP routes and saved settings call
   the flag `clip_valid_region`; the `geo2stl.projections` functions keep the parameter name
   `clip_nans`. The route alias `clip_nans` was removed 2026-09-30.) The DEM key does
   carry `maintain_dimensions` (`md`); the other layers re-project on a hit, so a changed

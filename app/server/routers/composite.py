@@ -41,8 +41,9 @@ import numpy as np
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from numpy2stl.raster import burn_polygons
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.server.config import MAX_DIM
 from app.server.core.cache import (
     make_cache_key,
     read_array_cache,
@@ -69,6 +70,10 @@ class CompositeCityRasterRequest(BaseModel):
     detail: str = "full"  # "full" or "coarse" — must match the tier used by /api/cities
                           # so the OSM cache lookup key resolves to the matching entry
     maintain_dimensions: bool = False  # keep input shape after projection (legacy/opt-in)
+    # Longest side after projection (the DEM's dim). When given, the output is
+    # exactly geo2stl.projections.projected_shape - the DEM's grid - whatever
+    # width x height was rasterised; without it the legacy projected size.
+    dim: int | None = Field(default=None, ge=1, le=MAX_DIM)
 
 
 # ---------------------------------------------------------------------------
@@ -349,13 +354,14 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 
     out = await run_sync(_city_raster_arrays, req)
 
-    if req.projection != "none":
+    if req.projection != "none" or req.dim:
         from geo2stl.projections import project_grid
         for name in _CITY_CHANNELS:
             out[name] = project_grid(
                 out[name], req.north, req.south, req.east, req.west,
                 req.projection, clip_valid_region, categorical=False,
                 maintain_dimensions=req.maintain_dimensions,
+                target_dim=req.dim,
             )
 
     ph, pw = out["buildings"].shape
@@ -372,7 +378,8 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 #: Bumped when the composite's arithmetic changes, so older cached grids are not
 #: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
 #: the valley floor, lakes levelled after the median (F-REGION step 4).
-COMPOSITE_CACHE_VERSION = 6   # 6: still-water grid cached; 5: large-box lakes from ESA water
+COMPOSITE_CACHE_VERSION = 9   # 9: base DEM and river carve from the shared grid (2026-10-14); 8: drop composites cut while HydroRIVERS failed silently (2026-10-14); 7: dim = longest side after projection (2026-10-13)
+# 6: still-water grid cached; 5: large-box lakes from ESA water
 #: Layers whose cells are standing water (water_out["still"] of compute_composite_dem).
 STILL_WATER_SOURCES = ("lakes", "water_esa")
 # 4: sea mask from the unweighted base (3 erased weight-0 previews)
@@ -443,17 +450,25 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     (bbox, dim, layers, projection) so the same spec hits cache on subsequent
     requests.
 
-    Each layer is fetched, projected onto the requested map projection, put
-    through its own processing pipeline, and blended onto the running
-    composite.  The first layer sets the output grid; later layers are resized
-    onto it by ``blend_layers``.
+    Each layer is fetched at ``geo2stl.projections.source_dim``, projected
+    onto the requested map projection with ``target_dim=dim`` (so every layer
+    lands on ``projected_shape``, longest side *dim*: user decision 2026-10-13),
+    put through its own processing pipeline, and blended onto the running
+    composite.  The first layer sets the output grid; ``blend_layers`` resizes
+    any later layer that still differs.
 
     *layers* accepts MergeLayerSpec objects or the plain dicts an export
     request carries; dicts are coerced so processing specs behave the same
     either way.
 
+    A built-in elevation base comes from ``geo2stl.dem.shared_base_grid``: one
+    read per box on the grid fine enough for every projection
+    (``geo2stl.projections.shared_source_shape``), fitted down per projection.
+
     Terrain-relative sources (rivers, lakes: ``geo2stl.water_layers``) blended
-    with ``add`` are fetched on the base layer's raw grid, projected with
+    with ``add`` are fetched on the base layer's raw grid (rivers on the shared
+    grid, then pooled to it keeping the deepest cell, so a projection switch
+    reuses the carve: ``geo2stl.dem.is_shared_grid_source``), projected with
     nearest-neighbour, resized keeping the deepest value, and combined into a
     separate *carve* grid (deeper wins where they overlap). The result is
     ``composite + carve``; with ``split_carve=True`` it is ``(composite,
@@ -515,10 +530,27 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         apply_layer_processing,
         blend_layers,
         fetch_layer_data,
+        is_shared_base_source,
+        is_shared_grid_source,
         is_terrain_relative_source,
-        upsample_dem,
+        shared_base_grid,
     )
-    from geo2stl.water_layers import resize_relative
+    from geo2stl.projections import (
+        fit_grid,
+        project_grid,
+        projected_shape,
+        shared_covers,
+        shared_source_dim,
+        shared_source_shape,
+        source_dim,
+        source_shape,
+    )
+    from geo2stl.water_layers import pool_deepest, resize_relative
+
+    # dim is the longest side after projection (user decision 2026-10-13): every
+    # layer is sampled at the plate-carree size that projects to it and
+    # projected onto exactly projected_shape, so the layers need no resize.
+    bbox = (north, south, east, west)
 
     cached = read_array_cache("composite", cache_key)
     if cached is not None and cached[0].get("composite") is not None:
@@ -543,19 +575,39 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
     still_parts = []   # standing-water grids (any shape), resized onto the composite below
     skipped: list[str] = []
     if TEST_MODE:
-        h = w = dim
+        h, w = projected_shape(bbox, projection or "none", dim, maintain_dimensions)
         composite = np.linspace(0, 100, h * w, dtype=np.float64).reshape(h, w)
     else:
         composite = None
         base_raw = None
+        # The base on the projection-independent shared grid (None: not shared).
+        # The DEM read and the river carve on it are the same for every
+        # projection; each projection only pools them down to its source grid.
+        shared_base = None
+        src_shape = source_shape(dim, bbox, projection or "none", maintain_dimensions)
         relative = []   # (processed, weight) of terrain-relative layers
         for spec in specs:
             is_relative = (composite is not None and spec.blend_mode == "add"
                            and is_terrain_relative_source(spec.source))
+            on_shared = is_relative and shared_base is not None and is_shared_grid_source(
+                spec.source)
             try:
-                raw = fetch_layer_data(spec.source, north, south, east, west,
-                                       spec.dim, spec.options,
-                                       base=base_raw if is_relative else None)
+                if base_raw is None and is_shared_base_source(spec.source) and shared_covers(
+                        shared_source_shape(spec.dim, bbox, maintain_dimensions), src_shape):
+                    shared_base = shared_base_grid(spec.source, north, south, east, west,
+                                                   spec.dim, spec.options, maintain_dimensions)
+                    raw = shared_base
+                elif on_shared:
+                    raw = pool_deepest(fetch_layer_data(
+                        spec.source, north, south, east, west,
+                        shared_source_dim(spec.dim, bbox, maintain_dimensions),
+                        spec.options, base=shared_base), src_shape)
+                else:
+                    raw = fetch_layer_data(spec.source, north, south, east, west,
+                                           source_dim(spec.dim, bbox, projection or "none",
+                                                      maintain_dimensions),
+                                           spec.options,
+                                           base=base_raw if is_relative else None)
             except Exception as exc:  # noqa: BLE001 - see the docstring
                 if composite is None:
                     raise
@@ -564,16 +616,15 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
                 skipped.append(msg)
                 continue
             if base_raw is None:
-                # Same order as /api/terrain/dem: upsample the raw grid to *dim*,
-                # then project. The terrain-relative layers rasterise on it.
-                raw = upsample_dem(raw, dim)
+                # Same order as /api/terrain/dem: fit the raw grid to the sampling
+                # grid, then project. The terrain-relative layers rasterise on it.
+                raw = fit_grid(np.asarray(raw, dtype=np.float64), src_shape)
                 base_raw = raw
 
-            if projection and projection != "none":
-                from geo2stl.projections import project_grid
-                raw = project_grid(raw, north, south, east, west, projection,
-                                   clip_valid, categorical=is_relative,
-                                   maintain_dimensions=maintain_dimensions)
+            raw = project_grid(raw, north, south, east, west, projection or "none",
+                               clip_valid, categorical=is_relative,
+                               maintain_dimensions=maintain_dimensions,
+                               target_dim=dim)
 
             processed = apply_layer_processing(raw, spec.processing)
 
@@ -583,21 +634,8 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
                 relative.append((processed, float(spec.weight)))
             elif composite is None:
                 # The first layer sets the grid: the projected grid itself, as
-                # /api/terrain/dem returns it (a cosine projection narrows the
-                # longer side below *dim*). Stretching it back to *dim* made
-                # Apply to DEM widen the model by 1/cos(lat) - a 403 mm Grand
-                # Canyon became 500 mm - and interpolated every cell. Only a grid
-                # larger than *dim* is resized (down).
-                h, w = processed.shape
+                # /api/terrain/dem returns it (projected_shape, longest side dim).
                 composite = processed.astype(np.float64)
-                if max(h, w) > dim:
-                    if h >= w:
-                        out_h, out_w = dim, max(1, int(dim * w / h))
-                    else:
-                        out_w, out_h = dim, max(1, int(dim * h / w))
-                    composite = _cv2.resize(
-                        composite.astype(np.float32), (out_w, out_h),
-                        interpolation=_cv2.INTER_AREA).astype(np.float64)
                 # The terrain itself, before its weight: the open-sea mask for the
                 # carve below must not depend on the weight (the 2D river preview
                 # sends weight 0, which made every cell "sea" and erased the rivers).

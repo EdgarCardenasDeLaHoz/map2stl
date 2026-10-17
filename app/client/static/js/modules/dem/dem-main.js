@@ -10,6 +10,8 @@
 
 'use strict';
 
+import { finiteRange } from './dem-stats.js';
+import { settleProjectionPreview } from './projection-preview.js';
 import { parseBedSize } from '../export/print-scale.js';
 
 // Colormap LUT cache — keyed by colormap name; rebuilt only on first use per colormap.
@@ -60,6 +62,11 @@ function _onDemWorkerMessage({ data }) {
     const pending = _demWorkerPending.get(gen);
     _demWorkerPending.delete(gen);
     if (!pending) return;  // stale — discard
+    // Painted (or failed): a projection preview may hand over to this canvas now. Checked
+    // here as well as on the redraw below, which a hidden tab never runs (rAF).
+    delete pending.canvas.dataset.pending;
+    const sources = window.getLayerSourceCanvases?.();
+    if (sources) settleProjectionPreview(sources);
 
     if (type === 'error') {
         console.warn('[dem-render-worker] error:', message);
@@ -98,11 +105,11 @@ function _applyDemResult(data, north, south, east, west) {
     }
 
     const colormap = document.getElementById('demColormap').value;
-    const finiteVals = demVals.filter(Number.isFinite);
-    const calcMin = finiteVals.length ? finiteVals.reduce((a, b) => a < b ? a : b, finiteVals[0]) : 0;
-    const calcMax = finiteVals.length ? finiteVals.reduce((a, b) => a > b ? a : b, finiteVals[0]) : 1;
-    const vmin = data.min_elevation !== undefined ? data.min_elevation : calcMin;
-    const vmax = data.max_elevation !== undefined ? data.max_elevation : calcMax;
+    // The server sends the range; scan the values only when it did not (one pass, no copy).
+    const hasRange = data.min_elevation !== undefined && data.max_elevation !== undefined;
+    const calc = hasRange ? null : finiteRange(demVals);
+    const vmin = data.min_elevation !== undefined ? data.min_elevation : (calc.count ? calc.min : 0);
+    const vmax = data.max_elevation !== undefined ? data.max_elevation : (calc.count ? calc.max : 1);
 
     // Store bounding box for gridlines
     window.appState.currentDemBbox = { north, south, east, west };
@@ -136,7 +143,8 @@ function _applyDemResult(data, north, south, east, west) {
     // Update overlays
     window.updateAxesOverlay?.(window.appState.currentDemBbox);
     window.drawColorbar?.(vmin, vmax, colormap);
-    window.drawHistogram?.(demVals);
+    // Next task: the histogram is a 1M-value pass the first paint does not need.
+    setTimeout(() => window.drawHistogram?.(demVals), 0);
 
     // Draw gridlines after canvas is appended and sized
     requestAnimationFrame(() => window.drawGridlinesOverlay?.('demImage'));
@@ -159,10 +167,10 @@ function _applyDemResult(data, north, south, east, west) {
     // Handle landuse/satellite data if available
     const landuseContainer = document.getElementById('demLanduse');
     const landuseWrapper = document.querySelector('.dem-landuse-container');
-    if (data.sat_values && data.sat_dimensions && data.sat_available) {
+    if ((data.sat_values_b64 || data.sat_values) && data.sat_dimensions && data.sat_available) {
         const sat_h = data.sat_dimensions[0];
         const sat_w = data.sat_dimensions[1];
-        const satCanvas = window.renderSatelliteCanvas?.(data.sat_values, sat_w, sat_h);
+        const satCanvas = window.renderSatelliteCanvas?.(window.decodeSatValues(data), sat_w, sat_h);
         if (landuseContainer && satCanvas) {
             landuseContainer.innerHTML = '';
             landuseContainer.appendChild(satCanvas);
@@ -466,6 +474,7 @@ window.renderDEMCanvas = function renderDEMCanvas(values, width, height, colorma
         // buffer — the original `flat` may alias lastDemData.values.
         const flatValues = new Float32Array(flat);
         _demWorkerPending.set(gen, { canvas, ctx });
+        canvas.dataset.pending = '1';   // blank until the worker answers (projection-preview.js)
         worker.postMessage(
             { gen, values: flatValues, width, height, lut: lutCopy, vmin: min, vmax: max },
             [flatValues.buffer, lutCopy.buffer],

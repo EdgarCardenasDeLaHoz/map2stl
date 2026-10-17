@@ -64,16 +64,19 @@ flowchart LR
 | `state.js` | `window.appState` | Pre-Vue Proxy store (`get/set/on/off/emit`); replaced by the Pinia bridge at DOMContentLoaded ([frontend.md](frontend.md#how-state-flows-windowappstate--pinia)) |
 | `events.js` | `window.events`, `window.EV` | Event bus + constants. `EV.BBOX_CHANGED` fires from `setBboxRectangle`, the mini-map drag and a drawn rectangle |
 | `api.js` | `window.api` | All fetch helpers: regions, terrain, export, cities (`start/status/result/cancel`, landmarks), composite (`demMerge`, city raster), registration, mesh, geocode, cache (`clearRegion` only), settings (`default` only) |
-| `ui-helpers.js` | `showToast`, `toastAnimation`, `toastDropIndex`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts (plain text, max 3, errors persist; see frontend.md "Feedback surfaces"), layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); base64 grid decoders |
+| `ui-helpers.js` | `showToast`, `toastAnimation`, `toastDropIndex`, `toastLane`, `setLayerStatus`, `getProjectionParams`, `emitStackUpdate`, `decode*Values` | Toasts (plain text, max 3, errors persist until closed and stay closed, centred between the side panels; see frontend.md "Feedback surfaces"), layer status; `getProjectionParams()` is the single source of projection settings for every layer fetch (F-PROJ-DIMS); `emitStackUpdate` coalesces to one stack redraw per animation frame; base64 grid decoders |
 | `usage-log.js` | `window.usageLog` (`pause`, `resume`, `flush`, `session`) | Local usage log (F-USAGE): capture-phase clicks and committed changes, `EV.BBOX_CHANGED` / `REGION_SELECTED` / `DEM_LOADED`, wraps `window.fetch` (every `/api/` call's status and ms), `showToast`, errors; batches to `POST /api/usage` every 5 s. Secret-looking controls are redacted; `map2stl_usage_log` = `off` pauses |
-| `cache.js` | `waterMaskCache` | In-memory water-mask cache, oldest-inserted evicted first (the cache-status panel and its 5 s poll were removed 2026-09-30) |
+| `cache.js` | `waterMaskCache` | In-memory water-mask cache, oldest-inserted evicted first; `findEsa` lends a cached response's ESA grid to `loadEsaLandCover` (F-SPEED #10) (the cache-status panel and its 5 s poll were removed 2026-09-30) |
 
 ### `dem/` — DEM rendering
 
 | File | Key symbols | Purpose |
 |---|---|---|
 | `dem-loader.js` | `mapElevationToColor`, `renderSatelliteCanvas`, `drawColorbar`, `drawHistogram`, `updateAxesOverlay`, `enableZoomAndPan` | Colormaps, colourbar, histogram, axes, DEM canvas zoom |
+| `dem-stats.js` | `finiteRange`, `binCounts` | Pure one-pass range and histogram bins over the DEM values (used by `dem-main.js::_applyDemResult` and `drawHistogram`; it was filter + reduce + forEach over 1M values); tests `tests/js/demStats.test.js` |
 | `dem-gridlines.js` | `drawGridlinesOverlay`, `recolorDEM`, `rescaleDEM`, `resetRescale` | Lat/lon gridlines; recolour / rescale the rendered DEM |
+| `graticule.js` | `projectedFrac`, `geoAtFrac`, `projectedAspect`, `projectedShape`, `graticuleLines`, `niceDegreeStep`, `formatDegree`, `bendsMeridians`, `frameAspect` | Pure: where a lat/lon lands in the projected height map (mirrors `geo2stl/projections.py`) and its inverse (`geoAtFrac`); the raster shape the server will return for a projection (`projectedShape`, mirrors `projected_shape`); the true grid's lines and labels; the shape the Edit map shows the height map at (`frameAspect`: the projected raster's own aspect, cosine bbox without a projection) |
+| `projection-preview.js` | `warpPixels`, `startProjectionPreview`, `markPreviewDemLanded`, `releaseProjectionPreview`, `settleProjectionPreview`, `endProjectionPreview`, `settlePreviewLayer`, `layerHasLanded`, `layerSettled`, `settleLayer`, `releaseSettles`, `previewCanEnd`, `unsettledModes`, `previewSize`, `isProjectionPreviewActive`, `projectionPreviewSource`, `projectionPreviewFrame`, `projectionPreviewTiming`, `projTiming`, `projTimingStart` | Instant preview when the projection changes: snapshots each loaded layer at most 600 px (`previewSize`), warps it into the new projection (pure `warpPixels`, row-affine nearest sample) and serves it as that layer's source until that layer has settled for the current pick (the DEM: landed and painted by the render worker, `canvas.dataset.pending` cleared; others: their own reload finished, with a picture, empty, cached or failed, via `settlePreviewLayer(mode, pick)`; a stale pick is ignored). The reload releases the preview rather than ending it, so layers that reload on their own (Rivers & lakes, Borders, Trails) keep their preview until they settle or 30 s pass (layers nothing reloads, e.g. the composite, are never settled by the release: they keep their preview until a new canvas appears). The end check runs at the release, at each `settlePreviewLayer`, at the DEM worker's paint (`dem/dem-main.js::_onDemWorkerMessage`) and on each stack redraw: the redraw alone (a requestAnimationFrame) never runs in a hidden pane, which held the pill 30 s whenever a layer settled after the release. The 30 s timeout logs the modes still unsettled (`unsettledModes`). When it ends, the module hides the `#projectionPreviewStatus` pill. Driven by the `#paramProjection` handler in `events/event-listeners-map.js` (`_switchProjection`), which sends every layer request (DEM, Borders, Rivers & lakes, Trails, composite merge, water mask, land cover) before the warp, reading the loaded frame (`_loadedFrame`) before `loadDEM` clears it. `window.DEBUG_PROJ_TIMING = true` logs `[proj-timing]` request/landed times; tests `tests/js/projectionPreview.test.js` |
 | `dem-main.js` | `loadDEM`, `renderDEMCanvas`, `populateDemSources`, `loadSatelliteImage`, `loadSatelliteRGBImage`, `WORKFLOW_STEPS` | DEM fetch + orchestration; renders pixels off-thread in `app/client/static/js/workers/dem-render-worker.js` |
 | `dem-sampling.js` | `describeDemSampling`, `UPSAMPLE_WARN` | Pure: "~30 m → 165×165 real samples, upsampled to 600×600", warns above 4× |
 
@@ -81,21 +84,22 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `moveLayer`, `setLayerOpacity`, `getLayerOrder`, `getActiveLayers`, `applyStackedTransform`, `setSplitViewEnabled`, `clearAllLayerBuffers`, `drawLayerGrid`, `LAYER_CANVAS_IDS`, `LAYER_AUTOLOAD` | The multi-layer stack; owns order and active set. See [layer-system.md](layer-system.md) |
-| `composite-dem.js` | `computeCompositeDem`, `applyCompositeToDem`, `previewComposite`, `buildCompositeLayerSpec`, `setupCompositeDemControls` | Additive, toggleable height channels + histograms. OSM channels are 2D preview only; Apply/export use the terrain-only composite (F-ARCH). The only composite UI (the old merge panel and dem-merge.js were removed) |
+| `stacked-layers.js` | `updateStackedLayers`, `setStackMode`, `setLayerVisible`, `moveLayer`, `setLayerOrder`, `setLayerOpacity`, `getLayerOpacities`, `getLayerStackState`, `applyLayerStackState`, `getLayerOrder`, `getActiveLayers`, `applyStackedTransform`, `setSplitViewEnabled`, `clearAllLayerBuffers`, `drawLayerGrid`, `LAYER_CANVAS_IDS`, `LAYER_AUTOLOAD`, `LAYER_SOURCES`, `window.getLayerSourceCanvases` | The multi-layer stack; owns order and active set. See [layer-system.md](layer-system.md) |
+| `layer-stack-state.js` | `DEFAULT_LAYER_ORDER`, `DEFAULT_LAYER_OPACITY`, `COMPANIONS`, `stackToRailOrder`, `railOrderToStack`, `moveRow`, `parseLayerState`, `serializeLayerState` | Pure: stack order (bottom first) vs the Layers rail order (top first), companion layers, the saved `view.layers` shape |
+| `composite-dem.js` | `computeCompositeDem`, `applyCompositeToDem`, `previewComposite`, `buildCompositeLayerSpec`, `setupCompositeDemControls`, `window.prefetchCompositeHydro` | Additive, toggleable height channels + histograms. `prefetchCompositeHydro({bbox, grid})` starts the rivers/lakes dem-merge before the DEM lands (projection switch); the recompute reuses that fetch. OSM channels are 2D preview only; Apply/export use the terrain-only composite (F-ARCH). The only composite UI (the old merge panel and dem-merge.js were removed) |
 | `composite-spec.js` | `FEATURE_SOURCES`, `WATER_TERRAIN_SOURCES`, `RIVER_SOURCES`, `waterTerrainLayers`, `buildCompositeLayerSpec`, `anyFeatureChannelEnabled`, `compositeInputKey`, `compositeApplyCheck` | Pure: panel params → server `MergeLayerSpec` list; Apply-to-DEM staleness guard |
 | `mesh-layer.js` | `uploadMeshLayer`, `selectLibraryMeshFile`, `computeMeshHeightmap`, `autoRegisterMesh`, `suggestedMeshResolutionM`, `applyMeshRegistration`, `applyMeshToDem`, `clearMeshLayer` | STL/OBJ import (F-MESHIMPORT) → heightmap → registered `MeshImport` layer → optional DEM merge; `regions.js::selectCoordinate` clears it on region switch |
 | `mesh-registration.js` | `openMeshRegistrationModal`, `closeMeshRegistrationModal`, `computeMeshRegistration`, `undoLastMeshPointPair`, `clearMeshPointPairs` | Point-pair picker (DEM vs mesh) feeding the `/register` affine fit |
 | `water-mask.js` | `loadWaterMask`, `loadEsaLandCover`, `renderWaterMask`, `renderEsaLandCover`, `renderCombinedView` | Water mask + ESA land cover |
-| `hydrology-print.js` | `riverSourceFromHydro`, `readHydrologyRiverControls`, `loadedDemGrid`, `hydrologyPrintQuery`, `readRiverDepthScale`, `readRiverDepthMm`, `NEED_DEM_MESSAGE` | Pure: the one river-settings source (Fetch → Hydrology) and the print-model `/api/terrain/hydrology` query |
-| `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer. Preview = print: the hydrology half asks for the composite's own river carve on the loaded DEM (`dem_source`, the DEM request's `dim`, Composite Depth ×); without a loaded DEM it shows "Load the DEM first" and requests nothing. Legend tooltips count px (`order_counts_unit: "px"`) or reaches; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
+| `hydrology-print.js` | `riverSourceFromHydro`, `readHydrologyRiverControls`, `loadedDemGrid`, `nextDemGrid`, `hydrologyPrintQuery`, `readRiverDepthScale`, `readRiverDepthMm`, `NEED_DEM_MESSAGE` | Pure: the one river-settings source (Fetch → Hydrology) and the print-model `/api/terrain/hydrology` query; `nextDemGrid` is the grid the next DEM fetch will use (form dim and source), so a reload can start before the DEM lands |
+| `water-hydrology-combined.js` | `loadWaterHydrology`, `clearWaterHydrology`, `renderWaterHydrologyCombined`, `rerenderWaterHydrology` | Water + hydrology as one layer. Preview = print: the hydrology half asks for the composite's own river carve on the loaded DEM (`dem_source`, the DEM request's `dim`, Composite Depth ×); without a loaded DEM it shows "Load the DEM first" and requests nothing, unless given `loadWaterHydrology({grid})` (the projection switch passes `nextDemGrid()` so it fetches in parallel with the DEM). Legend tooltips count px (`order_counts_unit: "px"`) or reaches; sets `appState.waterHydrologyCanvas` and `appState.lastWaterHydrology`. Samples each canvas pixel from the grid (no forward copy, which striped narrower grids). `#hydroColorMode`: depth (blue) or Strahler order (`HYDRO_ORDER_COLORS`, legend `#hydroOrderLegend`), redrawn without a request. Skips the separate water mask when the hydrology grid carries `water_surface` |
 | `trails-overlay.js` | `loadTrails`, `renderTrails`, `refreshTrailsCategories`, `clearTrails`, `cancelTrailsLoad` | Ski + hiking grids from `/api/terrain/trails`; retains `appState.lastTrailsData` so display controls repaint without refetching |
-| `borders-overlay.js` | `loadBorders`, `renderBorders`, `clearBorders` | Border grid from `/api/terrain/borders` (view only); keeps the grid so the Countries / States switches and colours repaint without refetching |
+| `borders-overlay.js` | `loadBorders`, `renderBorders`, `clearBorders` | Border grid from `/api/terrain/borders` (view only); `loadBorders({activate, bbox, dim})` can fetch before the DEM lands (dim defaults to the DEM request's); keeps the grid so the Countries / States switches and colours repaint without refetching |
 | `city-overlay.js` | `loadCityData`, `cancelCityFetch`, `clearCityOverlay`, `selectCityBuilding`, `enhanceBuildingHeights`, `_drawCityCanvas` | OSM fetch (via `city-fetch.js`), terrain Z, feature pre-bake, building picking |
 | `city-render.js` | `renderCityOverlay`, `renderCityOnDEM`, `_renderViaWorker`, `loadCityRaster` | City overlay painting (off-thread in `app/client/static/js/workers/city-worker.js` when OffscreenCanvas is available; each view keeps its last picture) + `/api/cities/raster` layer |
 | `city-fetch.js` | `runCityFetch`, `summarizeCityFetch`, `mirrorHost`, `LAYER_STATE_ICON`, `cityPanelOsmParams`, `cityBuildOsmParams` | Pure: start → poll → result of the background city fetch; per-layer summary for `CityFetchProgress.vue` |
 | `building-heights.js` | `summarizeBuildingHeights`, `heightSourceGroup`, `buildingsWithOverrides`, `hasOverrides` | Pure: height-source summary, histogram; City Model `layer_data` with overrides |
-| `landmark-overrides.js` | `overridesForBuild`, `draftFromSpec`, `specFromDraft`, `overrideLabel`, `meshBounds`, `CATEGORY_LABELS` | Pure: landmark override specs (osm / ndsm / mesh), F-LANDMARK |
+| `landmark-overrides.js` | `overridesForBuild`, `draftFromSpec`, `specFromDraft`, `overrideLabel`, `validHeight`, `MAX_HEIGHT_M`, `meshBounds`, `CATEGORY_LABELS` | Pure: landmark override specs (osm / ndsm / mesh / height), F-LANDMARK |
 
 ### `map/` — map, globe, bbox
 
@@ -123,12 +127,12 @@ flowchart LR
 
 | File | Key symbols | Purpose |
 |---|---|---|
-| `city-fullmodel.js` | `parseModelParts`, `toViewerFrame`, `partColor` | Pure: the finished City Model's parts file (`/api/export/model-parts/{task_id}`) mapped into the viewer's frame |
+| `city-fullmodel.js` | `parseModelParts`, `toViewerFrame`, `partColor`, `staleParts` | Pure: the finished City Model's parts file (`/api/export/model-parts/{task_id}`) mapped into the viewer's frame |
 | `city-quickview.js` | `buildingPrisms`, `demGroundMm`, `MIN_HEIGHT_MM` | Pure: building footprints as prisms on the 3D preview by the City Model's height rule (quick view until the City Model build) |
-| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `resetViewerCamera`, `setViewerNormals`, `setViewerAutoRotate`, `updateBedOutline`, `rebuildViewerColors` (`_applySatelliteTexture`, `_paintWater`, `_updateCityQuickView`, `_scheduleFullModel`, `_showCityFull`) | Three.js preview of the server's mesh; draggable puzzle cuts; colormap or satellite drape (texture from the Edit tab's satellite canvas, fetched at ≥ the DEM's resolution, UVs from each vertex's DEM pixel) |
-| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
+| `model-viewer.js` | `initModelViewer`, `previewModelIn3D`, `haversineDiagKm`, `updatePuzzlePreview`, `puzzleEdgesFor`, `resetPuzzleEdges`, `clearViewerModel`, `resetViewerCamera`, `setViewerNormals`, `setViewerWireframe`, `setViewerAutoRotate`, `refreshCityLayers`, `updateBedOutline`, `rebuildViewerColors` (`_applySatelliteTexture`, `_paintWater`, `_updateCityQuickView`, `_scheduleFullModel`, `_runFullModel`, `_cancelFullModel`, `_showCityFull`, `_fallBackToQuickView`, `_applyViewMode`, `_realMaterial`, `_visibleBounds`, `_fitCamera`, `_orbitBy`, `_renderHud`, `_elevColor`, `_heightColors`) | Three.js preview of the server's mesh; draggable puzzle cuts; HUD (mesh stats, ground-grid cell size, printer bed) instead of labels over the model; layer solids flat-shaded and the colormap muted; colormap or satellite drape (texture from the Edit tab's satellite canvas, fetched at ≥ the DEM's resolution, UVs from each vertex's DEM pixel) |
+| `export-handlers.js` | `downloadSTL`, `downloadModel`, `downloadCrossSection`, `downloadFitTest`, `exportPuzzle`, `exportCityModel`, `runPreflight`, `cancelExport`, `_demSettings`, `_asyncExport` | Exports, puzzle and City Model builds, pre-flight |
 | `export-poll.js` | `EXPORT_STALL_TIMEOUT_MS`, `createStallWatch`, `formatElapsed`, `exportProgressText` | Pure: stall-based give-up, progress text |
-| `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges` | Pure: puzzle cut positions (mm from west / south) |
+| `puzzle-cuts.js` | `evenEdges`, `nearestEdge`, `moveEdge`, `minPieceMm`, `gridKey`, `isCustom`, `roundEdges`, `tonguePath`, `knobFits`, `knobSize`, `MIN_AUTO_PIECE_MM`, `cutPolyline`, `jigsawCuts` | Pure: puzzle cut positions (mm from west / south) and the jigsaw outline the server cuts |
 | `print-scale.js` | `modelScale`, `bboxDiagonalKm`, `formatGroundLength`, `parseBedSize`, `DEFAULT_BED`, `defaultPieceMm`, `piecesNeeded`, `fillBedMmPerPx`, `bedFitMm` | Pure: model scale, bed size, piece grid (ports of `city_model.choose_scale` / `puzzle.plan_grid`) |
 
 ### `ui/`
@@ -176,6 +180,9 @@ Under `app/client/static/js/vue/components/`. Store and bridge: [frontend.md](fr
 | `dem/` | `DemSettingsPanel`, `CityBuildingsPanel` (DemContainer); in DemSettingsPanel: `PresetsSection`, `ProjectionSection`, `FetchLayersSection`, `CityLandmarksSection`, `VisualizationSection`, `LayerViewSection`, `LayerDisplaySections`, `CompositeDemSection`, `MeshImportSection`, `PlateRegistrationSection`; in FetchLayersSection: `CityFetchProgress`, `DemSamplingInfo` |
 | `shared/` | `CollapsibleSection` (used throughout) |
 
+- **Layers rail (Edit, left):** `EditLayersPanel.vue` owns visibility (a switch on every row,
+  Terrain included; Terrain off hides it in 2D only), opacity (selected row) and order (drag or
+  Alt+Up/Down; top of the list is drawn on top). Saved per region as `view.layers`.
 - **Layer rack:** `LayerViewSection.vue` is a view over `stacked-layers.js` and rebuilds on the
   `layer-stack-changed` window event.
   [why](../decisions/composite.md#2026-09-06--the-layer-engine-owns-stack-state-and-the-rack-is-a-view)
@@ -270,7 +277,7 @@ One line per function. `window.*` unless marked (private) or (export).
 | `drawColorbar(min, max, cmap)` | Colourbar legend |
 | `drawHistogram(values)` | Elevation histogram + cumulative |
 | `enableZoomAndPan(canvas)` | Wheel/drag zoom on the DEM canvas |
-| `drawGridlinesOverlay()` | Lat/lon gridlines |
+| `drawGridlinesOverlay()` | Lat/lon gridlines (Explore overlay); positions through `graticule.js::projectedFrac` |
 | `recolorDEM()` | Re-render the DEM with current settings |
 | `rescaleDEM(vmin, vmax)` / `resetRescale()` | Rescale display / back to data range |
 
@@ -323,15 +330,19 @@ One line per function. `window.*` unless marked (private) or (export).
 
 | Function | Purpose |
 |---|---|
-| `updateStackedLayers()` | Draw each active layer into its buffer, then composite onto `#stackViewCanvas` in `_layerOrder` |
+| `updateStackedLayers()` | Draw each active layer into its buffer, then composite onto `#stackViewCanvas` in `_layerOrder`. Each layer's source canvas comes from `LAYER_SOURCES` through `projection-preview.js::projectionPreviewSource` (the warped preview while a projection change loads). A layer with no source gets its buffer emptied, not kept: a kept buffer is composited at the old pixel density |
+| `window.getLayerSourceCanvases()` | The real source canvas of each active layer (what the projection preview snapshots) |
 | `setStackMode(mode)` | Toggle a layer; switching on fetches missing data via `LAYER_AUTOLOAD` ([why](../decisions/frontend.md#2026-08-28--layers-fetch-their-own-data-when-switched-on)) |
 | `moveLayer(mode, delta)` | Swap past the next active layer; fires `layer-stack-changed` |
-| `setLayerOpacity(mode, v)` | Per-layer alpha |
+| `setLayerVisible(mode, on, opts)` | Show/hide a layer without touching the model flags (the rail's switches) |
+| `setLayerOrder(order)` | Replace the draw order (bottom first); fires `layer-stack-changed` |
+| `setLayerOpacity(mode, v)` / `getLayerOpacities()` | Per-layer alpha |
+| `getLayerStackState()` / `applyLayerStackState(saved)` | The saved `view.layers` (order, opacity, visibility) out / in; parse rules in `layer-stack-state.js::parseLayerState` |
 | `getLayerOrder()` / `getActiveLayers()` | Copies of the order and the active set (read by `LayerViewSection.vue`) |
 | `setSplitViewEnabled(on)` / `isSplitViewEnabled()` | Composite / Satellite side-by-side |
 | `applyStackedTransform()` | Shared CSS zoom/pan transform |
 | `enableStackedZoomPan()` | Wheel/drag + hover tooltip on `#layersStack` |
-| `drawLayerGrid()` | Graticule on `#layerGridCanvas`; needs only `currentDemBbox` |
+| `drawLayerGrid()` | Edit map grids on `#layerGridCanvas`, mapped onto `appState.demLayout`: pixel (`#showPixelGrid`), straight (`#showGridlines`) and true (`#showRealGrid`, inner `drawTrueGrid`, via `graticule.js::graticuleLines`). All default on |
 | `clearAllLayerBuffers()` | Free every buffer and reset zoom (region change) |
 
 ### `composite-dem.js`, `composite-spec.js`
@@ -373,15 +384,21 @@ One line per function. `window.*` unless marked (private) or (export).
 | `initModelViewer()` | Three.js scene |
 | `previewModelIn3D()` | Build the preview; sets `appState.modelPreviewState` |
 | `haversineDiagKm()` | Bbox diagonal |
-| `updatePuzzlePreview()` | Draw cut lines at `appState.puzzleEdges` or evenly |
+| `updatePuzzlePreview()` | Draw the jigsaw cut outline at `appState.puzzleEdges` or evenly |
 | `puzzleEdgesFor(cols, rows)` | Dragged cuts `{col_edges_mm, row_edges_mm}`, null for even |
 | `resetPuzzleEdges()` | Back to the even split |
+| `clearViewerModel()` | Drop the mesh, overlays, HUD and background City Model build (region change); resets the preview gate |
+| `resetViewerCamera()` | Fit the camera to everything shown (`_visibleBounds`: terrain, quick view, finished parts) |
+| `setViewerWireframe(on)` / `setViewerNormals(on)` | View modes, applied to every displayed mesh and to new ones (`_applyViewMode`) |
+| `setViewerAutoRotate(on)` | Orbits the camera (`_orbitBy`), so parts, cuts and bed outline stay aligned |
+| `refreshCityLayers()` | City layer edit: quick view now, finished model rebuilt after a 1.5 s debounce |
 
 ### `export-handlers.js`
 
 | Function | Purpose |
 |---|---|
 | `downloadSTL()` / `downloadModel(format)` / `downloadCrossSection()` | Exports |
+| `downloadFitTest()` | Puzzle fit-test coupon STL (Puzzle details › Fit test) |
 | `exportPuzzle()` / `exportCityModel()` | Async builds; bodies from `_puzzleExtra()` / `_cityExtra()` |
 | `_asyncExport(format, extra, fileName)` (private) | Start → poll → download; stall-based give-up |
 | `_demSettings()` (private) | DEM part of the body from `appState.lastDemRequest` (+ composite spec) |

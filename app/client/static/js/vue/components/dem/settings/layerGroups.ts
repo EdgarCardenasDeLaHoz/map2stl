@@ -55,18 +55,8 @@ export interface LayerGroups {
   note?: string;
 }
 
-const w = () => window as any;
 const click = (id: string) => (document.getElementById(id) as HTMLElement | null)?.click();
 const f1 = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
-
-/** The layer's "On the map" opacity (also the layer-order sub-page's slider). */
-function opacityRow(stack: string): Row {
-  return {
-    kind: 'slider', label: 'On the map', icon: '◐', color: '#636366', id: `layerOpacity_${stack}`,
-    min: 0, max: 100, step: 5, fmt: (v) => `${v}% opaque`,
-    set: (v) => { setField(`layerOpacity_${stack}`, String(v)); w().setLayerOpacity?.(stack, Number(v) / 100); },
-  };
-}
 
 /** Per-layer resolution: follows the terrain's Detail unless "Own resolution" is ticked. */
 function resRow(id: string, what: string): Row {
@@ -100,9 +90,11 @@ export const GROUPS: Record<string, LayerGroups> = {
     ],
     links: [{ label: 'Clear cached downloads', click: 'clearRegionCacheBtn' }, { label: 'Settings as JSON', click: 'jsonViewToggleBtn' }],
     view: [
-      { kind: 'switch', label: 'Grid', icon: '#', color: '#636366', id: 'showGridlines', hint: 'Lat/lon lines' },
-      { kind: 'sub', label: 'Grid & map options', icon: '🗺', color: '#0a84ff', sub: 'grid', hint: 'Spacing, pixel grid, map under the terrain' },
-      { kind: 'sub', label: 'Layer order', icon: '☰', color: '#5e5ce6', sub: 'layers', hint: "What's drawn on top, on the map only" },
+      { kind: 'switch', label: 'Straight grid', icon: '#', color: '#636366', id: 'showGridlines', hint: 'Straight lines, degrees on the edges' },
+      { kind: 'switch', label: 'True grid', icon: '🌐', color: '#ff9f0a', id: 'showRealGrid',
+        hint: 'Real lat/lon, bent by the projection' },
+      { kind: 'switch', label: 'Pixel grid', icon: '▦', color: '#ff3b30', id: 'showPixelGrid', hint: 'Lines every few height-map pixels' },
+      { kind: 'sub', label: 'Grid & map options', icon: '🗺', color: '#0a84ff', sub: 'grid', hint: 'Spacing, units, colours' },
       { kind: 'button', label: 'Compare with satellite', icon: '◫', color: '#636366', click: 'splitViewToggleBtn', hint: 'Split view on the map' },
     ],
     composite: [
@@ -160,7 +152,6 @@ export const GROUPS: Record<string, LayerGroups> = {
     reload: { label: '↺ Reload rivers & lakes', click: 'loadWaterHydrologyBtn' },
     links: [{ label: 'Clear rivers & lakes', click: 'clearWaterHydrologyBtn' }],
     view: [
-      opacityRow('WaterHydrology'),
       { kind: 'seg', label: 'Colour rivers by', icon: '🎨', color: '#bf5af2', id: 'hydroColorMode',
         options: [{ value: 'depth', label: 'Depth' }, { value: 'order', label: 'Size' }] },
     ],
@@ -210,7 +201,6 @@ export const GROUPS: Record<string, LayerGroups> = {
     reload: { label: '↺ Reload buildings & roads', click: 'loadCityDataBtn' },
     links: [{ label: 'Clear buildings & roads', click: 'clearCityDataBtn' }],
     view: [
-      opacityRow('CityOverlay'),
       { kind: 'select', label: 'Colour buildings by', icon: '🎨', color: '#bf5af2', id: 'cityColormap', hint: 'Height colours' },
       { kind: 'switch', label: 'Show buildings', icon: '🏠', color: '#ff9f0a', id: 'cityLayerBuildings', adv: true },
       { kind: 'switch', label: 'Show roads', icon: '🛣', color: '#636366', id: 'cityLayerRoads', adv: true },
@@ -253,7 +243,7 @@ export const GROUPS: Record<string, LayerGroups> = {
     fetch: [resRow('satImgResolution', 'satellite image')],
     reload: { label: '↺ Reload satellite image', click: 'loadSatImgBtn' },
     links: [{ label: 'Clear satellite image', click: 'clearSatImgBtn' }],
-    view: [opacityRow('SatImg')],
+    view: [],
     composite: [
       { kind: 'switch', label: 'Colour the 3D model', icon: '🛰', color: '#30a46c', id: 'viewerColormap',
         hint: 'Drapes the image over the preview and the 3MF',
@@ -277,7 +267,6 @@ export const GROUPS: Record<string, LayerGroups> = {
     reload: { label: '↺ Reload trails', click: 'loadTrailsBtn' },
     links: [{ label: 'Clear trails', click: 'clearTrailsBtn' }],
     view: [
-      opacityRow('Trails'),
       { kind: 'switch', label: 'Ski pistes', icon: '⛷', color: '#0a84ff', id: 'trailsShowSki' },
       { kind: 'switch', label: 'Hiking paths', icon: '🥾', color: '#ff9f0a', id: 'trailsShowHiking' },
       { kind: 'switch', label: 'Ski areas', icon: '▧', color: '#0a84ff', id: 'trailsShowAreas', adv: true },
@@ -302,7 +291,6 @@ export const GROUPS: Record<string, LayerGroups> = {
     fetch: [resRow('esaResolution', 'land cover')],
     reload: { label: '↺ Reload land cover', click: 'loadEsaBtn' },
     view: [
-      opacityRow('Sat'),
       { kind: 'sub', label: 'Land-use colours', icon: '🎨', color: '#30a46c', sub: 'landuse', hint: 'Colour per class' },
     ],
     composite: [
@@ -318,7 +306,6 @@ export const GROUPS: Record<string, LayerGroups> = {
     fetch: [],
     reload: { label: '↺ Reload borders', click: 'reloadBordersBtn' },
     view: [
-      opacityRow('Borders'),
       { kind: 'switch', label: 'Countries', icon: '🏳', color: '#ff453a', id: 'bordersShowCountries',
         hint: 'Borders between countries' },
       { kind: 'switch', label: 'States and provinces', icon: '▦', color: '#ffd60a', id: 'bordersShowStates',
@@ -332,7 +319,7 @@ export const GROUPS: Record<string, LayerGroups> = {
 
   mesh: {
     fetch: [{ kind: 'sub', label: 'Import a mesh', icon: '📐', color: '#5e5ce6', sub: 'mesh', hint: 'STL or OBJ: upload, library, convert' }],
-    view: [opacityRow('MeshImport')],
+    view: [],
     composite: [{ kind: 'sub', label: 'Plate registration', icon: '🧭', color: '#ff9f0a', sub: 'plate', hint: 'Place a printed plate on the map' }],
   },
 };
@@ -342,7 +329,7 @@ export const GROUPS: Record<string, LayerGroups> = {
 /** Sub-page titles. */
 export const SUB_TITLES: Record<string, string> = {
   landmarks: 'Landmarks', presets: 'Saved presets', curve: 'Height curve', landuse: 'Land-use colours',
-  mesh: 'Import a mesh', plate: 'Plate registration', grid: 'Grid & map options', layers: 'Layer order',
+  mesh: 'Import a mesh', plate: 'Plate registration', grid: 'Grid & map options',
 };
 
 /** Every control id the rows write: the inventory test checks each exists once in the page. */

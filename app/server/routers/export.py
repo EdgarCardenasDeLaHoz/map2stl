@@ -18,6 +18,7 @@ router = APIRouter(tags=["export"])
 from app.server.core.export import (  # noqa: E402
     generate_3mf,
     generate_crosssection,
+    generate_fit_test,
     generate_mesh_preview,
     generate_obj,
     generate_stl,
@@ -91,6 +92,12 @@ async def export_preflight(request: Request):
 async def export_crosssection(request: Request):
     """Generate a cross-section STL along a chosen latitude or longitude line."""
     return await _off_loop(generate_crosssection, await request.json())
+
+
+@router.post("/api/export/fit-test")
+async def export_fit_test(request: Request):
+    """STL of the puzzle fit-test coupon: one joint per clearance (0.2 to 0.5 mm)."""
+    return await _off_loop(generate_fit_test, await request.json())
 
 
 @router.post("/api/export/puzzle")

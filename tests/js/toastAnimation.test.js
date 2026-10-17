@@ -62,3 +62,29 @@ describe('toastDropIndex', () => {
         expect(drop(['error', 'error', 'error', 'error'])).toBe(0);
     });
 });
+
+// The stack sat at the window's centre and covered the Extrude panel's view
+// checkboxes (1014 px window, right panel from 686 px).
+describe('toastLane', () => {
+    const lane = (...a) => globalThis.window.toastLane(...a);
+
+    it('centres in the window when no panel is shown', () => {
+        expect(lane(1014, [])).toEqual({ center: 507, width: 440 });
+    });
+
+    it('keeps the stack left of the Extrude right panel', () => {
+        const { center, width } = lane(1014, [{ left: 686, right: 999 }]);
+        expect(center + width / 2).toBeLessThanOrEqual(686 - 16);
+        expect(center - width / 2).toBeGreaterThanOrEqual(16);
+    });
+
+    it('uses the gap between a left sidebar and a right panel', () => {
+        const { center, width } = lane(1400, [{ left: 0, right: 300 }, { left: 1050, right: 1400 }]);
+        expect(center).toBe(675);
+        expect(width).toBe(440);
+    });
+
+    it('falls back to the whole window when the gap is too narrow', () => {
+        expect(lane(375, [{ left: 0, right: 375 }])).toEqual({ center: 187.5, width: 343 });
+    });
+});

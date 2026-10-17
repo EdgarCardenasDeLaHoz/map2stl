@@ -332,12 +332,18 @@ class TestCityRaster:
             assert key in body, f"Missing field: {key}"
 
     def test_dimensions_match_dim_param(self, client, tmp_data_dir):
+        """dim is the longest side after projection (user decision 2026-10-13):
+        the raster lands on the DEM's grid, projected_shape, not a dim x dim square."""
+        from geo2stl.projections import projected_shape
+
         dim = 12
         resp = client.post("/api/cities/raster", json=self._payload(dim=dim))
         body = resp.json()
-        assert body["width"] == dim
-        assert body["height"] == dim
-        assert len(_values(body)) == dim * dim
+        b = SMALL_BBOX
+        h, w = projected_shape((b["north"], b["south"], b["east"], b["west"]), "none", dim)
+        assert (body["height"], body["width"]) == (h, w)
+        assert max(h, w) == dim
+        assert len(_values(body)) == h * w
 
     def test_empty_features_produce_zero_values(self, client, tmp_data_dir):
         resp = client.post("/api/cities/raster", json=self._payload())
@@ -407,11 +413,12 @@ class TestCityRaster:
                            json=self._payload(dim=dim, buildings=building_fc))
         assert resp.status_code == 200
         body = resp.json()
-        arr = np.array(_values(body), dtype=np.float32).reshape(dim, dim)
+        h, w = body["height"], body["width"]
+        arr = np.array(_values(body), dtype=np.float32).reshape(h, w)
 
         # One polygon in SW-ish area and one in NE-ish area should both appear as raised cells.
-        sw_nonzero = np.count_nonzero(arr[22:39, 0:18] > 0)
-        ne_nonzero = np.count_nonzero(arr[0:18, 22:39] > 0)
+        sw_nonzero = np.count_nonzero(arr[h // 2:, : w // 2] > 0)
+        ne_nonzero = np.count_nonzero(arr[: h // 2, w // 2:] > 0)
         assert sw_nonzero > 0
         assert ne_nonzero > 0
 
