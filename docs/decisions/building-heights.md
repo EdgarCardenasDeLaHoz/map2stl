@@ -1634,6 +1634,33 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ## Rejected hypotheses
 
+### 2026-10-17 - Split merged OSM footprints by cadastre constructions (Cartagena)
+
+- **Idea:** cut OSM footprints that hold several cadastre constructions into parts, each with its own floors x storey height.
+- **Not testable as briefed:** Cartagena has no survey-LiDAR truth (`benchmark.REGIONS` has no Cartagena; its truth cache is
+  900 of 900 "unmeasured"), and its cadastre is the Colombian AMB `Construccion` layer. Truth agreement was never measured.
+- **Potential:** 681 of 3,020 footprints (22.5%) hold at least 2 constructions (part at least 15 m2, at least 50% inside,
+  stacked polygons merged, Z stripped). Cadastre parts differ by more than max(25%, 2 m) in 39% of the 447 non-PH eligible footprints.
+- **Proxy (Open Buildings 2.5D, n=121, not truth):** it orders the parts like the cadastre in 52% (90% CI 40-64%). Per-part
+  agreement 36% vs 40% for one height per footprint. No gain.
+- **Ownership:** 173 non-PH footprints would get differing claims, but parts are narrower than the pose error at range
+  (all parts wider than 9 m at 1 km in 35 of 173; wider than 17 m at 2 km in 6 of 173). In `Cartagena_v18_ctrl` 12 of 42
+  drone-read multi-footprints and 4 published rows are affected, all 4 already nearer the tallest part.
+- **Decision:** not adopted. Re-test where truth and part-level cadastre both exist (Spanish Catastro INSPIRE building parts
+  plus floors with LiDAR: Granada, Benidorm). Scratch: `split/01_splits.py` to `04_ownership.py`.
+
+### 2026-10-17 - Satellite lean/shadow as a gate on pano readings
+
+- **Test:** reject a pano reading when |ln(pano/sat)| of the same footprint exceeds X; footprints with no satellite reading kept.
+- **San Juan, 605 readings (38 right):** AUC 0.62 (lean 0.53, shadow 0.44, stereo 0.63, multiview 0.68). X=0.5 keeps 13/38 right and
+  drops 384/567 wrong. The satellite height is itself right on 15% of footprints (7% of the 58 with truth of 30 m or more).
+- **Honolulu, 38 readings (28 covered):** AUC 1.00; half/half split-tuned: 13/15 right kept, 25/26 wrong dropped. Only 14 right readings.
+- **Cartagena:** no survey truth. A 28-row proxy (CTBUH towers, non-PH cadastre bands, tags) is confounded: wrong rows are all low
+  plots, where lean reads the neighbouring tower (45-60 m on 3-10 m plots).
+- **Decision:** rejected as a standalone gate; worse than the ownership rule (flags 5/13 right, catches 30/40 wrong). Wrong-owner
+  cases are mostly low buildings, where lean and shadow are weakest. Revisit with Cartagena survey truth and lean conf >= 0.7 only.
+  Offline scene fit may be below production quality, so this is a weak negative. Scratch: `lean/gate.py`, `cart_gate.py`.
+
 ### 2026-10-14 - Unmapped cadastre polygons measured in a separate pass as read-only claims (Cartagena, stage A 31 non-PH, stage B 139) leave every OSM row alone but get almost no reading of their own: 0 of 13 trusted readings fit the cadastre band, the rest are tops an OSM footprint owns
 
 - **Hypothesis (user, "Extras as read-only claims", after the in-run replay below failed):** measure the extras in a pass that
