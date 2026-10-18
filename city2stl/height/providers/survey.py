@@ -1,7 +1,8 @@
 """Registry of the surveyed nDSM providers (F-LANDMARK §4).
 
 One interface over every lidar-derived height-above-ground source, for the
-landmark nDSM override (``city2stl.landmarks``)::
+landmark nDSM override (``city2stl.landmarks``) and the default-height fill
+(``city2stl.height.survey_fill``, validated sources only)::
 
     ndsm_for_bbox(name, bbox, resolution_m=None) -> (array row0=north, lon/lat Affine) | None
     available_for_bbox(bbox) -> [{name, label, resolution_m, available, note}, ...]
@@ -11,7 +12,7 @@ Contract and caching: ``_survey``. Providers (one module each):
 
 =================  ===========================================================
 ``ign_lidarhd``    France, IGN LiDAR HD MNH, 0.5 m (WMS-R float GeoTIFF)
-``rediam_mdhn``    Andalucía, REDIAM MDHN, 1 m, 2020-21 (regional COG)
+``rediam_mdhn``    Andalucía, REDIAM MDHN, 1 m, 2020-21 (regional COG; vegetation model)
 ``cnig_mdsn``      Spain, CNIG MDSn edificación, 2.5 m, 2008-15 (IDEE WCS)
 ``cuzk_dmp``       Czechia, ČÚZK DMP 1G − DMR 5G, ~1 m (ArcGIS ImageServer)
 ``usgs_3dep``      USA, 3DEP point cloud: COPC (laspy), then EPT (laspy), then EPT (PDAL)

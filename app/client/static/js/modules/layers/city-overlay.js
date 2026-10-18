@@ -26,6 +26,8 @@
  */
 
 import { cityPanelOsmParams, runCityFetch, summarizeCityFetch } from './city-fetch.js';
+import { roofShapesValue } from './city-detail.js';
+import { lccParameters, projectedFrac } from '../dem/graticule.js';
 
 const ALPHA_BUCKETS = 8;   // number of opacity bands for building height shading
 
@@ -141,6 +143,11 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
     const sinSouth   = Math.sin(toRad(south));
     const sinRange   = sinNorth - sinSouth;
     const centerLon  = (east + west) / 2;
+    // laea / lcc: bounding-rectangle raster of the projected bbox (graticule.js). lcc is
+    // equidistant where its cone is undefined, as on the server.
+    const bboxObj    = { north, south, east, west };
+    const conicFrac  = (projection === 'laea' || (projection === 'lcc' && lccParameters(bboxObj)))
+        ? projectedFrac(bboxObj, projection) : null;
 
     return function geoToPx(lat, lon) {
         const xLin = (lon - west) / lonRange;
@@ -151,6 +158,21 @@ function _buildGeoToPx(north, south, east, west, canvasX, canvasY, canvasW, canv
                 xFrac = xLin;
                 yFrac = mercRange > 1e-10 ? (mercN - mercYfn(lat)) / mercRange : yLin;
                 break;
+            case 'laea':
+            case 'lcc': {
+                if (conicFrac) {
+                    const f = conicFrac(lat, lon);
+                    xFrac = f.x;
+                    yFrac = f.y;
+                    break;
+                }
+                // lcc without a cone: equidistant
+                const rowCos = Math.cos(toRad(lat));
+                const scale = avgCos > 1e-10 ? (rowCos / avgCos) : 1;
+                xFrac = (1 - scale) / 2 + xLin * scale;
+                yFrac = yLin;
+                break;
+            }
             case 'cosine':
             case 'equidistant': {
                 const rowCos = Math.cos(toRad(lat));
@@ -344,6 +366,7 @@ window.loadCityData = async function loadCityData() {
             min_area: minArea,
             m_per_level: mPerLevel,
             detail,
+            roof_shapes: roofShapesValue(document.getElementById('cityRoofShapes')?.value),
         }, {
             signal,
             onStatus: (st) => {

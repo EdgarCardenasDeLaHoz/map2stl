@@ -94,7 +94,8 @@ async def get_city_data(city_req: CityRequest):
     north, south, east, west = city_req.north, city_req.south, city_req.east, city_req.west
     try:
         result = await run_sync(get_city_layers, north, south, east, west, layers,
-                                city_req.simplify_tolerance, min_area)
+                                city_req.simplify_tolerance, min_area,
+                                roof_shapes=city_req.roof_shapes)
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
@@ -118,7 +119,8 @@ async def start_city_fetch(city_req: CityRequest):
         return err
     task = city_fetch_tasks.start_city_fetch(
         city_req.north, city_req.south, city_req.east, city_req.west,
-        layers, city_req.simplify_tolerance, min_area, diagonal_km=diag_km)
+        layers, city_req.simplify_tolerance, min_area, diagonal_km=diag_km,
+        roof_shapes=city_req.roof_shapes)
     return JSONResponse(content=task.snapshot())
 
 

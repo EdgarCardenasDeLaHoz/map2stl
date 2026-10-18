@@ -90,6 +90,55 @@ def resolve_dem(data: dict) -> tuple[list, int, int] | None:
     return dem_arr.ravel().tolist(), h, w
 
 
+#: ``vector_rivers: "auto"`` cuts rivers as vector solids when the bbox's longest
+#: ground side is at least this long (km), and keeps the raster carve below it.
+#: No existing cutoff marks where the river network turns large: HydroRIVERS is the
+#: river source at every size, and the nearest thresholds answer other questions
+#: (OSM lakes 500 km2, carve prewarm 500,000 km2, trails 300 km diagonal). At 200 km
+#: and up the raster carve is at most a few pixels wide per river and steps along
+#: the pixel grid, which is what the vector solids fix (user, 2026-10-17: vector
+#: rivers on by default for large regions); below it a box is usually a valley or
+#: a city, where the raster carve is fine and the vector cut only adds faces and time.
+VECTOR_RIVERS_AUTO_MIN_SIDE_KM = 200.0
+
+#: Projections whose grid is a linear map of lon/lat (city2stl.city_model.Terrain.project
+#: places vector features with one); the others fall back to the raster river carve.
+_LINEAR_PROJECTIONS = ("none", "cosine")
+
+
+def resolve_vector_rivers(value, bbox: dict | None) -> bool:
+    """The request's ``vector_rivers`` ("auto", true / false, or their string forms) as a bool.
+
+    "auto" (the default, also for a missing or unknown value) is on when the bbox's
+    longest ground side is at least :data:`VECTOR_RIVERS_AUTO_MIN_SIDE_KM`; without a
+    bbox it is off.
+    """
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower() if value is not None else "auto"
+    if text in ("true", "on", "1", "yes"):
+        return True
+    if text in ("false", "off", "0", "no"):
+        return False
+    if not bbox:
+        return False
+    from geo2stl.geo import bbox_size_m
+    return max(bbox_size_m(bbox)) / 1000.0 >= VECTOR_RIVERS_AUTO_MIN_SIDE_KM
+
+
+def vector_rivers_blocker(dem_settings: dict) -> str | None:
+    """Why the grid cannot carry vector rivers (None when it can).
+
+    Vector features are placed by a linear lon/lat map, exact only for an unprojected
+    grid and for "cosine" without maintain_dimensions (a plain resize).
+    """
+    projection = dem_settings.get("projection") or "none"
+    if projection not in _LINEAR_PROJECTIONS or (
+            projection == "cosine" and dem_settings.get("maintain_dimensions")):
+        return f"projection {projection!r} is not a linear lon/lat grid"
+    return None
+
+
 # Composite sources that rasterise OSM features. Meshes get those features from
 # the vector stage (city2stl.city_model); baked into the terrain as well, every
 # building would print twice, once as a pixel block. They stay available for
@@ -169,6 +218,20 @@ class ExportContext:
     river_depth_mm: float | None = None
     # Standing water (lakes, ESA open water) on the composite grid, for the viewer's colours.
     still_water: Any = None
+    # Rivers cut as vector solids (the feature stage) instead of the raster carve. The
+    # request's "auto" / true / false is resolved here (resolve_vector_rivers); it is
+    # True only when the composite has a river layer and the grid can place vectors.
+    vector_rivers: bool = False
+    # Vector rivers: reaches cut shallower than this (mm) are left out.
+    vector_rivers_min_depth_mm: float = 0.1
+    # Vector rivers: the carve without the river layers (lakes), and the river layers
+    # ({"source", "options", "weight"}) whose reaches the feature stage cuts.
+    lake_carve_m: Any = None
+    river_layers: list | None = None
+    # Why vector rivers were asked for (explicitly or by "auto") but not used; and,
+    # after the export, what the feature stage cut (see export.mesh_terrain_stage).
+    vector_rivers_note: str | None = None
+    vector_rivers_report: dict | None = None
 
     @classmethod
     def from_request(cls, data: dict) -> ExportContext:
@@ -188,11 +251,25 @@ class ExportContext:
         composite_error = None
         carve_m = None
         water: dict = {}
+        dem_settings = data.get("dem") or {}
+        vector_rivers = resolve_vector_rivers(data.get("vector_rivers", "auto"), data.get("bbox"))
+        river_layers = [
+            {"source": src, "options": dict(_spec_field(s, "options") or {}),
+             "weight": float(_spec_field(s, "weight") if _spec_field(s, "weight") is not None
+                             else 1.0)}
+            for s in (composite_layers or [])
+            if (src := _spec_field(s, "source")) in _river_sources()]
+        vector_note = None
+        if vector_rivers and not river_layers:
+            vector_rivers = False   # nothing to cut: no river layer in the composite
+        elif vector_rivers and (blocker := vector_rivers_blocker(dem_settings)):
+            vector_rivers, vector_note = False, f"raster river carve: {blocker}"
+        if vector_rivers:
+            water["need_lake_carve"] = True
         if composite_layers and data.get("bbox"):
             try:
                 # Lazy import — avoids circular deps with the composite router.
                 from app.server.routers.composite import compute_composite_dem
-                dem_settings = data.get("dem") or {}
                 dim = int(data.get("composite_dim") or dem_settings.get("dim") or 600)
                 composite, carve = compute_composite_dem(
                     data["bbox"], dim, composite_layers,
@@ -226,6 +303,14 @@ class ExportContext:
             except DemGone:
                 bbox = None
 
+        # Opt-in: the largest wing-free rectangle keeps only ~43% of a Europe-sized LAEA
+        # region (user, 2026-10-17), so it stays off until the projected frame's Inside mode
+        # (F-FRAME) turns it on.
+        if bool(dem_settings.get("crop_wings", False)):
+            dem_values, height, width, bbox = _crop_wings(
+                dem_values, height, width, bbox, water, carve_m)
+            carve_m = water.pop("_carve_m", carve_m)
+
         return cls(
             dem_values=dem_values,
             height=height,
@@ -244,7 +329,67 @@ class ExportContext:
             carve_m=carve_m,
             river_depth_mm=float(data["river_depth_mm"]) if data.get("river_depth_mm") else None,
             still_water=water.get("still"),
+            vector_rivers=vector_rivers and carve_m is not None,
+            vector_rivers_min_depth_mm=max(0.0, float(
+                data["vector_rivers_min_depth_mm"])
+                if data.get("vector_rivers_min_depth_mm") is not None else 0.1),
+            lake_carve_m=water.get("lake_carve") if vector_rivers else None,
+            river_layers=river_layers if vector_rivers else None,
+            vector_rivers_note=vector_note,
         )
+
+
+def _crop_wings(dem_values, height: int, width: int, bbox: dict | None,
+                water: dict, carve_m):
+    """Crop a projected grid to the largest rectangle free of projection wings.
+
+    sinusoidal / laea / lcc return a full rectangle whose out-of-bbox cells are NaN
+    ("wings", joined to the border). ``prepare_dem`` would fill them with the lowest
+    elevation, printing a flat slab in the corners, so the grid is cut to the largest
+    axis-aligned rectangle with none (``geo2stl.projections.largest_valid_rect``).
+    Interior NaN voids are not wings and keep the fill. Interim, until the projected
+    frame feature (docs/issues.md, Projections).
+
+    Every array on the grid (``water["still"]``, ``water["lake_carve"]``, ``carve_m``) is
+    cropped alike (``carve_m`` comes back as ``water["_carve_m"]``), and ``bbox``
+    shrinks by the kept fraction of rows / columns (plate carree, the way
+    ``GeoGrid`` reads it), so ``m_per_px`` and vector features stay on the cropped grid.
+    A grid without wings is returned untouched. Returns ``(dem_values, height, width, bbox)``.
+    """
+    import numpy as np
+
+    from geo2stl.projections import largest_valid_rect
+
+    if not height or not width or len(dem_values) != height * width:
+        return dem_values, height, width, bbox
+    grid = np.asarray(dem_values, dtype=np.float64).reshape(height, width)
+    r0, r1, c0, c1 = largest_valid_rect(grid)
+    if (r0, r1, c0, c1) == (0, height, 0, width):
+        return dem_values, height, width, bbox
+    logger.info("Cropped projection wings: %dx%d -> %dx%d", width, height, c1 - c0, r1 - r0)
+    for key in ("still", "lake_carve"):
+        arr = water.get(key)
+        if arr is not None and np.shape(arr) == (height, width):
+            water[key] = np.asarray(arr)[r0:r1, c0:c1]
+    if carve_m is not None and np.shape(carve_m) == (height, width):
+        carve_m = np.asarray(carve_m)[r0:r1, c0:c1]
+    water["_carve_m"] = carve_m
+    if bbox and all(bbox.get(k) is not None for k in ("north", "south", "east", "west")):
+        dlon = (bbox["east"] - bbox["west"]) / width
+        dlat = (bbox["north"] - bbox["south"]) / height
+        bbox = {**bbox, "west": bbox["west"] + c0 * dlon, "east": bbox["west"] + c1 * dlon,
+                "north": bbox["north"] - r0 * dlat, "south": bbox["north"] - r1 * dlat}
+    return grid[r0:r1, c0:c1].ravel().tolist(), r1 - r0, c1 - c0, bbox
+
+
+def _spec_field(spec, name: str):
+    """A composite layer spec's field, whether the spec is a dict or a model."""
+    return spec.get(name) if isinstance(spec, dict) else getattr(spec, name, None)
+
+
+def _river_sources() -> frozenset:
+    from geo2stl.water_layers import RIVER_FETCH
+    return frozenset(RIVER_FETCH)
 
 
 def _parse_export_params(data: dict) -> ExportContext:

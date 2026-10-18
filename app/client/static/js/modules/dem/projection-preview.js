@@ -39,6 +39,9 @@
  */
 import { geoAtFrac, projectedFrac, projectedShape } from './graticule.js';
 
+/** Azimuthal and conic projections: rows are curved, so the per-row shortcut does not hold. */
+const isConic = (p) => p === 'laea' || p === 'lcc';
+
 /**
  * Re-project an RGBA pixel buffer from one projection to another, nearest sample.
  * Pixels the target projection leaves outside the box stay transparent.
@@ -62,7 +65,26 @@ export function warpPixels(src, bbox, from, to, dim) {
     const fwd = projectedFrac(bbox, from.projection, !!from.maintainDimensions);
     const { west, east } = bbox;
     const tol = Math.abs(east - west) * 1e-9;
-    // Along one row every supported projection is affine: latitude is fixed by the row, the
+    // laea / lcc (as target or source) bend the rows: latitude varies along one, so each pixel
+    // is mapped on its own.
+    if (isConic(to.projection) || isConic(from.projection)) {
+        const { north, south } = bbox;
+        const latTol = Math.abs(north - south) * 1e-9;
+        for (let j = 0; j < H; j++) {
+            const fy = (j + 0.5) / H;
+            const row = j * W;
+            for (let i = 0; i < W; i++) {
+                const g = inv((i + 0.5) / W, fy);
+                if (!(g.lon >= west - tol && g.lon <= east + tol
+                    && g.lat >= south - latTol && g.lat <= north + latTol)) continue;
+                const s = fwd(g.lat, g.lon);
+                if (!(s.x >= 0 && s.x <= 1 && s.y >= 0 && s.y <= 1)) continue;
+                o32[row + i] = s32[Math.min(sh - 1, (s.y * sh) | 0) * sw + Math.min(sw - 1, (s.x * sw) | 0)];
+            }
+        }
+        return { data: out, width: W, height: H };
+    }
+    // Along one row every other supported projection is affine: latitude is fixed by the row, the
     // inverse gives lon = a + b*x and the forward gives x = c + d*lon. So two samples per row
     // give the whole row, and the per-pixel loop is arithmetic only (Mercator's atan/sinh and
     // log/tan per pixel made a 600 px layer ~3x slower).

@@ -62,7 +62,7 @@ _DEFAULT_SETTINGS: dict = {
     # maintain_dimensions: True = pad output to dim×dim; False = crop to valid data extent.
     # clip_valid_region: strip all-NaN edge rows/cols after projection — keeps result rectangular.
     "projection": {
-        # "none"|"cosine"|"mercator"|"equal_area"|"equidistant"|"lambert"|"sinusoidal"
+        # "none"|"cosine"|"mercator"|"equal_area"|"equidistant"|"lambert"|"sinusoidal"|"miller"|"gall"|"laea"|"lcc"
         "projection":          "none",
         "maintain_dimensions": False,
         "clip_valid_region":   True,
@@ -168,7 +168,7 @@ _DEFAULT_SETTINGS: dict = {
 
 _VALID_PROJECTIONS = frozenset({
     "none", "cosine", "mercator", "equal_area",
-    "equidistant", "lambert", "sinusoidal",
+    "equidistant", "lambert", "sinusoidal", "miller", "gall", "laea", "lcc",
 })
 _VALID_DEM_SOURCES = frozenset({
     "local", "h5_local",

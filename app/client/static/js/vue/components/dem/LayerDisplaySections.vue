@@ -16,6 +16,9 @@
       </select>
     </div>
     <div id="hydroOrderLegend" class="hydro-order-legend" hidden></div>
+    <!-- River lines on the Edit map (modules/layers/river-lines.js): view only, saved per
+         region (presets.js view.river_lines). The visible row is layerGroups.ts water.view. -->
+    <label class="check-label"><input type="checkbox" id="hydroShowLines" aria-label="Draw river lines on the map"> River lines</label>
   </CollapsibleSection>
 
   <CollapsibleSection title="🏙 City Display" :start-open="false">

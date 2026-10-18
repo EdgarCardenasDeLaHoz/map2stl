@@ -2,6 +2,43 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
+### 2026-10-17 — The lidar tree canopy is an opt-in `trees` layer, built only where a vegetation survey covers the box
+- **Decision:** `city2stl/canopy.py` rebuilds the study's canopy: nDSM from the first
+  vegetation-capable provider (`TREE_PROVIDERS`: REDIAM MDHN, IGN LiDAR HD, ČÚZK DMP, USGS 3DEP;
+  CNIG MDSn left out, it models buildings only) > 2.5 m, outside buildings buffered 2 m, inside
+  OSM green or ExG > 0.115 (chromaticity 2g − r − b, satellite ~1 m, skipped without an image);
+  depinch, open 0.8 mm, drop < 1 mm², fill holes < 0.5 mm²; heights clipped 30 m, gaussian
+  0.4 mm; one solid per area, heightfield TIN 0.25 mm, outline simplified 0.3 mm, bottom 0.6 mm
+  below the terrain; `trees` is last in `LAYER_PRIORITY`, so it is cut by every other layer.
+  Preview variant: TIN 4 mm, outline 1.6 mm, crowns < 10 mm² dropped. The export builds it only
+  with `layers.trees.enabled: true`; off (with `report.layers.trees.off` = the reason) where no
+  survey covers the box. Own cache key (`CANOPY_VERSION`), no `MODEL_CACHE_VERSION` bump.
+- **Why:** F-DETAIL D3. Outline at 0.2 mm gave about 25 % more faces than the study on the same
+  area; 0.3 mm is 4 % above. Granada, OSM green only: 38.2 ha, 1,274 solids, 172k faces, all
+  watertight, about 20 s; preview 7.3x fewer faces.
+- **Rejected:** on by default — doubles Granada's faces; the user's D5 switch decides.
+- **Open:** ExG formula and threshold unverified on real imagery (not cached on KO).
+- **Supersedes / superseded by:** builds on the study entry below.
+- **Source:** [../plans/active/F-DETAIL-survey-detail.md](../plans/active/F-DETAIL-survey-detail.md) D3.
+
+### 2026-10-17 — Granada detail study: lidar tree canopy is worth adding, REDIAM lidar roofs are not, a hand-modelled landmark can be merged but is not shipped
+- **Decision:** none of the three experiments ships yet. Tree canopy from lidar is the one
+  worth a plan; lidar roofs from REDIAM are refused; merging a hand-modelled landmark stays
+  manual.
+- **Why:** measured on Granada (outputs in `output/detail_study/`, each with a `results.md`):
+  - Trees (exp2): about 372k faces and 37 ha of canopy that OSM does not map.
+  - Lidar roofs (exp3): REDIAM MDHN 2020–21 is a vegetation-height model. It suppresses
+    classified buildings (p90 8.9 m against CNIG 14.6 m on the same footprints, 17 % of
+    building cells nodata), so the roofs it gives are too low.
+  - Thingiverse merge (exp4): the swap of a hand-modelled Alhambra into the plate works
+    (`granada_merged.3mf`, method A and B compared). Registration of the downloaded model
+    and its CC BY-SA licence are the hard parts, not the geometry.
+- **Rejected:** REDIAM MDHN as a roof or building-height source — it is not a surface model
+  of buildings. The CNIG MDSn edificación layer is used instead (see
+  [building-heights.md](building-heights.md)).
+- **Supersedes / superseded by:** —
+- **Source:** session 2026-10-17; three-way diff in `output/detail_study/exp1_diff/`.
+
 ### 2026-10-14 — Puzzle pieces are cut for FDM fit: 0.45 mm clearance, rounded corners, bevelled bottom
 - **Decision:**
   - Default clearance 0.45 mm per side (server `app/server/core/puzzle.py::DEFAULT_CLEARANCE_MM`,

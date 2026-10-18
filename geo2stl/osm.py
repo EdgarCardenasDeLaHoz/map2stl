@@ -23,12 +23,14 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 # Overpass base URLs (osmnx appends /interpreter automatically).
-# overpass-api.de is canonical but suffers frequent timeouts;
-# kumi.systems and mail.ru are reliable mirrors.
+# overpass-api.de is canonical but suffers frequent timeouts. On 2026-10-17 all three of the
+# first entries were down at once (overpass-api.de read timeout, kumi.systems 500, mail.ru 504)
+# while private.coffee answered in 1.8 s, so it is listed as a fourth mirror.
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api",
     "https://overpass.kumi.systems/api",
     "https://maps.mail.ru/osm/tools/overpass/api",
+    "https://overpass.private.coffee/api",
 ]
 
 # The status probe's budget. Generous because a healthy mirror under load still

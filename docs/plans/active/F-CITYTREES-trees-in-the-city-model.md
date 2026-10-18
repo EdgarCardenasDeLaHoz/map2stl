@@ -2,6 +2,11 @@
 
 _Proposed 2026-10-14 (user choice from the "more realistic City Model" form). Status: planned._
 
+> **Lidar canopy moved to F-DETAIL D3 (2026-10-17).** Where a vegetation-capable survey covers
+> the box, trees are built from lidar as a canopy (`city2stl/canopy.py`, layer `trees`):
+> [F-DETAIL-survey-detail.md](F-DETAIL-survey-detail.md). This plan stays for OSM-only trees
+> (`natural=tree` points, `tree_row` lines, crowns) where no survey exists.
+
 (Not F-TREES: that ID is the buildings-vs-vegetation classifier in
 [F-TREES](F-TREES-buildings-vs-vegetation.md), which reads trees *out of* scanned models.)
 

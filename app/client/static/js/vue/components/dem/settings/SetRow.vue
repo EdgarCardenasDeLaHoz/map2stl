@@ -1,7 +1,7 @@
 <template>
   <!-- One settings row (F-EDITPANEL): icon, name, one plain line, the control on the right or
        below. It writes the existing control by id (layerGroups.ts). -->
-  <div class="sr" :class="{ stack: stacked }">
+  <div class="sr" :class="{ stack: stacked, off: disabled }">
     <div class="sr-head">
       <span class="sr-ic" :style="{ background: row.color }" aria-hidden="true">{{ row.icon }}</span>
       <div class="sr-t">
@@ -10,7 +10,7 @@
       </div>
 
       <input v-if="row.kind === 'switch'" type="checkbox" role="switch" class="sr-switch" :aria-label="row.label"
-             :checked="!!value" @change="write(($event.target as HTMLInputElement).checked)">
+             :checked="!!value" :disabled="disabled" @change="write(($event.target as HTMLInputElement).checked)">
       <span v-else-if="row.kind === 'slider'" class="sr-val">{{ row.fmt ? row.fmt(Number(value)) : value }}</span>
       <template v-else-if="row.kind === 'number'">
         <input type="number" class="sr-num" :aria-label="row.label" :value="value"
@@ -75,6 +75,11 @@ const value = computed(() => {
   return r.kind === 'switch' ? checked(r.id) : (val(r.id) ?? '');
 });
 
+const disabled = computed(() => {
+  void store.tick;
+  return !!props.row.disabled?.();
+});
+
 const hintText = computed(() => {
   void store.tick;
   const h = props.row.hint;
@@ -85,9 +90,20 @@ const hintText = computed(() => {
   return typeof h === 'function' ? h() : h || '';
 });
 
+// Keep the same array while the options are unchanged. `store.tick` bumps about once a second;
+// a fresh array re-renders the row, and Vue then re-sets every option's and the select's
+// `value`, which drops a pick made while the native list is open.
+let lastOpts: ReturnType<typeof options> = [];
+let lastSig = '';
 const opts = computed(() => {
   void store.tick;
-  return props.row.options || (props.row.id ? options(props.row.id) : []);
+  const next = props.row.options || (props.row.id ? options(props.row.id) : []);
+  const sig = JSON.stringify(next);
+  if (sig !== lastSig) {
+    lastSig = sig;
+    lastOpts = next;
+  }
+  return lastOpts;
 });
 
 /** A resolution is the layer's own when it differs from the terrain's Detail. */
@@ -138,6 +154,8 @@ function setOwn(on: boolean) {
 .sr-res label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .sr-res .grow { flex: 1; }
 .sr-ck { width: 16px; height: 16px; accent-color: #0a84ff; margin: 0; }
+.sr.off .sr-ic, .sr.off .sr-t { opacity: .45; }
+.sr-switch:disabled { cursor: default; opacity: .45; }
 .sr-switch {
   appearance: none; -webkit-appearance: none; flex: none; position: relative; cursor: pointer;
   width: 40px; height: 24px; border-radius: 999px; background: #48484a; margin: 0; transition: background .15s;

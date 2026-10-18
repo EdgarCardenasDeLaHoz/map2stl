@@ -32,6 +32,8 @@
  *   clearLayerDisplays()            (global function in app.js)
  *   switchView(view)                (global function in app.js)
  */
+import { applyDefaultProjection } from '../dem/projection-default.js';
+
 
 // ── Auto-scale thresholds ────────────────────────────────────────────────────
 
@@ -274,6 +276,8 @@ async function selectCoordinate(index, opts = {}) {
             // Skip if saved settings were loaded — respect the persisted dim.
             if (!hasSaved && autoDim > currentDim) dimEl.value = String(autoDim);
         }
+        // Large regions default to laea (sinusoidal shears a continent); a saved projection wins.
+        if (!hasSaved) applyDefaultProjection(selectedRegion);
         // Every layer's resolution follows the terrain's Detail unless the region saved its
         // own (F-EDITPANEL, user 2026-10-04: "a number entry and a check box to override").
         if (!hasSaved && dimEl) {

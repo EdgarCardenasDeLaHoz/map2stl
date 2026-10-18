@@ -5,7 +5,8 @@
 import { describe, it, expect } from 'vitest';
 import {
     riverSourceFromHydro, readHydrologyRiverControls, loadedDemGrid, hydrologyPrintQuery,
-    readRiverDepthScale, nextDemGrid,
+    readRiverDepthScale, nextDemGrid, readVectorRivers, readVectorRiversMinDepthMm,
+    LARGE_RIVER_REGION_KM, isLargeRiverRegion, riverLoadingMessage,
 } from '../../app/client/static/js/modules/layers/hydrology-print.js';
 
 /** Minimal document stub: id → {value}. */
@@ -96,5 +97,37 @@ describe('nextDemGrid', () => {
     it('falls back to 600 px and the local source', () => {
         expect(nextDemGrid(doc({ paramDim: '' }))).toEqual({ dim: 600, demSource: 'local' });
         expect(nextDemGrid(null)).toEqual({ dim: 600, demSource: 'local' });
+    });
+});
+
+describe('readVectorRivers', () => {
+    it('maps Auto / On / Off onto the request value', () => {
+        expect(readVectorRivers(doc({ compositeVectorRivers: 'auto' }))).toBe('auto');
+        expect(readVectorRivers(doc({ compositeVectorRivers: 'on' }))).toBe(true);
+        expect(readVectorRivers(doc({ compositeVectorRivers: 'off' }))).toBe(false);
+        expect(readVectorRivers(doc({}))).toBe('auto');
+    });
+
+    it('reads the shallowest reach, 0.1 mm by default, 0 allowed', () => {
+        expect(readVectorRiversMinDepthMm(doc({ compositeVectorRiversMinDepthMm: '0.25' }))).toBe(0.25);
+        expect(readVectorRiversMinDepthMm(doc({ compositeVectorRiversMinDepthMm: '0' }))).toBe(0);
+        expect(readVectorRiversMinDepthMm(doc({}))).toBe(0.1);
+    });
+});
+
+describe('isLargeRiverRegion / riverLoadingMessage', () => {
+    const amazon = { north: 5, south: -20, east: -45, west: -80 };
+    const town = { north: 40.1, south: 40, east: -105.1, west: -105.3 };
+    it('uses the 200 km side, like export_params.VECTOR_RIVERS_AUTO_MIN_SIDE_KM', () => {
+        expect(LARGE_RIVER_REGION_KM).toBe(200);
+        expect(isLargeRiverRegion(amazon)).toBe(true);
+        expect(isLargeRiverRegion(town)).toBe(false);
+        expect(isLargeRiverRegion({ north: '5', south: '-20', east: '-45', west: '-80' })).toBe(true);
+        expect(isLargeRiverRegion(null)).toBe(false);
+    });
+    it('says how long a big region takes', () => {
+        expect(riverLoadingMessage(town, 1)).toBe('Loading rivers…');
+        expect(riverLoadingMessage(amazon, 3)).toBe('Loading rivers… large region, may take a while');
+        expect(riverLoadingMessage(amazon, 1)).toBe('Loading rivers… large region, about a minute');
     });
 });

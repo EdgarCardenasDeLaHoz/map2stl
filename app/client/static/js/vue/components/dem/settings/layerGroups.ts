@@ -10,6 +10,8 @@
  * here is the only visible control left.
  */
 import { checked, num, setChecked, setField, val } from '../../../dom-fields';
+import { ALHAMBRA_BBOX, bboxIntersects, fetchSurveySources, surveyCoverage } from '../../../../modules/layers/city-detail.js';
+import { LARGE_RIVER_REGION_KM, isLargeRiverRegion } from '../../../../modules/layers/hydrology-print.js';
 
 export type RowKind = 'switch' | 'slider' | 'seg' | 'number' | 'select' | 'sub' | 'button' | 'res' | 'color';
 
@@ -39,6 +41,8 @@ export interface Row {
   set?: (v: string | boolean) => void;
   /** Custom read. */
   get?: () => string | boolean;
+  /** Greyed out and not switchable when this returns true. */
+  disabled?: () => boolean;
   /** Shown only when this returns true. */
   show?: () => boolean;
 }
@@ -65,6 +69,26 @@ function resRow(id: string, what: string): Row {
 
 /** The ids that follow #paramDim when not overridden (resolution model, user 2026-10-04). */
 export const RES_IDS = ['waterResolution', 'esaResolution', 'satImgResolution', 'cityRasterDim', 'trailsDim'];
+
+/**
+ * Rivers row hint. On a region LARGE_RIVER_REGION_KM or larger, "All" (size 1–2) warns that it
+ * is slow: HydroRIVERS at size 1 on the Amazon is 1.23M reaches and took about a minute.
+ */
+function riversHint(): string {
+  const src = val('hydroSource') === 'natural_earth' ? 'Natural Earth' : 'HydroRIVERS';
+  const size = parseInt(val('hydroMinOrder'), 10);
+  const bbox = (window as any).appState?.selectedRegion;
+  if (Number.isFinite(size) && size <= 2 && isLargeRiverRegion(bbox)) {
+    return `${src} · every stream on a region this big is slow; Most is quicker`;
+  }
+  return `${src} · size ${val('hydroMinOrder')} and up`;
+}
+
+/** Survey lidar over the selected box for the Trees row: 'yes' | 'no' | 'unknown' (still asking). */
+const surveyTrees = () => surveyCoverage((window as any).appState?.selectedRegion, fetchSurveySources,
+  // The store is loaded lazily: it reads `window` at import time (specs import this file bare).
+  () => { void import('../../../stores/editLayers').then((m) => m.useEditLayersStore().bump()); });
+const inAlhambra = () => bboxIntersects((window as any).appState?.selectedRegion, ALHAMBRA_BBOX);
 
 const COLORMAPS: Opt[] = [
   { value: 'terrain', label: 'Terrain' }, { value: 'viridis', label: 'Viridis' },
@@ -140,7 +164,7 @@ export const GROUPS: Record<string, LayerGroups> = {
   water: {
     fetch: [
       { kind: 'seg', label: 'Rivers', icon: '〰', color: '#0a84ff', id: 'hydroMinOrder',
-        hint: () => `${val('hydroSource') === 'natural_earth' ? 'Natural Earth' : 'HydroRIVERS'} · size ${val('hydroMinOrder')} and up`,
+        hint: riversHint,
         options: [{ value: '5', label: 'Big only' }, { value: '3', label: 'Most' }, { value: '1', label: 'All' }],
         click: 'loadWaterHydrologyBtn' },
       { kind: 'select', label: 'River data', icon: '⛁', color: '#636366', id: 'hydroSource',
@@ -154,6 +178,9 @@ export const GROUPS: Record<string, LayerGroups> = {
     view: [
       { kind: 'seg', label: 'Colour rivers by', icon: '🎨', color: '#bf5af2', id: 'hydroColorMode',
         options: [{ value: 'depth', label: 'Depth' }, { value: 'order', label: 'Size' }] },
+      // modules/layers/river-lines.js: lines over the map, finer as you zoom; not printed.
+      { kind: 'switch', label: 'River lines', icon: '〰', color: '#64d2ff', id: 'hydroShowLines',
+        hint: 'Lines over the map, more detail as you zoom · view only' },
     ],
     composite: [
       { kind: 'slider', label: 'River depth', icon: '↧', color: '#0a84ff', id: 'compositeRiverDepthMm',
@@ -163,6 +190,17 @@ export const GROUPS: Record<string, LayerGroups> = {
         // The map's rivers are the print's carve: reload them too (the composite recomputes on
         // its own; the server builds the shared carve once, perf audit 2026-10-04).
         click: 'loadWaterHydrologyBtn' },
+      // Export only (the preview keeps the raster carve): export-handlers.js::_exportParams.
+      { kind: 'seg', label: 'Smooth river channels', icon: '∿', color: '#0a84ff', id: 'compositeVectorRivers',
+        hint: () => ({
+          auto: `On for regions ${LARGE_RIVER_REGION_KM} km and larger · smooth walls, more faces, slower export`,
+          on: 'Smooth walls · more faces and a slower export',
+          off: 'Channels follow the pixel grid',
+        } as Record<string, string>)[val('compositeVectorRivers')] ?? '',
+        options: [{ value: 'auto', label: 'Auto' }, { value: 'on', label: 'On' }, { value: 'off', label: 'Off' }] },
+      { kind: 'slider', label: 'Shallowest smooth river', icon: '⇣', color: '#0a84ff', id: 'compositeVectorRiversMinDepthMm',
+        adv: true, min: 0, max: 0.5, step: 0.05, fmt: (v) => `${v.toFixed(2)} mm`,
+        hint: 'Shallower reaches are left out', show: () => val('compositeVectorRivers') !== 'off' },
       { kind: 'switch', label: 'Rivers', icon: '〰', color: '#0a84ff', id: 'compositeRiversEnabled', adv: true },
       { kind: 'slider', label: 'Depth from flow', icon: '≋', color: '#0a84ff', id: 'compositeRiverDepthScale', adv: true,
         min: 0, max: 20, step: 0.5, fmt: (v) => `× ${f1(v)}`, hint: 'How much deeper big rivers are than small' },
@@ -214,6 +252,26 @@ export const GROUPS: Record<string, LayerGroups> = {
       { kind: 'slider', label: 'Building height', icon: '↥', color: '#ff9f0a', id: 'cityLayer_buildings_value',
         min: 0.5, max: 3, step: 0.1, hint: 'One scale for the map preview and the print',
         fmt: (v) => (Math.abs(v - 1) < 0.05 ? 'true height' : `× ${v.toFixed(1)}`) },
+      // F-DETAIL (mockups claude/mockups/2026-10-17-detail): the request fields are built by
+      // export-handlers.js::_cityExtra (city-detail.js::cityDetailFields).
+      { kind: 'seg', label: 'Roof shapes', icon: '⌂', color: '#ff9f0a', id: 'cityRoofShapes',
+        hint: () => (val('cityRoofShapes') === 'off' ? 'Only roofs tagged in OSM'
+          : 'OSM shapes kept · untagged roofs guessed from lidar and imagery'),
+        options: [{ value: 'auto', label: 'Auto' }, { value: 'off', label: 'Off' }] },
+      // On by default, but only effective where survey lidar covers the box.
+      { kind: 'switch', label: 'Trees', icon: '🌳', color: '#248a3d', id: 'cityTrees',
+        get: () => checked('cityTrees') && surveyTrees() === 'yes',
+        disabled: () => surveyTrees() !== 'yes',
+        hint: () => {
+          const c = surveyTrees();
+          if (c === 'unknown') return 'Checking survey lidar…';
+          if (c === 'no') return 'No survey lidar covers this box';
+          return checked('cityTrees') ? 'Lidar canopy (survey) · coarse in the preview, full in the print' : 'Off';
+        } },
+      // Off by default; offered only where the box meets the reference model.
+      { kind: 'switch', label: 'Alhambra model', icon: '🏰', color: '#b8860b', id: 'cityAlhambra', show: inAlhambra,
+        hint: () => (checked('cityAlhambra') ? 'Replaces 22 buildings · Thingiverse model, CC BY-SA'
+          : 'Detailed 3D model for 22 buildings of the Alhambra') },
       { kind: 'switch', label: 'Roads', icon: '🛣', color: '#636366', id: 'cityLayer_roads_enabled' },
       { kind: 'seg', label: 'Roads are', icon: '⇵', color: '#636366', id: 'cityLayer_roads_mode',
         options: [{ value: 'raised', label: 'Raised' }, { value: 'engraved', label: 'Engraved' }] },
@@ -221,8 +279,6 @@ export const GROUPS: Record<string, LayerGroups> = {
       { kind: 'switch', label: 'Rail', icon: '🚆', color: '#8e8e93', id: 'cityLayer_railways_enabled' },
       { kind: 'switch', label: 'Parks', icon: '🌳', color: '#30a46c', id: 'cityLayer_green_enabled' },
       { kind: 'switch', label: 'Walls', icon: '🧱', color: '#8e8e93', id: 'cityLayer_walls_enabled', adv: true },
-      { kind: 'switch', label: 'Sloped roofs', icon: '⌂', color: '#ff9f0a', id: 'cityRoofShapes', adv: true,
-        hint: 'Roof shapes from OpenStreetMap' },
       { kind: 'number', label: 'Road cut on the map', icon: '⇣', color: '#636366', id: 'compositeRoadCut', unit: 'm', adv: true,
         min: 0, max: 5, step: 0.1, hint: 'In the combined height map' },
       { kind: 'number', label: 'Water cut on the map', icon: '⇣', color: '#0a84ff', id: 'compositeRiverDepth', unit: 'm', adv: true,

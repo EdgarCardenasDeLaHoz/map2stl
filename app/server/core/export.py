@@ -59,7 +59,8 @@ def _run_export_pipeline(data: dict, fmt: str, task: ExportTask) -> None:
     face_count = int(len(mesh.faces))
     if not is_watertight:
         logger.warning("%s mesh is not watertight (%d faces)", fmt.upper(), face_count)
-    mesh_headers = _quality_headers(is_watertight, face_count, p.composite_error)
+    mesh_headers = {**_quality_headers(is_watertight, face_count, p.composite_error),
+                    **_vector_rivers_headers(p)}
 
     # Step 5: Export to file
     suffix = f".{fmt}"
@@ -109,17 +110,22 @@ class TerrainField:
     # Water for the viewer to colour like the Edit map: 0 dry, 0..1 relative carve
     # depth (rivers, lakes, open water), WATER_SEA on the open sea. None without a carve.
     water: np.ndarray | None = None
+    # Carve depth (m) that prints river_depth_mm deep (the 99.5th-percentile carve),
+    # for vector rivers to cut by the same rule. None without river_depth_mm or a carve.
+    river_ref_m: float | None = None
 
 
-def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
+def terrain_stage(p: ExportContext, data: dict, vector_rivers: bool = False) -> TerrainField:
     """Stage 1 of every mesh export: the request's DEM as a heightfield in mm.
 
     Raster terrain modifiers only (composite / edited values are already in
     ``p.dem_values``): median filter, sea-level cap, vertical scale, then the
     label and contour engraving. Features belong to the vector stage.
+    ``vector_rivers`` (with ``p.vector_rivers``) leaves the rivers out of the carve
+    for :func:`mesh_terrain_stage` to cut as solids; previews keep the raster carve.
     """
     masks: dict = {}
-    im, im_min, im_max, scale = _prepare_dem_array(p, masks)
+    im, im_min, im_max, scale = _prepare_dem_array(p, masks, vector_rivers)
     label_text = data.get("label_text", p.name)
     if data.get("engrave_label") and label_text:
         im = _apply_label_engraving(im, label_text, p.base_height)
@@ -130,10 +136,90 @@ def terrain_stage(p: ExportContext, data: dict) -> TerrainField:
         im = _apply_contour_lines(im, im_min, im_max, p.model_height * p.exaggeration,
                                   p.base_height, contour_interval,
                                   data.get("contour_style", "engraved"))
-    return TerrainField(im, scale, masks.get("water"))
+    return TerrainField(im, scale, masks.get("water"), masks.get("river_ref_m"))
 
 
-def _prepare_dem_array(p: ExportContext, masks: dict | None = None
+def mesh_terrain_stage(p: ExportContext, data: dict) -> tuple[TerrainField, dict]:
+    """The terrain stage of a mesh export, plus the feature layers it hands on.
+
+    With ``p.vector_rivers`` the rivers are not carved into the heightfield: they
+    come back as a ``"rivers"`` FeatureCollection (:func:`river_features`) for
+    ``build_on_terrain`` to cut as solids, and ``p.vector_rivers_report`` says what
+    was cut. Returns ``(field, layers_geojson)``; layers is empty otherwise.
+    """
+    field = terrain_stage(p, data, vector_rivers=p.vector_rivers)
+    layers: dict = {}
+    if p.vector_rivers:
+        fc, report = river_features(p, field)
+        p.vector_rivers_report = report
+        if fc["features"]:
+            layers["rivers"] = fc
+    return field, layers
+
+
+def river_features(p: ExportContext, field: TerrainField) -> tuple[dict, dict]:
+    """The composite's river reaches as GeoJSON lines with their print size.
+
+    Each reach gets ``width`` (ground m: ``river_size_m`` x the layer's width scale)
+    and ``depth_mm``: its raster carve depth (``river_size_m`` depth x depth scale
+    x layer weight) through the raster carve's print rule
+    (``geo2stl.water_layers.reach_print_depth_mm``, with ``field.river_ref_m``).
+    Reaches shallower than ``p.vector_rivers_min_depth_mm`` are dropped, first at
+    the read (``min_depth_m``) so they are never buffered. Unlike the raster carve
+    the reaches are not snapped to the valley floor. Returns (FeatureCollection, report).
+    """
+    import json as _json
+
+    import shapely
+
+    from geo2stl.water_layers import (
+        RIVER_FETCH,
+        min_carve_depth_m,
+        reach_carve_depth_m,
+        reach_print_depth_mm,
+        river_size_m,
+    )
+
+    t0 = time.perf_counter()
+    rule = {"ref_m": field.river_ref_m, "river_depth_mm": p.river_depth_mm,
+            "z_mm_per_m": field.scale.z_mm_per_m}
+    min_mm = p.vector_rivers_min_depth_mm
+    n, s, e, w = (p.bbox[k] for k in ("north", "south", "east", "west"))
+    features: list[dict] = []
+    report = {"reaches": 0, "min_depth_mm": min_mm, "sources": []}
+    for layer in p.river_layers or []:
+        opts, weight = dict(layer.get("options") or {}), float(layer.get("weight", 1.0))
+        if weight <= 0:
+            continue
+        ds = float(opts.get("depth_scale", 1.0))
+        min_m = min_carve_depth_m(min_mm, **rule) / weight
+        gdf = RIVER_FETCH[layer["source"]](n, s, e, w, {**opts, "min_depth_m": min_m})
+        if gdf is None or not len(gdf):
+            report["sources"].append({"source": layer["source"], "reaches": 0})
+            continue
+        depth_mm = reach_print_depth_mm(reach_carve_depth_m(gdf, ds) * weight, **rule)
+        order = gdf["ORD_STRA"].to_numpy(dtype=float) if "ORD_STRA" in gdf.columns else None
+        q = gdf["DIS_AV_CMS"].to_numpy(dtype=float) if "DIS_AV_CMS" in gdf.columns else None
+        width_m = river_size_m(order, q)[0] * float(opts.get("width_scale", 1.0))
+        width_m = np.broadcast_to(width_m, depth_mm.shape)
+        keep = np.flatnonzero(depth_mm >= min_mm)
+        geoms = shapely.to_geojson(np.asarray(gdf.geometry.values, dtype=object)[keep])
+        features.extend(
+            {"type": "Feature", "geometry": _json.loads(g),
+             "properties": {"width": round(float(width_m[k]), 2),
+                            "depth_mm": round(float(depth_mm[k]), 4)}}
+            for g, k in zip(geoms, keep, strict=True))
+        report["sources"].append({"source": layer["source"], "reaches": int(len(keep)),
+                                  "read": int(len(gdf))})
+    report["reaches"] = len(features)
+    report["seconds"] = round(time.perf_counter() - t0, 2)
+    logger.info("Vector rivers: %d reaches at least %.2f mm deep (%.1f s)",
+                len(features), min_mm, report["seconds"])
+    return {"type": "FeatureCollection", "features": features}, report
+
+
+def _prepare_dem_array(p: ExportContext, masks: dict | None = None,
+                       vector_rivers: bool = False
                        ) -> tuple[np.ndarray, float, float, ModelScale]:
     """
     Reshape, fill, median-filter, sea-level-clip and scale the DEM into model mm.
@@ -148,8 +234,9 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
     normalisation - before it, it cancels out); "auto" picks true scale for
     regions under 20 km diagonal, fit above, and falls back to fit when no bbox
     is known. A 3x3 median (``median_size``) removes the blocky artefacts of an
-    upsampled DEM. NaNs (projection edges, JSON nulls) are filled with the lowest
-    real elevation so they print as the floor of the relief.
+    upsampled DEM. Interior NaNs (DEM holes, JSON nulls) are filled with the lowest
+    real elevation so they print as the floor of the relief; projection wings (NaN
+    regions touching the border) were already cropped away by ``ExportContext.from_request``.
 
     Rivers / lakes (``carve_m``) carve after the median. With ``river_depth_mm`` the
     carve is applied after scaling, in print millimetres: the main river (the
@@ -157,7 +244,12 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
     ratios and deeper carve is capped; the vertical scale then comes from the
     uncarved terrain, and channels are widened to ``RIVER_MIN_WIDTH_MM`` on the print.
     Without it the carve is in metres, added before scaling. A ``masks`` dict gets
-    ``"water"`` (see :attr:`TerrainField.water`) when there is a carve.
+    ``"water"`` (see :attr:`TerrainField.water`) when there is a carve, and
+    ``"river_ref_m"`` (that reference depth) with ``river_depth_mm``.
+
+    ``vector_rivers`` (with ``p.vector_rivers``): only the carve without the rivers
+    (``p.lake_carve_m``) is applied; the reference depth and the viewer's water
+    still come from the whole carve, so the vector rivers cut by the same rule.
     """
     from city2stl.city_model import choose_scale, prepare_dem
 
@@ -165,12 +257,20 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
     im = prepare_dem(im, p.median_size)
     carve = p.carve_m if p.carve_m is not None and p.carve_m.shape == im.shape else None
     carve_in_mm = carve is not None and bool(p.river_depth_mm)
+    # The carve applied to the terrain: all of it, or without the rivers when they
+    # are cut as vector solids.
+    applied = carve
+    if carve is not None and vector_rivers and p.vector_rivers:
+        lake = p.lake_carve_m
+        applied = lake if lake is not None and lake.shape == im.shape else np.zeros_like(carve)
     if carve_in_mm:
         # Widen channels to RIVER_MIN_WIDTH_MM on the print (deepest neighbour wins).
         width_px = int(np.ceil(RIVER_MIN_WIDTH_MM / max(p.mm_per_pixel, 1e-6) - 1e-9))
         if width_px >= 2:
             from scipy.ndimage import minimum_filter
+            same = applied is carve
             carve = minimum_filter(carve, size=width_px, mode="nearest")
+            applied = carve if same else minimum_filter(applied, size=width_px, mode="nearest")
     still = p.still_water if p.still_water is not None and p.still_water.shape == im.shape else None
     if masks is not None and ((carve is not None and (carve < 0).any()) or still is not None):
         from geo2stl.water_layers import ocean_mask
@@ -185,7 +285,7 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
     if carve is not None and not carve_in_mm:
         # A 1-px channel is 3 of 9 cells in a 3x3 window, so smoothing after
         # carving would erase it (F-REGION).
-        im = im + carve
+        im = im + applied
 
     if p.sea_level_cap:
         # Raise everything below sea level to zero so the sea prints flat. (This was
@@ -209,8 +309,11 @@ def _prepare_dem_array(p: ExportContext, masks: dict | None = None
         # capped at the print depth.
         ref = float(np.percentile(-carve[carve < 0], 99.5, method="lower"))
         if ref > 0:
-            im = np.maximum(im + np.maximum(carve / ref, -1.0) * p.river_depth_mm,
-                            max(0.1, p.base_height * 0.5))
+            if masks is not None:
+                masks["river_ref_m"] = ref
+            if (applied < 0).any():
+                im = np.maximum(im + np.maximum(applied / ref, -1.0) * p.river_depth_mm,
+                                max(0.1, p.base_height * 0.5))
     return im, im_min, im_max, scale
 
 
@@ -292,15 +395,19 @@ def _prepare_export_mesh(p: ExportContext, data: dict, progress=None):
     """Both stages for a terrain-only export: heightfield, then the city model on it.
 
     Returns the merged ``trimesh.Trimesh`` (adaptive terrain within the print
-    tolerance, watertight, north up, z = 0 floor). The city export calls
+    tolerance, watertight, north up, z = 0 floor), with vector rivers cut into it
+    when ``p.vector_rivers`` (:func:`mesh_terrain_stage`). The city export calls
     :func:`terrain_stage` and ``build_on_terrain`` itself to add its layers.
     """
     from city2stl.city_model import build_on_terrain
 
-    field = terrain_stage(p, data)
+    field, layers = mesh_terrain_stage(p, data)
     if progress:
-        progress(30, "Meshing terrain...")
-    mesh = build_on_terrain(field.z_mm, p.bbox, field.scale, {}).merged
+        progress(30, "Cutting vector rivers..." if layers else "Meshing terrain...")
+    model = build_on_terrain(field.z_mm, p.bbox, field.scale, layers)
+    if layers and p.vector_rivers_report is not None:
+        p.vector_rivers_report["layer"] = model.report["layers"].get("rivers")
+    mesh = model.merged
     if len(mesh.faces) == 0:
         raise ValueError("Mesh generation produced no faces")
     return mesh
@@ -341,6 +448,19 @@ def _quality_headers(watertight: bool, face_count: int,
         headers["X-Composite-Error"] = composite_error.encode(
             "ascii", "replace").decode("ascii").replace("\n", " ")
     return headers
+
+
+def _vector_rivers_headers(p: ExportContext) -> dict:
+    """``X-Vector-Rivers``: how the rivers were cut ("vector: N reaches", "raster",
+    or "raster river carve: <why>" when vector was asked for but could not be used)."""
+    if p.vector_rivers:
+        rep = p.vector_rivers_report or {}
+        value = f"vector: {rep.get('reaches', 0)} reaches"
+    else:
+        value = p.vector_rivers_note or "raster"
+    return {"X-Vector-Rivers": value.encode("ascii", "replace").decode("ascii"),
+            "Access-Control-Expose-Headers":
+                "X-Watertight, X-Face-Count, X-Composite-Error, X-Vector-Rivers"}
 
 
 def _mesh_response_headers(name: str, ext: str, mesh,
@@ -703,8 +823,9 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
     ``layout`` + ``bed_mm``.
 
     A terrain-only model is cut by the fast mask path (pieces meshed straight
-    from the heightfield); ``puzzle_method: "boolean"`` builds the whole model
-    and cuts it with manifold3d instead.
+    from the heightfield); ``puzzle_method: "boolean"``, or vector rivers
+    (:func:`mesh_terrain_stage`), build the whole model and cut it with manifold3d
+    instead. An explicit ``"mask"`` falls back to the raster river carve.
     """
     import zipfile
 
@@ -721,14 +842,19 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
     except ValueError as exc:
         task.fail(str(exc))
         return
+    if p.vector_rivers and str(spec.get("method") or "auto") == "mask":
+        # The mask path cuts the heightfield itself, which has no vector rivers.
+        p.vector_rivers, p.vector_rivers_note = False, "raster river carve: puzzle method 'mask'"
     task.update(5, "Terrain stage...")
-    field = terrain_stage(p, data)
+    field, layers = mesh_terrain_stage(p, data)
+    if layers:
+        method = "boolean"   # vector rivers are solids cut from the mesh
     mesh = heightfield = None
     if method == "mask":
         heightfield = Heightfield(field.z_mm, p.mm_per_pixel, terrain_tolerance(field.scale))
     else:
         task.update(20, "Building terrain mesh...")
-        mesh = build_on_terrain(field.z_mm, p.bbox, field.scale, {}).merged
+        mesh = build_on_terrain(field.z_mm, p.bbox, field.scale, layers).merged
     fd, zip_path = tempfile.mkstemp(suffix=".zip")
     os.close(fd)
     try:
@@ -745,7 +871,8 @@ def generate_puzzle(data: dict, task: ExportTask) -> None:
         **_disposition(f"{p.name}_puzzle.zip"),
         "X-Piece-Count": str(info["pieces"]),
         "X-Puzzle-Info": json.dumps({k: info[k] for k in ("cols", "rows", "method", "seconds")}),
-        "Access-Control-Expose-Headers": "X-Piece-Count, X-Puzzle-Info",
+        **_vector_rivers_headers(p),
+        "Access-Control-Expose-Headers": "X-Piece-Count, X-Puzzle-Info, X-Vector-Rivers",
     })
 
 

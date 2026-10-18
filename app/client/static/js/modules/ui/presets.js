@@ -279,6 +279,8 @@ function collectAllSettings() {
             // Every grid starts on (2026-10-14); a region saved with one off keeps it off.
             pixel_grid_show: _chk('showPixelGrid', true),
             real_grid_show: _chk('showRealGrid', true),
+            // River lines on the Edit map (river-lines.js), view only; off by default.
+            river_lines: _chk('hydroShowLines', false),
             elevation_curve: window.appState.activeCurvePreset || null,
             elevation_curve_points: (window.appState.curvePoints || []).map(pt => [pt.x, pt.y]),
             elevation_curve_vmin: window.appState.curveDataVmin ?? null,
@@ -324,6 +326,9 @@ function collectAllSettings() {
             building_scale: _flt('cityBuildingScale', 0.5),
             road_depression_m: _flt('cityRoadDepression', 0.0),
             water_depression_m: _flt('cityWaterOffset', -2.0),
+            roof_shapes: _str('cityRoofShapes', 'auto'),
+            trees: _chk('cityTrees', true),
+            reference_landmarks: _chk('cityAlhambra', false),
             simplify_terrain: true,
         },
         hydrology: {
@@ -345,6 +350,8 @@ function collectAllSettings() {
             lakes: _chk('compositeLakesEnabled', false),
             river_depth_scale: _flt('compositeRiverDepthScale', 1.0),
             river_depth_mm: _flt('compositeRiverDepthMm', 0.5),
+            vector_rivers: _str('compositeVectorRivers', 'auto'),
+            vector_rivers_min_depth_mm: _flt('compositeVectorRiversMinDepthMm', 0.1),
             lake_depth_m: _flt('compositeLakeDepth', 2.0),
             lake_min_area_ha: _flt('compositeLakeMinAreaHa', 1.0),
         },
@@ -376,6 +383,7 @@ function collectAllSettings() {
 const COMPOSITE_DEFAULTS = Object.freeze({
     enabled: false, water: false, rivers: false, lakes: false,
     river_depth_scale: 1.0, lake_depth_m: 2.0, lake_min_area_ha: 1.0,
+    vector_rivers: 'auto', vector_rivers_min_depth_mm: 0.1,
 });
 
 function _applyComposite(c) {
@@ -384,7 +392,9 @@ function _applyComposite(c) {
         compositeLakesEnabled: c.lakes, compositeEnabled: c.enabled };
     const values = { compositeRiverDepthScale: c.river_depth_scale, compositeRiverDepthMm: c.river_depth_mm,
         compositeLakeDepth: c.lake_depth_m,
-        compositeLakeMinAreaHa: c.lake_min_area_ha };
+        compositeLakeMinAreaHa: c.lake_min_area_ha,
+        compositeVectorRivers: c.vector_rivers,
+        compositeVectorRiversMinDepthMm: c.vector_rivers_min_depth_mm };
     for (const [id, v] of Object.entries(values)) {
         const el = _get(id);
         if (el && v != null && String(el.value) !== String(v)) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); fire(el); }
@@ -450,6 +460,8 @@ function applyAllSettings(s) {
                 'mercator': 'Web Mercator — vertical stretching increases towards poles.',
                 'lambert': 'Lambert Cylindrical Equal-Area — preserves area at the cost of shape.',
                 'sinusoidal': 'Sinusoidal — each row scaled by cos(lat), centred on meridian.',
+                'laea': 'Lambert azimuthal equal-area — preserves area, centred on the region.',
+                'lcc': 'Lambert conic conformal — preserves local shapes.',
             };
             projDesc.textContent = descs[projVal] || '';
         }
@@ -465,6 +477,8 @@ function applyAllSettings(s) {
     // Regions saved before these were kept get the default (on), not the last region's choice.
     setChk('showPixelGrid', view.pixel_grid_show ?? true);
     setChk('showRealGrid', view.real_grid_show ?? true);
+    setChk('hydroShowLines', view.river_lines ?? false);
+    window.drawRiverLines?.();
     // null (a region saved before the rail owned it) puts the default order back.
     if (s.view && 'layers' in view) window.applyLayerStackState?.(view.layers);
     if (view.elevation_curve_points && Array.isArray(view.elevation_curve_points) && view.elevation_curve_points.length >= 2) {
@@ -527,6 +541,9 @@ function applyAllSettings(s) {
     if (city.building_scale != null) set('cityBuildingScale', city.building_scale);
     if (city.road_depression_m != null) set('cityRoadDepression', city.road_depression_m);
     if (city.water_depression_m != null) set('cityWaterOffset', city.water_depression_m);
+    if (city.roof_shapes != null) set('cityRoofShapes', city.roof_shapes === 'off' ? 'off' : 'auto');
+    if (typeof city.trees === 'boolean') setChk('cityTrees', city.trees);
+    if (typeof city.reference_landmarks === 'boolean') setChk('cityAlhambra', city.reference_landmarks);
     if (Array.isArray(city.layers)) {
         setChk('cityLayerBuildings', city.layers.includes('buildings'));
         setChk('cityLayerRoads', city.layers.includes('roads'));

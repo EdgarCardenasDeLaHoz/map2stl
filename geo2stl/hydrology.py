@@ -643,6 +643,8 @@ def _read_region_parquets(regions, west, south, east, north, use_o3, _time):
 def fetch_hydrorivers(
     north: float, south: float, east: float, west: float,
     min_order: int = 3,
+    min_depth_m: float = 0.0,
+    depth_scale: float = 1.0,
 ):
     """Fetch HydroRIVERS features intersecting the bbox as a GeoDataFrame.
 
@@ -656,6 +658,11 @@ def fetch_hydrorivers(
     Args:
         north/south/east/west: bounding box in WGS-84 degrees
         min_order: minimum Strahler order (1=all, 3=medium+, 5=major only).
+        min_depth_m: drop reaches whose carve depth (``river_size_m`` depth x
+            *depth_scale*) is under this many metres
+            (:func:`geo2stl.water_layers.drop_shallow_reaches`); 0 keeps every reach.
+            Vector rivers pass the depth that prints at their minimum print depth.
+        depth_scale: the river layer's depth scale, for *min_depth_m*.
 
     Returns:
         GeoDataFrame with columns ``ORD_STRA``, ``DIS_AV_CMS``, ``geometry``, or
@@ -707,6 +714,13 @@ def fetch_hydrorivers(
     # (order 3 -> 5 above 180k reaches) silently dropped two thirds of the rivers.
     logger.info("HydroRIVERS: %d features after order-%d+ filter",
                 len(combined), effective_min_order)
+
+    if min_depth_m > 0:
+        from geo2stl.water_layers import drop_shallow_reaches
+        n_before = len(combined)
+        combined = drop_shallow_reaches(combined, min_depth_m, depth_scale)
+        logger.info("HydroRIVERS: %d of %d reaches at least %.2f m deep",
+                    len(combined), n_before, min_depth_m)
 
     if len(combined) == 0:
         return None

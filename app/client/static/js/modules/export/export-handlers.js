@@ -27,7 +27,10 @@
 
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import { cityBuildOsmParams } from '../layers/city-fetch.js';
-import { readRiverDepthMm } from '../layers/hydrology-print.js';
+import { ALHAMBRA_BBOX, bboxIntersects, cityDetailFields, fetchSurveySources, surveyCoverage, surveyCoverageReady } from '../layers/city-detail.js';
+import {
+    readRiverDepthMm, readVectorRivers, readVectorRiversMinDepthMm,
+} from '../layers/hydrology-print.js';
 import { FEATURE_SOURCES } from '../layers/composite-spec.js';
 import { overridesForBuild } from '../layers/landmark-overrides.js';
 import { EXPORT_STALL_TIMEOUT_MS, createStallWatch, exportProgressText } from './export-poll.js';
@@ -199,11 +202,22 @@ function _demSettings() {
  */
 function _exportParams() {
     const md = window.appState?.generatedModelData;
-    return {
+    const params = {
         ...(md.demSettings || _demSettings()),
         ...(md.buildParams || window._readBuildParams?.() || {}),
         name: _regionName(),
     };
+    // Smooth river channels: read now, not from the preview. The preview always shows
+    // the raster carve, so changing this does not rebuild it.
+    if (params.composite_layers) {
+        params.vector_rivers = readVectorRivers();
+        params.vector_rivers_min_depth_mm = readVectorRiversMinDepthMm();
+        if (window.appState) {
+            window.appState.vectorRivers = params.vector_rivers;
+            window.appState.vectorRiversMinDepthMm = params.vector_rivers_min_depth_mm;
+        }
+    }
+    return params;
 }
 
 // Note: the 3D model is built by the Extrude-tab auto-rebuild preview
@@ -310,6 +324,17 @@ function _cityExtra() {
             document.getElementById('citySimplifyTolerance')?.value,
             document.getElementById('cityMinArea')?.value),
     };
+    // F-DETAIL: roof shapes, survey-lidar trees, Alhambra reference model.
+    const detail = cityDetailFields({
+        roofShapes: document.getElementById('cityRoofShapes')?.value,
+        trees: document.getElementById('cityTrees')?.checked,
+        covered: surveyCoverage(window.appState?.selectedRegion, fetchSurveySources) === 'yes',
+        alhambra: document.getElementById('cityAlhambra')?.checked,
+        alhambraInBox: bboxIntersects(window.appState?.selectedRegion, ALHAMBRA_BBOX),
+    });
+    extra.roof_shapes = detail.roof_shapes;
+    extra.reference_landmarks = detail.reference_landmarks;
+    if (detail.trees) extra.layers.trees = { ...extra.layers.trees, ...detail.trees };
     // Heights edited in the Buildings panel exist only here; send the edited
     // buildings so the server uses them in place of its cached OSM copy.
     const overrides = window.appState?.cityHeightOverrides;
@@ -350,6 +375,8 @@ async function exportCityModel() {
         window.showToast?.('Load the DEM first', 'warning');
         return;
     }
+    // _cityExtra reads the survey coverage synchronously: make sure the answer is in.
+    await surveyCoverageReady(window.appState?.selectedRegion, fetchSurveySources);
     const extra = _cityExtra();
     // The Extrude viewer may be building this exact model in the background: wait for it,
     // so this build is a model-cache hit rather than a second full build alongside it.

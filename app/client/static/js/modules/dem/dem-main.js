@@ -366,6 +366,17 @@ window.loadDEM = async function loadDEM(highRes = false) {
     }
 };
 
+// The newest call's promise, beside its AbortController: a projection switch whose request a
+// newer loadDEM aborted waits on this one instead (projection-switch.js awaitNewestDemLoad).
+{
+    const load = window.loadDEM;
+    window.loadDEM = function loadDEM(highRes = false) {
+        const run = load(highRes);
+        window.loadDEM._promise = run;
+        return run;
+    };
+}
+
 // ---------------------------------------------------------------------------
 // renderDEMCanvas
 // ---------------------------------------------------------------------------

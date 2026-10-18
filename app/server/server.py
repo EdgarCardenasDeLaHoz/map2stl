@@ -113,7 +113,7 @@ All raster layers follow a uniform projection pipeline:
 ### Projections
 
 Supported projections: `none` (Plate Carrée), `cosine`, `mercator`, \
-`equidistant`, `lambert`, `sinusoidal`.
+`equidistant`, `lambert`, `sinusoidal`, `miller`, `gall`, `laea` (Lambert azimuthal equal-area), `lcc` (Lambert conformal conic).
 
 - **Continuous data** (DEM, water mask, hydrology): bilinear interpolation, `fill_value=NaN`
 - **Categorical data** (ESA land cover class IDs): nearest-neighbour interpolation, `fill_value=0`

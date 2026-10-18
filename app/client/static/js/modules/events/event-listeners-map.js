@@ -12,6 +12,7 @@ import {
     endProjectionPreview, isProjectionPreviewActive, markPreviewDemLanded, projTiming, projTimingStart,
     releaseProjectionPreview, settlePreviewLayer, startProjectionPreview,
 } from '../dem/projection-preview.js';
+import { afterPaint, awaitNewestDemLoad } from '../dem/projection-switch.js';
 import { nextDemGrid } from '../layers/hydrology-print.js';
 
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
@@ -71,6 +72,8 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             'sinusoidal': 'Sinusoidal — pseudocylindrical equal-area; each row scaled by cos(lat).',
             'miller': 'Miller Cylindrical — compromise; Mercator-like with less polar exaggeration.',
             'gall': 'Gall Stereographic — compromise cylindrical; balanced shape/area distortion.',
+            'laea': 'Lambert azimuthal equal-area — preserves area; no shear on big regions (EPSG:3035 style).',
+            'lcc': 'Lambert conic conformal — preserves local shapes; flat at the two standard parallels.',
         };
         const _syncClipToggleState = () => {
             if (!clipChk) return;
@@ -146,10 +149,15 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
         /**
          * Re-fetch every loaded layer in the picked projection; the preview stands in meanwhile.
-         * Every request goes out first, in parallel: the DEM, then Rivers & lakes, Borders,
-         * Trails and the composite's rivers/lakes merge, whose parameters do not need the new
-         * DEM (the grid is the form's dim and source, hydrology-print.js nextDemGrid). They used
-         * to wait for the DEM to land (DEM_LOADED), ~1.5 s on Colombia. The warp runs after.
+         * The DEM request goes out first, then the warp is drawn and painted, then the other
+         * requests go out in parallel: Rivers & lakes, Borders, Trails and the composite's
+         * rivers/lakes merge, whose parameters do not need the new DEM (the grid is the form's
+         * dim and source, hydrology-print.js nextDemGrid), and the water mask and land cover.
+         * They used to wait for the DEM to land (DEM_LOADED), ~1.5 s on Colombia. The warp used
+         * to run after their synchronous parts, which held it back ~1 s on Europa (a cached
+         * land-cover grid re-renders synchronously, water-mask.js loadEsaLandCover).
+         * A newer loadDEM that aborts this one (a Detail change with auto-reload) is waited for,
+         * not taken for a failure (projection-switch.js awaitNewestDemLoad).
          */
         const _switchProjection = async (pick) => {
             const st = window.appState;
@@ -186,6 +194,15 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
 
             // Re-fetch DEM with new projection param (includes water if subtract_water).
             const demLoad = _timed('dem', window.loadDEM?.());
+            const demController = window.loadDEM?._controller;
+
+            // Show the new shape now: the loaded layers warped in the browser
+            // (modules/dem/projection-preview.js). loadDEM has cleared the stack: redraw it
+            // on the next frame, and let that frame paint before any other loader runs.
+            if (previewMe) _previewPick(pick, sources, frame);
+            window.emitStackUpdate?.();
+            await afterPaint();
+            if (pick !== _projPick) return;           // a newer pick re-fetches everything
 
             // Layers that reload on their own (they used to wait for DEM_LOADED): each settles
             // its preview when its own fetch finishes, with a picture, with none or failed.
@@ -213,12 +230,6 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
             if (had.water) early.push(_timed('water', window.loadWaterMask?.()));
             if (had.landCover || had.satEsa) early.push(own('Sat', () => window.loadEsaLandCover?.(), true));
 
-            // Show the new shape now: the loaded layers warped in the browser
-            // (modules/dem/projection-preview.js). loadDEM has cleared the stack: redraw it
-            // on the next frame, before it paints.
-            if (previewMe) _previewPick(pick, sources, frame);
-            window.emitStackUpdate?.();
-
             // Layers that reload on their own keep their preview until they settle: release, not end.
             const finish = (failed) => {
                 _reloadLayers = null;
@@ -227,9 +238,13 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
                 window.emitStackUpdate?.();
             };
 
-            await demLoad;
-            if (pick !== _projPick) return;           // a newer pick owns the map now
-            if (!window.appState.lastDemData) { finish(true); return; }   // failed or cancelled
+            const dem = await awaitNewestDemLoad(demLoad, demController, {
+                loader: window.loadDEM,
+                hasDem: () => !!window.appState.lastDemData,
+                isCurrent: () => pick === _projPick,
+            });
+            if (dem === 'stale') return;              // a newer pick owns the map now
+            if (dem === 'failed') { finish(true); return; }   // failed or cancelled
             markPreviewDemLanded(window.getLayerSourceCanvases?.());
             window.emitStackUpdate?.();
 

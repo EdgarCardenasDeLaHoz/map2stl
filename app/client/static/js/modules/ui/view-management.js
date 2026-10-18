@@ -474,6 +474,7 @@ window.setupDemSubtabs = function setupDemSubtabs() {
 
         const cityCollapsedTabW = document.getElementById('cityTableCollapsedTab')?.getBoundingClientRect().width || 0;
         const settingsHandleW = document.getElementById('settingsPanelResizeHandle')?.getBoundingClientRect().width || 0;
+        // Collapsed (#layersHideBtn), the Layers panel is only its reopen tab, so this is the tab's width.
         const layersPanelW = document.getElementById('editLayersPanel')?.getBoundingClientRect().width || 0;
         const targetMax = Math.max(220, demContainer.clientWidth - minCenter - cityCollapsedTabW - settingsHandleW - layersPanelW);
         const currentW = right.getBoundingClientRect().width;

@@ -102,6 +102,10 @@ class CityRequest(BoundingBox):
                     "all layers). 'coarse' = 25km tier: roads + waterways + large buildings "
                     "only (no walls, area-filtered), for regions too large for full detail."
     )
+    roof_shapes: str | bool = Field(
+        default="auto",
+        description="'auto' classifies untagged roofs on read (city_data.with_roof_shapes); "
+                    "'off' (or false) keeps OSM roof:shape only.")
 
 
 class EnhanceHeightsRequest(BoundingBox):

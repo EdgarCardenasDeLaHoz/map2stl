@@ -10,11 +10,110 @@
  *   gall
  *   sinusoidal                   x = 0.5 + (lon - centre)/(E - W) * cos(lat)/widest_cos,
  *                                widest_cos = max(|cos N|, |cos S|); y linear
+ *   laea, lcc                    spherical Lambert azimuthal equal-area / conformal conic, centred
+ *                                on the bbox centre; the raster is the bounding rectangle of the
+ *                                projected bbox (see conicAzimuthalModel). lcc falls back to
+ *                                equidistant when lccParameters(bbox) is null.
  * Fractions are of the projected raster: x 0 = west edge, y 0 = north edge.
  */
 
 const toRad = (d) => d * Math.PI / 180;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+const MAX_LAT = 89.9;
+const EXTENT_SAMPLES = 1001;
+const tanHalf = (phi) => Math.tan(Math.PI / 4 + phi / 2);
+
+/**
+ * Standard parallels [lat1, lat2] (degrees) of the Lambert conformal conic: south + span/6 and
+ * north - span/6. Null when the cone is undefined (bbox straddles the equator, or the parallels
+ * coincide within 1e-6 degrees), where the server treats `lcc` as `equidistant`.
+ * Mirrors geo2stl/projections.py::lcc_parameters.
+ * @param {{north:number, south:number}} bbox
+ * @returns {[number, number]|null}
+ */
+export function lccParameters(bbox) {
+    const { north, south } = bbox;
+    if (south < 0 && north > 0) return null;
+    const span = north - south;
+    const lat1 = south + span / 6;
+    const lat2 = north - span / 6;
+    if (Math.abs(lat2 - lat1) < 1e-6) return null;
+    return [clamp(lat1, -MAX_LAT, MAX_LAT), clamp(lat2, -MAX_LAT, MAX_LAT)];
+}
+
+/** `lcc` is `equidistant` where its cone is undefined; every other name is unchanged. */
+function effectiveProjection(bbox, projection) {
+    return projection === 'lcc' && !lccParameters(bbox) ? 'equidistant' : projection;
+}
+
+/**
+ * Spherical LAEA or LCC on the unit sphere (mirrors geo2stl/projections.py::_ConicAzimuthalModel).
+ * forward(lat, lon) -> {x, y} (north up); inverse(x, y) -> {lat, lon} in degrees, or null for a
+ * point off the sphere. extents = projected bounding rectangle of the bbox, which is the raster.
+ * @param {{north:number, south:number, east:number, west:number}} bbox
+ * @param {'laea'|'lcc'} projection  (lcc needs lccParameters(bbox) non-null)
+ */
+export function conicAzimuthalModel(bbox, projection) {
+    const { north, south, east, west } = bbox;
+    const lat0 = toRad((north + south) / 2);
+    const lon0 = toRad((east + west) / 2);
+    let forward, inverse;
+    if (projection === 'laea') {
+        const s0 = Math.sin(lat0), c0 = Math.cos(lat0);
+        forward = (lat, lon) => {
+            const phi = toRad(lat), dl = toRad(lon) - lon0;
+            const k = Math.sqrt(2 / (1 + s0 * Math.sin(phi) + c0 * Math.cos(phi) * Math.cos(dl)));
+            return { x: k * Math.cos(phi) * Math.sin(dl),
+                     y: k * (c0 * Math.sin(phi) - s0 * Math.cos(phi) * Math.cos(dl)) };
+        };
+        inverse = (x, y) => {
+            const rho = Math.hypot(x, y);
+            if (rho > 2) return null;
+            const c = 2 * Math.asin(rho / 2);
+            const sinPhi = Math.cos(c) * s0 + (rho > 1e-15 ? y * Math.sin(c) * c0 / rho : 0);
+            const lat = Math.asin(clamp(sinPhi, -1, 1));
+            const lon = lon0 + Math.atan2(x * Math.sin(c), rho * c0 * Math.cos(c) - y * s0 * Math.sin(c));
+            return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI };
+        };
+    } else {
+        const [lat1, lat2] = lccParameters(bbox);
+        const p1 = toRad(lat1), p2 = toRad(lat2);
+        const n = Math.log(Math.cos(p1) / Math.cos(p2)) / Math.log(tanHalf(p2) / tanHalf(p1));
+        const F = Math.cos(p1) * Math.pow(tanHalf(p1), n) / n;
+        const rho0 = F / Math.pow(tanHalf(lat0), n);
+        const sgn = Math.sign(n);
+        forward = (lat, lon) => {
+            const rho = F / Math.pow(tanHalf(toRad(clamp(lat, -MAX_LAT, MAX_LAT))), n);
+            const theta = n * (toRad(lon) - lon0);
+            return { x: rho * Math.sin(theta), y: rho0 - rho * Math.cos(theta) };
+        };
+        inverse = (x, y) => {
+            const dy = rho0 - y;
+            const rho = sgn * Math.hypot(x, dy);
+            const theta = Math.atan2(sgn * x, sgn * dy);
+            const lat = 2 * Math.atan(Math.pow(F / rho, 1 / n)) - Math.PI / 2;
+            if (!Number.isFinite(lat)) return null;
+            return { lat: lat * 180 / Math.PI, lon: (lon0 + theta / n) * 180 / Math.PI };
+        };
+    }
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    const take = (lat, lon) => {
+        const p = forward(lat, lon);
+        if (p.x < x0) x0 = p.x;
+        if (p.x > x1) x1 = p.x;
+        if (p.y < y0) y0 = p.y;
+        if (p.y > y1) y1 = p.y;
+    };
+    for (let k = 0; k < EXTENT_SAMPLES; k++) {
+        const t = k / (EXTENT_SAMPLES - 1);
+        take(south + t * (north - south), west);
+        take(south + t * (north - south), east);
+        take(north, west + t * (east - west));
+        take(south, west + t * (east - west));
+    }
+    return { forward, inverse, extents: { x0, x1, y0, y1 } };
+}
 
 /** y = f(lat) for the cylindrical projections that stretch latitude. */
 const CYLINDRICAL_Y = {
@@ -56,6 +155,7 @@ export function frameAspect(bbox, dem, projection = 'none', maintainDimensions =
  */
 export function projectedFrac(bbox, projection = 'none', maintainDimensions = false) {
     const { north, south, east, west } = bbox;
+    projection = effectiveProjection(bbox, projection);
     const lonRange = (east - west) || 1;
     const latRange = (north - south) || 1;
     const linX = (lon) => (lon - west) / lonRange;
@@ -77,6 +177,14 @@ export function projectedFrac(bbox, projection = 'none', maintainDimensions = fa
             x: 0.5 + (linX(lon) - 0.5) * Math.cos(toRad(lat)) / avgCos,
             y: linY(lat),
         });
+    }
+    if (projection === 'laea' || projection === 'lcc') {
+        const { forward, extents: e } = conicAzimuthalModel(bbox, projection);
+        const w = (e.x1 - e.x0) || 1, h = (e.y1 - e.y0) || 1;
+        return (lat, lon) => {
+            const p = forward(lat, lon);
+            return { x: (p.x - e.x0) / w, y: (e.y1 - p.y) / h };
+        };
     }
     if (projection === 'sinusoidal') {
         const widest = Math.max(Math.abs(Math.cos(toRad(north))), Math.abs(Math.cos(toRad(south)))) || 1;
@@ -108,6 +216,7 @@ const CYLINDRICAL_LAT = {
  */
 export function geoAtFrac(bbox, projection = 'none', maintainDimensions = false) {
     const { north, south, east, west } = bbox;
+    projection = effectiveProjection(bbox, projection);
     const lonRange = (east - west) || 1;
     const latRange = (north - south) || 1;
     const linLon = (x) => west + x * lonRange;
@@ -128,6 +237,14 @@ export function geoAtFrac(bbox, projection = 'none', maintainDimensions = false)
         return (x, y) => {
             const lat = linLat(y);
             return { lat, lon: linLon(0.5 + (x - 0.5) * avgCos / (Math.cos(toRad(lat)) || 1e-9)) };
+        };
+    }
+    if (projection === 'laea' || projection === 'lcc') {
+        const { inverse, extents: e } = conicAzimuthalModel(bbox, projection);
+        return (x, y) => {
+            const g = inverse(e.x0 + x * (e.x1 - e.x0), e.y1 - y * (e.y1 - e.y0));
+            // Off the sphere: a longitude outside [west, east] means "no data".
+            return g || { lat: linLat(y), lon: west - lonRange };
         };
     }
     if (projection === 'sinusoidal') {
@@ -152,7 +269,7 @@ export function geoAtFrac(bbox, projection = 'none', maintainDimensions = false)
  */
 export function projectedAspect(bbox, projection = 'none', maintainDimensions = false) {
     const { north, south, east, west } = bbox;
-    const p = maintainDimensions ? 'none' : projection;
+    const p = maintainDimensions ? 'none' : effectiveProjection(bbox, projection);
     const latSpan = north - south;
     const plate = latSpan ? (east - west) / latSpan : 1;
     const widthRad = toRad(east - west);
@@ -167,6 +284,9 @@ export function projectedAspect(bbox, projection = 'none', maintainDimensions = 
     else if (p === 'sinusoidal') {
         const widest = Math.max(Math.abs(Math.cos(toRad(north))), Math.abs(Math.cos(toRad(south))));
         a = (widthRad * widest) / (toRad(latSpan) || 1);
+    } else if (p === 'laea' || p === 'lcc') {
+        const { x0, x1, y0, y1 } = conicAzimuthalModel(bbox, p).extents;
+        a = y1 > y0 ? (x1 - x0) / (y1 - y0) : 1;
     } else a = plate;
     return Number.isFinite(a) && a > 0 ? a : 1;
 }
@@ -190,9 +310,13 @@ export function projectedShape(bbox, projection, dim, maintainDimensions = false
     return { width: Math.max(1, Math.round(d * aspect)), height: d };
 }
 
-/** True when the projection bends meridians (so a straight grid cannot show them). */
-export function bendsMeridians(projection, maintainDimensions = false) {
-    return projection === 'sinusoidal'
+/**
+ * True when the projection bends meridians (so a straight grid cannot show them).
+ * Pass `bbox` so an `lcc` that falls back to `equidistant` is told apart from a real cone.
+ */
+export function bendsMeridians(projection, maintainDimensions = false, bbox = null) {
+    if (projection === 'lcc' && bbox) projection = effectiveProjection(bbox, projection);
+    return projection === 'sinusoidal' || projection === 'laea' || projection === 'lcc'
         || ((projection === 'cosine' || projection === 'equidistant') && !!maintainDimensions);
 }
 

@@ -871,6 +871,23 @@ def _classify(
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
+_PREDICT_BATCH = 512
+_PROGRESS_EVERY = 500
+
+
+def _apply_model_batch(trained, pending: list) -> int:
+    """Predict ``pending`` ``(feature, props, row)`` triples with one model call and
+    write each answer into its feature (already in the output list). Returns the count."""
+    probs = trained.predict_rows([row for _, _, row in pending])
+    for (feat, props, _), p in zip(pending, probs, strict=True):
+        shape, conf = trained.shape_for(float(p))
+        props["roof:shape"] = shape
+        props["roof_source"] = "roof_model_gbm"
+        props["roof_confidence"] = round(float(conf), 3)
+        feat["properties"] = props
+    return len(pending)
+
+
 def classify_roof_shapes(
     buildings_geojson: dict,
     satellite_rgb: np.ndarray | list[np.ndarray],
@@ -882,6 +899,7 @@ def classify_roof_shapes(
     acquisition_hours: list[int] | None = None,
     cnn_model: str | object | None = None,
     use_model: bool = False,
+    progress=None,
 ) -> dict:
     """Classify ``roof:shape`` for buildings using multi-signal satellite analysis.
 
@@ -936,7 +954,11 @@ def classify_roof_shapes(
             fetching a zoom-18 crop per building rather than reading the
             supplied city-wide image.  Falls back to the signal cascade for
             any building the model cannot measure, and silently does nothing
-            when the checkpoint is absent.
+            when the checkpoint is absent.  With no image the model's rows are
+            predicted in batches of ``_PREDICT_BATCH`` (one predict per batch, not
+            per building).
+        progress: Optional ``progress(done, total)``, called every
+            ``_PROGRESS_EVERY`` buildings and once at the end.
 
     Returns:
         A copy of *buildings_geojson* with ``roof:shape``, ``roof_source``,
@@ -1016,8 +1038,14 @@ def classify_roof_shapes(
 
     lat_mid = (north + south) / 2.0
     lon_mid = (east + west) / 2.0
+    pending: list[tuple[dict, dict, list]] = []   # model-only rows awaiting one predict
 
-    for feat in features_list:
+    for i, feat in enumerate(features_list):
+        if progress and i % _PROGRESS_EVERY == 0:
+            progress(i, total)
+        if len(pending) >= _PREDICT_BATCH:
+            n = _apply_model_batch(trained, pending)
+            classified, by_model, pending = classified + n, by_model + n, []
         feat = copy.deepcopy(feat)
         props = feat.get("properties") or {}
         geom = feat.get("geometry") or {}
@@ -1056,6 +1084,19 @@ def classify_roof_shapes(
         # than the supplied image: a city-wide fetch is capped at 400 tiles
         # and walks the zoom down until it fits, so it arrives at roughly a
         # metre per pixel and a ten-metre house is eight pixels across.
+        if model_only:
+            try:
+                row = trained.row(ring, props)
+            except Exception as exc:                        # noqa: BLE001
+                logger.debug("roof model failed on one building: %s", exc)
+                row = None
+            if row is None:
+                skipped += 1
+            else:
+                pending.append((feat, props, row))
+            out_features.append(feat)
+            continue
+
         model_shape, model_conf = None, 0.0
         if trained is not None:
             try:
@@ -1063,19 +1104,6 @@ def classify_roof_shapes(
             except Exception as exc:                        # noqa: BLE001
                 logger.debug("roof model failed on one building: %s", exc)
                 model_shape = None
-
-        if model_only:
-            if model_shape is None:
-                skipped += 1
-            else:
-                props["roof:shape"] = model_shape
-                props["roof_source"] = "roof_model_gbm"
-                props["roof_confidence"] = round(float(model_conf), 3)
-                feat["properties"] = props
-                classified += 1
-                by_model += 1
-            out_features.append(feat)
-            continue
 
         # ── Crop bounds ────────────────────────────────────────────────
         cr0, cr1, cc0, cc1 = _crop_bounds_for_ring(
@@ -1171,6 +1199,12 @@ def classify_roof_shapes(
         feat["properties"] = props
         classified += 1
         out_features.append(feat)
+
+    if pending:
+        n = _apply_model_batch(trained, pending)
+        classified, by_model = classified + n, by_model + n
+    if progress:
+        progress(total, total)
 
     result = dict(buildings_geojson)
     result["features"] = out_features

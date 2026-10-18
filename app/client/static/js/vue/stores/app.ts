@@ -58,6 +58,10 @@ export const useAppStore = defineStore('app', {
         landCoverConfig: JSON.parse(JSON.stringify(DEFAULT_LAND_COVER)) as LandCoverConfig,
         landCoverConfigDefaults: JSON.parse(JSON.stringify(DEFAULT_LAND_COVER)) as LandCoverConfig,
         waterOpacity: 0.7,
+        // Smooth river channels (export request vector_rivers / _min_depth_mm), as the
+        // last export sent them; the controls are #compositeVectorRivers(MinDepthMm).
+        vectorRivers: 'auto' as 'auto' | boolean,
+        vectorRiversMinDepthMm: 0.1,
         curvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] as CurvePoint[],
         activeCurvePreset: 'linear',
         originalDemValues: null as Float32Array | null,

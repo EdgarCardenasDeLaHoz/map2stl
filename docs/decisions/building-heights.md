@@ -7,6 +7,104 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-17 — The survey fill covers the landmark layers and walls, and treats a bare 10.0 m height tag as a fallback
+- **Decision:** `city2stl/height/survey_fill.py::fill_layer_heights` fills `towers`, `churches`,
+  `fortifications` and `walls` as well as `buildings` (walls are lines, buffered 1.5 m each side).
+  A feature is fillable (`fillable`) on `height_source` `"default"`, or on an `osm_tag` of exactly
+  10.0 m unless a raw `height` / `building:height` of 10 is kept on it. The fill stats go into the
+  payload as `survey_fill`, and into `report.json`. Client `layer_data` (height overrides, roof
+  edits) is merged onto the server's layers (`app/server/core/city_data.py::merge_layer_data`):
+  the client wins, except a feature still fillable takes the server's survey height. The fill
+  also runs in `read_city_layers_any_tolerance` (composite, raster) and the pre-flight. Still on
+  read, so no `CITY_PIPELINE_VERSION` bump.
+- **Why:** F-DETAIL D1. Granada's landmarks stood at 10 m or 12 m: 24 of its 31 `osm_tag` towers
+  are exactly 10.0 and 6 more 12.0, round-number mapper estimates. The payload keeps no raw tags,
+  so a deliberate `height=10` cannot be told apart; the survey must still measure the feature or
+  it keeps its 10.0. Granada after: towers 31 survey / 9 osm_tag / 3 default (was 31 osm_tag,
+  12 default); churches 43 survey; fortifications 10 survey; walls 18 survey; 427 of 440
+  candidates filled (327 CNIG, 100 REDIAM). Torre de la Vela 10 -> 28.8 m, Torre del Homenaje
+  10 -> 23.0 m, Torre de Comares 10 -> 36.5 m, Torres Bermejas 12 -> 19.0 m, Alcazaba 12 -> 7.8 m.
+  An override export kept the 325 survey building heights.
+- **Rejected:** 12.0 m as a fallback too — not asked for; it stays a tag. Keeping the
+  `layer_data` swap — it dropped the survey heights when the client copy predated them.
+- **Open:** the buildings-layer Torre del Homenaje footprint stays 10.0 (survey could not measure
+  it). To protect a genuine `height=10`, `city2stl/fetch.py` would have to keep `height` in the
+  payload; the rule honours it once present.
+- **Supersedes / superseded by:** extends the entry below.
+- **Source:** [../plans/active/F-DETAIL-survey-detail.md](../plans/active/F-DETAIL-survey-detail.md) D1.
+
+### 2026-10-17 — In Spain, default-height buildings take their height from CNIG's building nDSM, with REDIAM only as a fallback
+- **Decision:** a footprint still on `height_source` `"default"` (no height tag, no levels, or
+  lowered by the low-default rule below) gets the p90 of CNIG MDSn edificación (`mdsn_e025`, IDEE
+  WCS, 2.5 m, 1st PNOA coverage 2008-15) over its cells after a 1 px inward buffer, when at least
+  half the cells are valid and the value is 1 m or more; clamped 3-300 m, `height_source`
+  `"survey"`, `survey_source` names the raster. Where CNIG reads under 1 m (the structure is not in
+  its building class) and REDIAM MDHN covers the city (Andalucía), REDIAM's value is used instead.
+  REDIAM is never the primary source. Other survey providers (IGN LiDAR HD, ČÚZK, USGS EPT) are
+  left out of the fill until validated the same way; the US keeps its 3DEP pass. Code:
+  `city2stl/height/survey_fill.py::fill_default_heights` (`FILL_SOURCES`, `footprint_stats`),
+  run by `city2stl/height/service.py::_enhance_from_survey` on a fresh fetch and by
+  `app/server/core/city_data.py::with_survey_heights` on every cached read in `get_city_layers`
+  (before this, `enhance_city_data` ran only when buildings were fetched, so a cached city never
+  got any enhancement; it is not behind a setting). No UI default changed.
+- **Why:** Granada, 1 m grid, p90 after a 1 px buffer, scored against OSM levels heights less one
+  level (OSM's levels formula adds a roof level, 3.2 m): CNIG median |Δ| **2.81 m** (median Δ
+  +1.2 m, n=23,308; 3 levels 9.3 vs 9.6 m, 5 levels 16.0 vs 16.0 m, 10 levels 28.9 vs 32 m), 100 %
+  valid, 92.7 % of building area ≥ 1 m, 86 % of footprints ≥ 80 % covered. That passes the gate
+  the user relaxed to "levels-derived median |Δ| ≤ 3 m and coverage ≥ 80 %" and chose "CNIG +
+  REDIAM fallback". On the cached Granada payloads the fill measures 251 of 253 default footprints
+  (209 CNIG, 42 REDIAM; wider payload 348 of 352: 286 / 62), and 55 of the 57 low-default rows:
+  Torres Bermejas 3 -> 19.0 m and Silla del Moro 3 -> 5.6 m (CNIG), Palacio del Partal 3 -> 15.5 m
+  (REDIAM), Alcazaba 3 -> 9.5 m (CNIG; the enclosure's p90 is its towers, so the whole 4,127 m²
+  outline stands at 9.5 m).
+- **Rejected:** REDIAM MDHN as the primary source — measured and refused. Its metadata (GeoNetwork
+  `4650aa97-6756-4cb1-af27-2ef4ccf9f740`) calls it a vegetation height model: building-class cells
+  are suppressed. No pipeline fault: zero shift is the best offset (mean over footprints 6.60 m vs
+  ≤ 6.55 m for every shift within ±10 m), no constant scale (ratio 0.48 at 1 level to 0.74 at 10),
+  1 m to 1 m bilinear, nodata handled. Against levels heights less one level median |Δ| 3.91 m
+  (median Δ −2.33 m); against the 74 height-tagged buildings 5.49 m; 24 % of in-building cells read
+  under 1 m and 17 % are void; on CNIG's building cells it reads p90 8.9 m where CNIG reads
+  14.6 m. It does read structures outside the building class (293 footprints: 4.9 m at 99 % valid,
+  CNIG 0.2 m), hence the fallback. CNIG's own tagged-building score (10.0 m, Alhambra towers at 0)
+  is the same class gap, which the fallback covers. CNIG's 2nd-coverage MDSnE 0.5 m — download
+  centre form only, not scriptable; no 3rd-coverage MDSn exists.
+- **Risks:** CNIG is 2008-15: a building put up later reads 0 there and falls back to REDIAM, which
+  reads it low (or void, leaving it on default). REDIAM includes trees, so a ruin under canopy can
+  read the trees. An enclosure's p90 is its towers (Alcazaba above). The user compared 3 m,
+  6.2 m (median of built cells) and 9.5 m renders on 2026-10-17 and kept 9.5 m; per-cell lidar
+  relief inside enclosures was offered and declined.
+- **Supersedes / superseded by:** —
+- **Source:** Granada study scripts (`p1_*.py`, `p2_verify.py`, session scratch, not kept).
+
+### 2026-10-17 — An untagged ruin or fortress enclosure defaults to 3 m, not 10 m, and a ruin's levels tag is ignored
+- **Decision:** a building with no `height` / levels tag gets `LOW_DEFAULT_HEIGHT_M` (3 m, the
+  building clamp's floor) instead of the flat 10 m when it is a ruin (`building=ruins`,
+  `historic=ruins`, `ruins=yes`) or a fortress enclosure / courtyard (`building=courtyard`, or
+  `historic` castle / fort / fortification / citywalls unless `castle_type` is palace, stately,
+  manor, schloss or chateau). A ruin whose height comes only from `building:levels` also gets 3 m:
+  its levels describe the building it was, not what stands. An explicit `height=` tag still wins.
+  These rows carry `height_source` `"default"` (the levels-ruins are moved to it), so height
+  providers and the lidar fill can override them. New fetches apply it in
+  `city2stl/heights.py::_fill_heights` (`low_height_override`, `default_height_for`; `ruins` and
+  `castle_type` are now kept in `LANDMARK_TAG_COLS`); cached payloads get it on read
+  (`app/server/core/city_data.py::with_low_default_heights`, idempotent, never raises a height),
+  with no cache-version bump, so nothing is refetched while Overpass is down.
+- **Why:** Granada Alhambra study: lidar reads the Alcazaba at about 0.2 m and tagged ruins at
+  0.1-2.5 m, while the 10 m default (and 6-22 m from the ruins' levels tags) stood them up as tall
+  blocks. User asked to "lower the default height for courtyards and ruins", chose ruins + fortress
+  enclosures at 3 m, then chose to ignore levels on ruins. In the cached Granada payload it changes
+  57 footprints: the 4 untagged `historic=castle` (Alcazaba 4,127 m², Silla del Moro, Torres
+  Bermejas, Palacio del Partal) and 53 levels-tagged `building=ruins`.
+- **Rejected:** applying it to every `historic=*` footprint — most are roofed buildings. Bumping
+  `CITY_PIPELINE_VERSION` — forces refetches during an Overpass outage. Changing
+  `city2stl/landmarks.py::DEFAULT_HEIGHT_M` — it mirrors `city_model`'s 10 m extrusion of a
+  feature without `height_m`, and every building now carries one. A special case for Granada's
+  false hits — the lidar fill will correct them.
+- **Risk accepted:** a roofed castle tagged only `historic=castle` (no `castle_type`) drops to 3 m.
+  Granada has two: Palacio del Partal (a roofed pavilion) and Torres Bermejas (towers); they stay
+  at 3 m until a height provider fills them.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-12 — Truth-city drone spheres are wired; the ownership rule passes its catch mark in two truth cities but not its false-flag mark (the second-city acceptance stays open)
 - **Decision:**
   - The 10 fitted drone Photo Spheres are in `seed_urls` + `elevated_seeds` (San Juan d1/d2,
