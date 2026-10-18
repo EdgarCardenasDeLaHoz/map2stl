@@ -7,6 +7,70 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
 [../research/roof-shape-research.md](../research/roof-shape-research.md); classifier reference:
 [../reference/roof-shape-model.md](../reference/roof-shape-model.md).
 
+### 2026-10-17 — Classified roofs are cached on disk per footprint, keyed by checkpoint hash + geometry + tags
+- **Decision:** `city_data.py::_classify_buildings` looks each untagged building up in
+  `<CACHE_ROOT>/roof_shapes.sqlite` (`city2stl/roof_cache.py`) and classifies only the misses; the
+  key is sha1 of `roof_cache.VERSION`, the checkpoint's content hash (`model_id`), the GeoJSON
+  geometry and the tags the model reads (`building`, `building:levels`, `height`). Only classified
+  rows are stored. `classify_roof_shapes` batches the model's predictions (512) and reports
+  `progress(done, total)`, shown as "Classifying roofs N of M" by the fetch and export tasks.
+- **Why:** the in-memory memo (last 3 boxes) was lost on every restart and missed on any moved box;
+  Granada took ~10 min cold. Per-footprint keys survive both. Measured on Granada: cold 124 s,
+  warm 3.4 s, identical shapes. Profile of 600 buildings: crop features 3.3 s, tile decode
+  1.6 s, per-row predict 1.3 s, so batching saves about a fifth and the cache does the rest.
+- **Rejected:** keying by bbox (a moved box misses everything); caching skips (a missing tile may
+  arrive later); speeding up `roof_features` appearance features (would change what the
+  checkpoint was trained on); classifying in the background with flat roofs meanwhile (still
+  possible later, see `issues.md`).
+- **Supersedes / superseded by:** —
+- **Source:** [F-DETAIL D2](../plans/active/F-DETAIL-survey-detail.md)
+
+### 2026-10-17 — Reference landmark: the Alhambra raster is z-scaled isometrically (3.68 m/mm), not terrain-fitted (4.67)
+- **Decision:** landmark kind `reference` (`city2stl.landmarks::reference_landmarks`) swaps the
+  Alhambra footprints of `exp4_merge/rule_table.csv` (22 swapped labels in 18 units, 11 flagged,
+  never deleted) for a stored height-above-ground raster built from the Thingiverse STL (thing
+  5141408, mamutazos, CC BY-SA) by `tools/landmarks/build_reference_raster.py`. The STL z is scaled
+  by the 4x4's isotropic **3.683 m/mm**. The builder renders both scales, scores each against the
+  REDIAM lidar nDSM (median |delta| over the swapped footprints, 1 cell eroded, tree-free) and keeps
+  the lower: **isotropic 2.367 m (18 of 19 labels improved), terrain-fit 4.671 m/mm 3.927 m (14
+  of 19)**. Off by default; off or outside the raster's bbox the model is unchanged.
+- **Why:** the terrain-fit scale made the raster too tall; the 4x4's own scale already matches the
+  lidar. Heights come from the study's ground-subtracted grid (`thing_resid_mm`, scale
+  independent): my own `estimate_dtm` re-run gave 3.25 m because it put the Alcazaba ground 0.8 mm
+  low. Checked on the stored raster alone (no merged-model terrain base): 21 of 22 swapped labels
+  beat OSM (only Torre del Criado, 275, is level: 2.98 vs 2.92 m), median 2.45 m, against method B's
+  22 of 22 and 2.37 m on the merged model. Tops follow the local terrain (`local_ground`), not
+  the footprint's highest ground, since the Alhambra sits on a slope.
+- **Rejected:** terrain-fit scale (above); re-deriving the ground with `estimate_dtm` (3.25 m);
+  shipping the 3MF or STL (the raster is 0.07 MB, tracked, no gitignore line).
+- **Supersedes / superseded by:** —
+- **Source:** [F-DETAIL D4](../plans/active/F-DETAIL-survey-detail.md)
+
+### 2026-10-17 — Untagged roofs are classified on read, after the survey fill; `roof_shapes: "off"` is today's output
+- **Decision:** `city_data.with_roof_shapes` runs `roof_classifier.classify_roof_shapes` on the
+  `buildings` layer in `get_city_layers`, after `with_survey_heights`, when `roof_shapes` is `"auto"`
+  (default; a bool maps true to auto, false to off). It uses the trained checkpoint
+  (`use_model=True`, no satellite image: the model fetches its own disk-cached zoom-18 tiles), so
+  a bbox with no checkpoint or no tiles skips quietly with `reason` in the stats. An OSM
+  `roof:shape` is never overwritten; classified features carry `roof_source`
+  (`roof_model_gbm`) and `roof_confidence`. Stats (`classified`, `unchanged`, `skipped`,
+  `by_shape`, `reason`) sit beside `survey_fill` in the payload and in `report.json`.
+  Applied on read, last results kept in memory per bbox and footprint set: no cache write, no
+  `CITY_PIPELINE_VERSION` bump. `"off"` returns the payload untouched (classifier never imported),
+  proved byte-identical by `tests/test_roof_shapes_server.py`. `merge_layer_data` keeps the
+  server's classified roof fields unless the client feature has its own `roof:shape`. The quick
+  view (`city-quickview.js::buildingPrisms`) draws gabled (ridge on the long axis) and hipped /
+  pyramidal (apex at the centroid, convex outlines) roofs, `roof:height` else 30 % of the height
+  capped at 50 %, as `city_model._roof`.
+- **Why:** F-DETAIL D2; the user chose "auto, off switch in Settings" (2026-10-17). The checkpoint
+  is the only classifier measured above always-flat (see the 2026-10 entries below); the signal
+  cascade needs a city-wide image whose resolution cannot show a roof.
+- **Rejected:** classifying inside the OSM cache (stale after every classifier change; would need
+  a version bump) -- on read is cheap once tiles are cached. Passing the survey nDSM to the
+  cascade -- the cascade was measured at its majority baseline.
+- **Supersedes / superseded by:** —
+- **Source:** [F-DETAIL D2](../plans/active/F-DETAIL-survey-detail.md)
+
 ### 2026-10-14 — Wall and fortification polygons print as their outline ring, in ground-following pieces
 - **Decision:** `walls` and `fortifications` polygons (`city2stl/city_model.py::RING_LAYERS`)
   become their outline ring, buffered by the layer's line width, in

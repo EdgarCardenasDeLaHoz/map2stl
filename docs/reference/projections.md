@@ -109,6 +109,17 @@ Compresses latitudes vertically by `sin(lat)` so that every unit of area in the 
 
 ---
 
+### `laea` and `lcc` — Lambert azimuthal equal-area, Lambert conformal conic
+
+Spherical, centred on the bbox centre, for regions too wide for the cylindrical set (a Europe
+box shears about 12 degrees under `sinusoidal`). The raster is the bounding rectangle of the
+projected bbox, each pixel inverse-projected and sampled (bilinear, nearest for categorical data);
+pixels outside the bbox are fill. `lcc` uses standard parallels at south + span/6 and north - span/6
+and is `equidistant` when the bbox straddles the equator or the parallels coincide
+(`lcc_parameters` is None). Code: `geo2stl/projections.py::_ConicAzimuthalModel`; the browser
+mirror is `graticule.js::conicAzimuthalModel`. Regions of 1000 km or more start on `laea`
+(`dem/projection-default.js`). Tests: `tests/test_projections_conic_azimuthal.py`.
+
 ### `sinusoidal` — Sinusoidal (Sanson-Flamsteed)
 
 Pseudocylindrical equal-area. Each row is scaled by `cos(lat)` (like cosine), but longitudes are also shifted so the left and right edges curve inward like a sine wave. The central meridian is straight.

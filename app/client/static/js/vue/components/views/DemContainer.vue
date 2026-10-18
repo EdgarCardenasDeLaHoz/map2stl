@@ -35,6 +35,9 @@
                 <canvas class="layer-canvas" id="stackViewCanvas"></canvas>
                 <!-- Layers ordered above the buildings (.osm-overlay, z-index 10) draw here -->
                 <canvas class="layer-canvas layer-top-overlay" id="stackViewCanvasTop" aria-hidden="true"></canvas>
+                <!-- River lines (modules/layers/river-lines.js): screen space like the grid,
+                     drawn only while #hydroShowLines is on -->
+                <canvas class="layer-canvas river-lines-overlay" id="riverLinesCanvas" aria-hidden="true"></canvas>
                 <!-- Grid overlay — always on top, exempt from zoom transform -->
                 <canvas class="layer-canvas layer-grid-overlay" id="layerGridCanvas"></canvas>
                 <!-- Projection preview: shown while a new projection's layers load

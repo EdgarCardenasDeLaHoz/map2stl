@@ -109,6 +109,7 @@ def test_probes_run_in_parallel_and_are_remembered(monkeypatch):
 
     monkeypatch.setattr("requests.get", get)
     monkeypatch.setattr(osm, "_FAILED_AT", {})
+    import osmnx  # noqa: F401  warm the probe's import: a cold one alone took 5 s (2026-10-17)
     t0 = time.time()
     first = osm.healthy_overpass_endpoints()
     assert time.time() - t0 < 0.3 * len(osm.OVERPASS_ENDPOINTS)       # not one after the other

@@ -169,7 +169,8 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
                 f"vertices {verts_before} -> {verts_after} ({verts_after/verts_before*100:.1f}%)  |  "
                 f"area {area_before/1e4:.2f} -> {area_after/1e4:.2f} ha  (d {area_delta_pct:+.2f}%)"
             )
-        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels')
+        gdf = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0, levels_col='building:levels',
+                            low_default=True)
         n_pre_dissolve = len(gdf)
         gdf_m_pre_d = _to_metric(gdf)
         area_pre_dissolve = float(gdf_m_pre_d.geometry.area.sum())
@@ -184,7 +185,8 @@ def _fetch_buildings(ox, bbox, tol_deg: float, simplify_tolerance: float, min_ar
         # Keep roof geometry tags so mesh generation can produce shaped roofs.
         # building:levels and min_height are also passed through for completeness.
         # osm_id + name/building/amenity/historic/tourism identify and classify
-        # landmarks (city2stl.landmarks; CITY_PIPELINE_VERSION 4).
+        # landmarks (city2stl.landmarks; CITY_PIPELINE_VERSION 4); ruins and
+        # castle_type pick the low default (heights.default_height_for).
         keep = [
             "geometry", "height_m", "height_source",
             "roof:shape", "roof:height", "roof:levels",

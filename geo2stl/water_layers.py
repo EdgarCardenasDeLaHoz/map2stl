@@ -225,6 +225,64 @@ def river_size_m(order=None, discharge=None) -> tuple[np.ndarray, np.ndarray]:
     return width, depth
 
 
+def _reach_columns(gdf) -> tuple:
+    """(order, discharge) columns of a reach GeoDataFrame; None for a missing column."""
+    order = gdf["ORD_STRA"].to_numpy(dtype=np.float64) if "ORD_STRA" in gdf.columns else None
+    q = gdf["DIS_AV_CMS"].to_numpy(dtype=np.float64) if "DIS_AV_CMS" in gdf.columns else None
+    if order is None and q is None:
+        order = np.full(len(gdf), 3.0)
+    return order, q
+
+
+def reach_carve_depth_m(gdf, depth_scale: float = 1.0) -> np.ndarray:
+    """Per-reach carve depth (positive m) the raster carve burns: river_size_m x depth_scale.
+
+    The composite layer weight multiplies this again (``compute_composite_dem``).
+    """
+    order, q = _reach_columns(gdf)
+    return river_size_m(order, q)[1] * float(depth_scale)
+
+
+def drop_shallow_reaches(gdf, min_depth_m: float, depth_scale: float = 1.0):
+    """*gdf* without the reaches whose carve depth (:func:`reach_carve_depth_m`) is
+    under *min_depth_m*; unchanged when *min_depth_m* <= 0.
+
+    Vector rivers print only reaches deep enough to see (user, 2026-10-17): on the
+    Amazon at order 3, a 0.1 mm floor drops 80-86 % of the reaches before any is
+    buffered, and buffering plus the union are most of the vector cost.
+    """
+    if gdf is None or min_depth_m <= 0 or not len(gdf):
+        return gdf
+    keep = reach_carve_depth_m(gdf, depth_scale) >= min_depth_m
+    return gdf[keep].reset_index(drop=True)
+
+
+def reach_print_depth_mm(depth_m, *, ref_m: float | None = None,
+                         river_depth_mm: float | None = None,
+                         z_mm_per_m: float = 1.0) -> np.ndarray:
+    """Print depth (mm) of reaches carved *depth_m* (positive m, weight applied).
+
+    The raster carve's rule (``app.server.core.export._prepare_dem_array``): with
+    ``river_depth_mm`` and the reference depth ``ref_m`` (the 99.5th-percentile
+    carve), a reach is ``min(depth / ref, 1) * river_depth_mm`` deep; otherwise
+    its depth in metres goes through the vertical scale.
+    """
+    d = np.asarray(depth_m, dtype=np.float64)
+    if river_depth_mm and ref_m and ref_m > 0:
+        return np.minimum(d / ref_m, 1.0) * float(river_depth_mm)
+    return d * float(z_mm_per_m)
+
+
+def min_carve_depth_m(min_depth_mm: float, *, ref_m: float | None = None,
+                      river_depth_mm: float | None = None, z_mm_per_m: float = 1.0) -> float:
+    """The carve depth (m) that prints *min_depth_mm* deep: :func:`reach_print_depth_mm` inverted."""
+    if min_depth_mm <= 0:
+        return 0.0
+    if river_depth_mm and ref_m and ref_m > 0:
+        return float(min_depth_mm) / float(river_depth_mm) * float(ref_m)
+    return float(min_depth_mm) / max(float(z_mm_per_m), 1e-12)
+
+
 # Valley snapping: corridor half-width by Strahler order, and the cost scale.
 SNAP_RADIUS_M = {3: 400.0, 4: 600.0, 5: 1000.0, 6: 1500.0}   # order >= 7: max
 SNAP_RADIUS_MAX_M = 2000.0
@@ -472,7 +530,8 @@ def _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx=None)
     h, w, px_m).
     """
     import shapely
-    from numpy2stl.raster import burn_polygons
+
+    from geo2stl.polygon_fill import burn_polygons_max, burn_segment_buffers_max
     dem, width_m, height_m, h, w, px_m = ctx
     lines = np.asarray(lines, dtype=object)
     if len(lines) and isinstance(lines[0], (bytes, bytearray)):
@@ -483,25 +542,36 @@ def _carve_chunk(lines, ok, radius, snap_r, reach_order, vals, orders, ctx=None)
         for i, g in zip(np.flatnonzero(ok), snapped, strict=True):
             lines[i] = g
     lines = shapely.simplify(lines, px_m / 2.0)
-    # 2 segments per quarter circle: the ends are at most ~8 % of a radius off, and
-    # the radius is about a pixel, while 16 made each reach dozens of vertices that
-    # the rasteriser then had to read (Amazon: 68 s of GeoJSON alone).
-    shapes = shapely.buffer(lines, radius, quad_segs=2)
+    layer = np.searchsorted(orders, reach_order)
+    bounds = (0.0, 0.0, width_m, height_m)
+    acc = np.full((len(orders), h, w), -np.inf)
+    # Each reach is burnt as shapely.buffer(line, radius, quad_segs=2): 2 segments per
+    # quarter circle put the ends at most ~8 % of a radius off, and the radius is
+    # about a pixel, while 16 made each reach dozens of vertices (Amazon: 68 s of
+    # GeoJSON alone). Most reaches simplify to one segment; their buffers are built
+    # and burnt in numpy with GEOS's vertices, the rest (and the few whose cells
+    # could hang on a vertex's last bit) through GEOS. Same cells as burning every
+    # GEOS buffer through rasterio (Amazon chunk of 307k reaches: ~3 s, against ~14 s).
+    seg = np.flatnonzero((shapely.get_type_id(lines) == 1) & (shapely.get_num_coordinates(lines) == 2))
+    xy = shapely.get_coordinates(lines[seg]).reshape(-1, 2, 2)
+    _, fragile = burn_segment_buffers_max(xy[:, 0], xy[:, 1], radius[seg], vals[seg], layer[seg],
+                                          len(orders), (h, w), bounds, out=acc)
+    rest = np.ones(len(lines), dtype=bool)
+    rest[seg[~fragile]] = False
+    rest = np.flatnonzero(rest)
+    shapes = shapely.buffer(lines[rest], radius[rest], quad_segs=2)
     keep = ~shapely.is_empty(shapes) & ~shapely.is_missing(shapes)
-    stack = np.zeros((len(orders), h, w), dtype=np.float32)
-    kept = np.zeros(len(orders), dtype=np.int64)
-    for k, o in enumerate(orders):
-        sel = keep & (reach_order == o)
-        kept[k] = int(sel.sum())
-        if kept[k]:
-            stack[k] = burn_polygons(list(shapes[sel]), (h, w), bounds=(0.0, 0.0, width_m, height_m),
-                                     values=vals[sel].tolist(), mode="max")
+    rest = rest[keep]
+    burn_polygons_max(shapes[keep], vals[rest], layer[rest], len(orders), (h, w), bounds, out=acc)
+    acc[acc == -np.inf] = 0.0
+    kept = np.bincount(np.r_[layer[seg[~fragile]], layer[rest]], minlength=len(orders)).astype(np.int64)
+    stack = acc.astype(np.float32)
     return stack, kept
 
 
 #: Boxes of at least this many km² start the carve pool before the reaches are read
-#: (:func:`start_carve_pool`): its workers spend ~1.5 s importing shapely, scikit-image
-#: and rasterio, which then overlaps the ~2 s HydroRIVERS read. Colombia (4.9M km²)
+#: (:func:`start_carve_pool`): its workers spend ~1.5 s importing shapely, scipy
+#: and scikit-image, which then overlaps the ~2 s HydroRIVERS read. Colombia (4.9M km²)
 #: has 126k reaches of order 3+; a 500k km² box is around the 50k-reach mark.
 CARVE_PREWARM_KM2 = 500_000
 
@@ -535,11 +605,11 @@ def _one_blas_thread():
 
 def _carve_warm() -> None:
     """Import what _carve_chunk needs, so a started pool's first chunk runs at once."""
-    import rasterio.features  # noqa: F401
     import scipy.ndimage  # noqa: F401
     import shapely  # noqa: F401
     import skimage.graph  # noqa: F401
-    from numpy2stl.raster import burn_polygons  # noqa: F401
+
+    import geo2stl.polygon_fill  # noqa: F401
 
 
 def start_carve_pool():
@@ -810,8 +880,13 @@ def _river_source(name: str, fetch):
 
 def _fetch_hydrorivers(north, south, east, west, options):
     from geo2stl import hydrology
+    floor = float(options.get("min_depth_m", 0.0))
+    # The depth floor only when one is set (vector rivers), so the raster carve's
+    # call stays the plain one.
+    extra = ({"min_depth_m": floor, "depth_scale": float(options.get("depth_scale", 1.0))}
+             if floor > 0 else {})
     return hydrology.fetch_hydrorivers(north, south, east, west,
-                                       min_order=int(options.get("min_order", 3)))
+                                       min_order=int(options.get("min_order", 3)), **extra)
 
 
 def _fetch_natural_earth(north, south, east, west, options):
@@ -824,10 +899,13 @@ def _fetch_natural_earth(north, south, east, west, options):
     min_order = int(options.get("min_order", 1))
     if gdf["ORD_STRA"].notna().all() and min_order > 1:
         gdf = gdf[gdf["ORD_STRA"] >= min_order]
-    return gdf
+    return drop_shallow_reaches(gdf, float(options.get("min_depth_m", 0.0)),
+                                float(options.get("depth_scale", 1.0)))
 
 
 #: River sources by composite name -> fetch(north, south, east, west, options).
+#: ``options["min_depth_m"]`` (vector rivers) drops reaches carved shallower
+#: (:func:`drop_shallow_reaches`); the raster carve never sets it.
 RIVER_FETCH = {"hydrorivers": _fetch_hydrorivers, "natural_earth_rivers": _fetch_natural_earth}
 
 hydrorivers_layer = _river_source("hydrorivers", _fetch_hydrorivers)

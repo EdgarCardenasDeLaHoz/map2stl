@@ -30,6 +30,11 @@ where they do not, the user can replace one building, identified by its OSM id
   roof shapes and parts keep their proportions. For OSM ``height=10`` placeholders
   on towers whose real height is known (Alhambra: Torre de Comares ~45 m).
 
+* ``{"kind": "reference", ...}`` -- like ``ndsm`` but from a stored, geo-referenced raster of a
+  hand-modelled reference (the Alhambra, :func:`reference_landmarks`): the top follows the
+  local terrain (``local_ground``), and an entry may carry a ``footprint_lonlat`` of its own
+  when OSM has no building with an id for it (the towers and churches layers).
+
 ``kind == "osm"`` (or no entry) keeps the tag-driven building.
 
 Resolution (file I/O, network) and geometry are split: :func:`resolve_overrides`
@@ -57,6 +62,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
+from rasterio.transform import Affine
 from shapely.geometry import Polygon
 
 logger = logging.getLogger(__name__)
@@ -71,7 +77,7 @@ SEAT_OVERLAP_MM = 0.05
 MIN_NDSM_COVERAGE = 0.3
 #: Margin (m) added around a footprint when fetching its nDSM.
 NDSM_MARGIN_M = 5.0
-OVERRIDE_KINDS = ("osm", "mesh", "ndsm", "height")
+OVERRIDE_KINDS = ("osm", "mesh", "ndsm", "height", "reference")
 #: A height override must be above 0 and below this (m).
 MAX_HEIGHT_M = 1000.0
 #: The height ``city_model`` extrudes a building without ``height_m`` to.
@@ -387,7 +393,7 @@ def coerce_overrides(overrides: dict | None) -> dict[str, LandmarkOverride]:
         elif isinstance(ov, dict) and ov.get("kind") == "height":
             out[oid] = LandmarkOverride(oid, "height", ov, source=str(ov.get("source") or "height"),
                                         height_m=override_height_m(ov))
-        elif isinstance(ov, dict) and ov.get("kind") in ("mesh", "ndsm"):
+        elif isinstance(ov, dict) and ov.get("kind") in ("mesh", "ndsm", "reference"):
             out[oid] = LandmarkOverride(oid, ov["kind"], ov, mesh=ov.get("mesh"),
                                         ndsm=ov.get("ndsm"), transform=ov.get("transform"),
                                         source=str(ov.get("source") or ov["kind"]))
@@ -507,11 +513,21 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
 
     arr = np.asarray(ov.ndsm, dtype=np.float64)
     t = ov.transform
+    # Work on the raster window around the footprint (a stored regional raster is large).
+    k, off = terrain._lonlat_affine()
+    x0, y0, x1, y1 = footprint.bounds
+    lons = (np.array([x0, x1]) - off[0]) / k[0]
+    lats = (np.array([y0, y1]) - off[1]) / k[1]
+    cs, rs = ~t * (lons, lats)
+    c0, c1 = max(int(np.floor(min(cs))) - 2, 0), min(int(np.ceil(max(cs))) + 2, arr.shape[1])
+    r0, r1 = max(int(np.floor(min(rs))) - 2, 0), min(int(np.ceil(max(rs))) + 2, arr.shape[0])
+    if c1 > c0 and r1 > r0 and (r1 - r0, c1 - c0) != arr.shape:
+        arr = arr[r0:r1, c0:c1]
+        t = t @ Affine.translation(c0, r0)
     h, w = arr.shape
     # Cell centres in model mm, and the footprint's coverage by measured cells.
     cols, rows = np.meshgrid(np.arange(w) + 0.5, np.arange(h) + 0.5)
     lon, lat = t * (cols.ravel(), rows.ravel())
-    k, off = terrain._lonlat_affine()
     centres = np.column_stack([lon, lat]) * k + off
     inside = shapely.contains_xy(footprint, centres[:, 0], centres[:, 1])
     if not inside.any():
@@ -523,6 +539,7 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
         raise LandmarkError(f"{ov.source}: measured heights cover only {coverage:.0%} of the "
                             f"footprint (need {MIN_NDSM_COVERAGE:.0%})")
     filled = _fill_nearest(arr)
+    local = bool(ov.spec.get("local_ground"))
     cell_mm = float(np.mean(np.abs([t.a * k[0], t.e * k[1]])))
     out: list[Mesh] = []
     for poly in shapely.get_parts(footprint):
@@ -534,7 +551,8 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
         ll = terrain.unproject_xy(v2)
         c, r = ~t * (ll[:, 0], ll[:, 1])
         hm = map_coordinates(filled, [np.asarray(r) - 0.5, np.asarray(c) - 0.5], order=1, mode="nearest")
-        top = np.column_stack([v2, ground_hi + np.maximum(hm * z_per_m, min_height_mm)])
+        base = terrain.sample(v2[:, 0], v2[:, 1]) if local else ground_hi
+        top = np.column_stack([v2, base + np.maximum(hm * z_per_m, min_height_mm)])
         f = orient_ccw(top, f)
         out.append(close_surface(top, f, lambda xy: np.full(len(xy), z_floor)))
     if not out:
@@ -609,9 +627,17 @@ class LandmarkPlan:
             oid = str(pr.get("osm_id") or "")
             if oid in self.overrides:
                 groups.setdefault(oid, []).append(k)
-        for oid in self.overrides:
-            if oid not in groups:
-                self.report[oid] = {"kind": self.overrides[oid].kind, "status": "missing",
+        free: dict[str, Polygon] = {}      # overrides that bring their own footprint
+        for oid, ov in self.overrides.items():
+            if oid in groups:
+                continue
+            ring = ov.spec.get("footprint_lonlat")
+            if ring:
+                lonlat = shapely.make_valid(Polygon(ring[0], ring[1:]))
+                free[oid] = terrain.project(np.array([lonlat], dtype=object))[0]
+                groups[oid] = []
+            else:
+                self.report[oid] = {"kind": ov.kind, "status": "missing",
                                     "reason": "no building with this OSM id in the model"}
         solids: list[Mesh] = []
         props = list(props)
@@ -619,7 +645,7 @@ class LandmarkPlan:
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         for oid, ks in groups.items():
             ov = self.overrides[oid]
-            fp = shapely.union_all([polys[k] for k in ks])
+            fp = free[oid] if oid in free else shapely.union_all([polys[k] for k in ks])
             mine = self._inside(polys, [fp]) & ~removed
             mine[ks] = True
             lo, hi = terrain.ranges_under(list(shapely.get_parts(fp)))
@@ -654,3 +680,98 @@ class LandmarkPlan:
         keep = ~removed
         return ([p for p, kk in zip(polys, keep, strict=True) if kk],
                 [p for p, kk in zip(props, keep, strict=True) if kk], solids)
+
+
+# ---------------------------------------------------------------------------
+# Reference landmark: the Alhambra (F-DETAIL D4)
+# ---------------------------------------------------------------------------
+
+#: Stored by ``tools/landmarks/build_reference_raster.py``.
+REFERENCE_DIR = Path(__file__).resolve().parents[1] / "data" / "landmarks"
+#: Depinch floor (m): a reference cell never drops below this above ground, so the top never
+#: collapses onto the terrain and pinches the solid (the rule only swaps buildings >= 1 m tall).
+REFERENCE_MIN_M = 1.0
+
+
+def load_reference(directory: Path | str | None = None) -> tuple[np.ndarray, object, dict, dict]:
+    """``(height_m, transform, meta, rule)`` from the stored raster and swap rule.
+
+    ``height_m`` is float32 metres above ground (NaN = no data), ``transform`` the lon/lat
+    Affine (row 0 north); ``meta`` / ``rule`` are the two JSON documents' contents.
+    """
+    import json
+
+    d = Path(directory) if directory else REFERENCE_DIR
+    with np.load(d / "alhambra_reference.npz") as z:
+        cm = z["height_cm"]
+        meta = json.loads(str(z["meta"]))
+    h = np.where(cm == 65535, np.nan, cm / 100.0).astype(np.float32)
+    with open(d / "alhambra_reference_rule.json", encoding="utf-8") as fh:
+        rule = json.load(fh)
+    return h, Affine(*meta["transform_affine"]), meta, rule
+
+
+def _depinch(h: np.ndarray) -> np.ndarray:
+    """Heightfield depinching: fill one-cell gaps from their neighbours and floor at
+    :data:`REFERENCE_MIN_M`, so no cell sits on the ground inside a roof."""
+    from scipy.ndimage import maximum_filter
+
+    out = np.array(h, dtype=np.float32)
+    gap = ~np.isfinite(out)
+    if gap.any():
+        near = maximum_filter(np.where(gap, -np.inf, out), size=3)
+        fill = gap & np.isfinite(near)
+        out[fill] = near[fill]
+    return np.where(np.isfinite(out), np.maximum(out, REFERENCE_MIN_M), np.nan).astype(np.float32)
+
+
+def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule: dict | None = None,
+                        ) -> tuple[dict, dict]:
+    """The Alhambra swap as ``(overrides, stats)`` for ``build_on_terrain(landmark_overrides=...)``.
+
+    Off (``enabled`` false), outside the raster's bbox, or nothing to swap: ``({}, stats)``,
+    so the model is unchanged. Otherwise one ``"reference"`` ``LandmarkOverride`` per rule unit: keyed by
+    its OSM id, or ``ref:<label>`` with a ``footprint_lonlat`` for the ones OSM carries only in
+    the towers / churches layers. All share one depinched raster; ``ndsm_solid`` crops it.
+
+    ``raster`` is ``(height_m, transform)`` (tests pass a tiny synthetic one) and ``rule`` the
+    ``alhambra_reference_rule.json`` structure; both default to the stored files. ``bbox`` has
+    ``north`` / ``south`` / ``east`` / ``west``.
+    """
+    stats = {"enabled": bool(enabled), "units": 0, "labels": 0, "reason": ""}
+    if not enabled:
+        stats["reason"] = "off"
+        return {}, stats
+    if raster is None or rule is None:
+        try:
+            h, t, _meta, stored = load_reference()
+        except FileNotFoundError:
+            stats["reason"] = "reference raster not built (tools/landmarks/build_reference_raster.py)"
+            return {}, stats
+        raster = (h, t) if raster is None else raster
+        rule = stored if rule is None else rule
+    height, t = raster
+    rows, cols = np.shape(height)
+    lon_w, lat_n = t * (0, 0)
+    lon_e, lat_s = t * (cols, rows)
+    if (min(lon_w, lon_e) > bbox["east"] or max(lon_w, lon_e) < bbox["west"]
+            or min(lat_s, lat_n) > bbox["north"] or max(lat_s, lat_n) < bbox["south"]):
+        stats["reason"] = "outside the raster"
+        return {}, stats
+    ndsm = _depinch(np.asarray(height))
+    source = str(rule.get("source") or "reference raster")
+    out: dict = {}
+    for u in rule["units"]:
+        key = u.get("osm_id") or u["key"]
+        spec = {"kind": "reference", "source": source, "local_ground": True}
+        if not u.get("osm_id"):
+            ring = u.get("footprint")
+            cx, cy = u.get("centroid") or (None, None)
+            if not ring or cx is None or not (bbox["west"] <= cx <= bbox["east"]
+                                              and bbox["south"] <= cy <= bbox["north"]):
+                continue
+            spec["footprint_lonlat"] = ring
+        out[key] = LandmarkOverride(key, "reference", spec, ndsm=ndsm, transform=t, source=source)
+        stats["labels"] += len(u["labels"])
+    stats["units"] = len(out)
+    return out, stats

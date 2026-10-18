@@ -29,8 +29,11 @@
 
 import {
   readHydrologyRiverControls, loadedDemGrid, hydrologyPrintQuery, readRiverDepthScale,
-  NEED_DEM_MESSAGE,
+  NEED_DEM_MESSAGE, riverLoadingMessage,
 } from './hydrology-print.js';
+import {
+  riverPixelColor, riverEdgeMask, orderColor, RIVER_EDGE_RGB, RIVER_EDGE_ALPHA,
+} from './river-style.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope state
@@ -45,11 +48,6 @@ let _combinedInflightKey = null;
 // Composite Rendering
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Colour per Strahler order 1..10 (viridis steps: small streams dark, trunk rivers yellow).
-const HYDRO_ORDER_COLORS = [
-  [68, 1, 84], [72, 40, 120], [62, 73, 137], [49, 104, 142], [38, 130, 142],
-  [31, 158, 137], [53, 183, 121], [110, 206, 88], [181, 222, 43], [253, 231, 37],
-];
 
 /** 'depth' (blue, opacity by depth) or 'order' (colour per Strahler order). */
 function _hydroColorMode() {
@@ -70,7 +68,7 @@ function _renderOrderLegend(hydroData) {
   // The print model counts carved pixels per order; the older path counted reaches.
   const unit = hydroData.order_counts_unit === 'px' ? 'px' : 'reaches';
   el.innerHTML = Object.keys(counts).map(Number).sort((a, b) => a - b).map((o) => {
-    const [r, g, b] = HYDRO_ORDER_COLORS[Math.min(o, HYDRO_ORDER_COLORS.length) - 1];
+    const [r, g, b] = orderColor(o);
     return `<span class="hydro-order-chip" title="${counts[o].toLocaleString()} ${unit}">`
       + `<span class="hydro-order-swatch" style="background:rgb(${r},${g},${b})"></span>${o}</span>`;
   }).join('');
@@ -153,6 +151,8 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
   // (inverse mapping): copying source pixels forward left ~1 in 67 canvas columns
   // unwritten whenever the projected grid was narrower than the canvas (591 vs
   // 600 px for the Amazon) - the vertical stripes over the sea.
+  // Rivers are light cyan with a dark edge (river-style.js), so they read over land
+  // cover and satellite; open water keeps the mid blue.
   if (hydroValues && hydroData) {
     const hydroDims = hydroData.river_grid_dimensions || [h, w];
     const hydroH = hydroDims[0] || h;
@@ -160,45 +160,39 @@ function renderWaterHydrologyCombined(waterData, hydroData) {
     // Deepest carve (print model) or the old max depression; keep the sign.
     const minD = hydroData.depression_m || -5.0;
     const byOrder = _hydroColorMode() === 'order';
-    const orders = byOrder ? window.decodeHydrologyOrders?.(hydroData) : null;
+    // Orders also in Depth mode: they tell open water from rivers.
+    const orders = window.decodeHydrologyOrders?.(hydroData) || null;
     const waterCode = hydroData.order_water_code ?? 100;
 
     // Read current pixels (water already rendered) so hydrology can blend on top.
     const baseImg = ctx.getImageData(0, 0, w, h);
     const px = baseImg.data;
+    const riverMask = new Uint8Array(w * h);
+    const blend = (base, r, g, b, alpha) => {
+      const a01 = alpha / 255;
+      px[base] = Math.round(px[base] * (1 - a01) + r * a01);
+      px[base + 1] = Math.round(px[base + 1] * (1 - a01) + g * a01);
+      px[base + 2] = Math.round(px[base + 2] * (1 - a01) + b * a01);
+      px[base + 3] = Math.max(px[base + 3], alpha);
+    };
 
     for (let ty = 0; ty < h; ty++) {
       const hy = Math.min(hydroH - 1, Math.floor(((ty + 0.5) / h) * hydroH));
       for (let tx = 0; tx < w; tx++) {
         const hx = Math.min(hydroW - 1, Math.floor(((tx + 0.5) / w) * hydroW));
         const hi = hy * hydroW + hx;
-        const v = hydroValues[hi] ?? 0;
-        if (v === 0) continue;
-        const base = (ty * w + tx) * 4;
-
-        let cr = 30, cg = 100, cb = 200, alpha;
-        if (orders) {
-          const o = orders[hi] | 0;
-          if (o === waterCode) {
-            [cr, cg, cb] = [0, 100, 255];
-            alpha = 150;
-          } else if (o > 0) {
-            [cr, cg, cb] = HYDRO_ORDER_COLORS[Math.min(o, HYDRO_ORDER_COLORS.length) - 1];
-            alpha = 235;
-          } else {
-            continue;
-          }
-        } else {
-          // Deeper river => more opacity.
-          const t = Math.min(1, Math.max(0, v / minD));
-          alpha = Math.round(60 + t * 160); // 60–220
-        }
-        const a01 = alpha / 255;
-        px[base] = Math.round(px[base] * (1 - a01) + cr * a01);
-        px[base + 1] = Math.round(px[base + 1] * (1 - a01) + cg * a01);
-        px[base + 2] = Math.round(px[base + 2] * (1 - a01) + cb * a01);
-        px[base + 3] = Math.max(px[base + 3], alpha);
+        const o = orders ? (orders[hi] | 0) : null;
+        const c = riverPixelColor(hydroValues[hi] ?? 0, minD, o, waterCode, byOrder);
+        if (!c) continue;
+        const i = ty * w + tx;
+        if (o !== waterCode) riverMask[i] = 1;
+        blend(i * 4, c[0], c[1], c[2], c[3]);
       }
+    }
+    const edge = riverEdgeMask(riverMask, w, h);
+    const [er, eg, eb] = RIVER_EDGE_RGB;
+    for (let i = 0; i < edge.length; i++) {
+      if (edge[i]) blend(i * 4, er, eg, eb, RIVER_EDGE_ALPHA);
     }
 
     ctx.putImageData(baseImg, 0, 0);
@@ -293,11 +287,14 @@ async function _performCombinedLoad(north, south, east, west, waterDim, waterDat
   const statusEl = document.getElementById('waterHydrologyStatus');
   const loadBtn = document.getElementById('loadWaterHydrologyBtn');
 
-  if (statusEl) statusEl.textContent = 'Loading hydrology…';
+  // "Loading rivers… large region, about a minute": the Amazon at size 1 took 57 s.
+  const loadingText = riverLoadingMessage(
+    { north, south, east, west }, parseInt(hydroParams.get?.('min_order'), 10));
+  if (statusEl) statusEl.textContent = loadingText;
   if (loadBtn) {
     loadBtn.disabled = true;
     loadBtn.dataset.origText = loadBtn.textContent;
-    loadBtn.textContent = '⏳ Loading Hydrology…';
+    loadBtn.textContent = '⏳ Loading rivers…';
   }
 
   window.setLayerStatus?.('waterHydrology', 'loading');

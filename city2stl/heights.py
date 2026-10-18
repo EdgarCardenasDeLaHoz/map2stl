@@ -9,7 +9,10 @@ Server callers (``app.server.core.city_data`` and the city routers) import this 
 ``height_from_tags`` is the one rule for OSM tag heights (``height`` with
 units, else ``building:levels`` x 3.2 m plus the roof); ``_fill_heights``
 applies it to a GeoDataFrame with clip bounds and a ``height_source`` column
-so downstream code can identify default-height buildings.
+so downstream code can identify default-height buildings. Untagged ruins and
+fortress enclosures default to 3 m, not 10 m, and a ruin's levels tag is
+ignored (``low_height_override``;
+``apply_low_default_heights`` does the same for payloads cached before it).
 """
 
 from __future__ import annotations
@@ -119,6 +122,103 @@ def min_height_from_tags(props) -> float:
     return max(h, 0.0)
 
 
+#: Fallback height (m) of an untagged ruin or fortress enclosure instead of the
+#: flat building default (10 m), and of a ruin whose height comes only from a
+#: levels tag. Equal to the building clamp's lower bound.
+LOW_DEFAULT_HEIGHT_M = 3.0
+_ENCLOSURE_HISTORIC = frozenset({"castle", "fort", "fortification", "citywalls"})
+#: ``castle_type`` values that mean a roofed building, which keeps the flat default.
+_ROOFED_CASTLE_TYPES = frozenset({"palace", "stately", "manor", "schloss", "château", "chateau"})
+
+
+def _tag(props, key: str) -> str:
+    v = props.get(key)
+    return "" if _is_missing(v) else str(v).strip().lower()
+
+
+def is_ruin(props) -> bool:
+    """``building=ruins``, ``historic=ruins`` or ``ruins=yes``."""
+    return ("ruins" in (_tag(props, "building"), _tag(props, "historic"))
+            or _tag(props, "ruins") == "yes")
+
+
+def is_low_default_footprint(props) -> bool:
+    """True for a ruin (:func:`is_ruin`) or an open fortress enclosure / courtyard.
+
+    Enclosure: ``building=courtyard`` or ``historic`` in castle / fort /
+    fortification / citywalls, unless ``castle_type`` marks a roofed building
+    (palace, stately, manor, schloss, chateau).
+    """
+    if is_ruin(props) or _tag(props, "building") == "courtyard":
+        return True
+    historic = _tag(props, "historic")
+    return historic in _ENCLOSURE_HISTORIC and _tag(props, "castle_type") not in _ROOFED_CASTLE_TYPES
+
+
+def default_height_for(props, default_m: float) -> float:
+    """Fallback height for a building with no height / levels tag:
+    :data:`LOW_DEFAULT_HEIGHT_M` (never above *default_m*) for ruins and fortress
+    enclosures (:func:`is_low_default_footprint`), else *default_m*. Granada
+    Alhambra study: lidar reads the Alcazaba at about 0.2 m and tagged ruins at
+    0.1-2.5 m, where the 10 m default stood them up as tall blocks. A ruin's
+    levels tag is ignored too (:func:`low_height_override`)."""
+    if is_low_default_footprint(props):
+        return min(LOW_DEFAULT_HEIGHT_M, float(default_m))
+    return float(default_m)
+
+
+def low_height_override(props, h: float, src: str, default_m: float) -> tuple[float, str]:
+    """``(height, source)`` after the low-default rule, for a building whose tag
+    rule gave ``(h, src)`` (``h`` already the fallback when ``src == "default"``).
+
+    - ``"default"``: :func:`default_height_for` (ruins and enclosures at 3 m).
+    - ``"osm_levels"`` on a ruin (:func:`is_ruin`): a ruin's levels describe the
+      building it was, not what stands, so it gets :data:`LOW_DEFAULT_HEIGHT_M`
+      and source ``"default"``, which lets height providers (lidar fill) override
+      it. An explicit ``height`` tag (``"osm_tag"``) still wins.
+    - Anything else unchanged. Never raises a height.
+    """
+    if src == "default":
+        return min(h, default_height_for(props, default_m)), src
+    if src == "osm_levels" and is_ruin(props):
+        return min(h, LOW_DEFAULT_HEIGHT_M), "default"
+    return h, src
+
+
+def apply_low_default_heights(fc: dict) -> tuple[dict, int]:
+    """Apply :func:`low_height_override` to a cached buildings FeatureCollection:
+    ``(fc, n_changed)``.
+
+    For payloads cached before the rule (their features went through
+    ``_fill_heights`` with the flat 10 m and counted a ruin's levels). Uses
+    whatever tags the features carry: ``"default"`` ruins / enclosures drop to
+    3 m and keep that source; ``"osm_levels"`` ruins drop to 3 m and become
+    ``"default"``, so height providers may still fill both. Never raises a height
+    and is idempotent. Returns a new collection when anything changed; the input
+    is not mutated.
+    """
+    feats = fc.get("features") if isinstance(fc, dict) else None
+    if not feats:
+        return fc, 0
+    out, n = [], 0
+    for f in feats:
+        props = f.get("properties") or {}
+        src = props.get("height_source")
+        if src in ("default", "osm_levels"):
+            try:
+                h = float(props.get("height_m"))
+            except (TypeError, ValueError):
+                h = math.nan
+            if not math.isfinite(h):
+                h = 10.0   # city_model extrudes a missing height_m at 10 m
+            new, new_src = low_height_override(props, h, src, h)
+            if new < h or new_src != src:
+                f = {**f, "properties": {**props, "height_m": new, "height_source": new_src}}
+                n += 1
+        out.append(f)
+    return ({**fc, "features": out}, n) if n else (fc, 0)
+
+
 # Roof geometry tags preserved through the dissolve step so that
 # _build_building_meshes() can generate shaped roofs.
 _ROOF_COLS = [
@@ -130,7 +230,9 @@ _ROOF_COLS = [
 # Identity and classification tags (F-LANDMARK §3/§5), preserved the same way:
 # a merged group keeps the largest member's OSM id, so an override of that id
 # replaces the whole merged footprint.
-LANDMARK_TAG_COLS = ["osm_id", "name", "building", "amenity", "historic", "tourism"]
+# ``ruins`` and ``castle_type`` feed :func:`is_low_default_footprint`.
+LANDMARK_TAG_COLS = ["osm_id", "name", "building", "amenity", "historic", "tourism",
+                     "ruins", "castle_type"]
 
 
 def keeps_own_footprint(row) -> bool:
@@ -269,6 +371,7 @@ def _fill_heights(
     lo: float = 2.0,
     hi: float = 300.0,
     levels_col: str | None = None,
+    low_default: bool = False,
 ):
     """Fill height_m for OSM features with :func:`height_from_tags`.
 
@@ -282,8 +385,14 @@ def _fill_heights(
         levels_col: If set, the level-count column (with ``roof:levels``) is
                     a secondary fallback before *default_m* (buildings only).
                     Without it only the ``height`` tags are read.
+        low_default: Buildings: apply :func:`low_height_override` (untagged
+                    ruins and fortress enclosures at 3 m instead of *default_m*;
+                    a ruin's levels tag ignored, source ``"default"``).
     """
     tag_cols = [c for c in ("height", "building:height") if c in gdf.columns]
+    if low_default:
+        tag_cols += [c for c in ("building", "historic", "ruins", "castle_type")
+                     if c in gdf.columns]
     level_cols: dict[str, str] = {}
     if levels_col and levels_col in gdf.columns:
         level_cols["building:levels"] = levels_col
@@ -302,6 +411,8 @@ def _fill_heights(
         h, src = height_from_tags(props)
         if h is None:
             h = float(default_m)
+        if low_default:
+            h, src = low_height_override(props, h, src, default_m)
         heights.append(round(min(max(h, lo), hi), 1))
         sources.append(src)
 

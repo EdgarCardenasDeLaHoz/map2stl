@@ -7,9 +7,16 @@ open repository. A COG is read by HTTP range requests, so a landmark's window
 costs a few hundred kilobytes: GDAL's ``/vsicurl/`` driver fetches only the
 tiles under it. Checked 2026-09-27 over Granada Cathedral (0-52 m, ~6 s cold).
 
-Heights include vegetation (it is surface minus ground); clipped to a building
-footprint that is the roof. The file's nodata tag says 255 but empty cells hold
--9999; both are treated as no data.
+It is a **vegetation** height model, not a building nDSM: the metadata record
+(GeoNetwork ``4650aa97-6756-4cb1-af27-2ef4ccf9f740``) gives its purpose as
+"modelo de alturas de la vegetación". Cells of the lidar building class are
+suppressed, so an ordinary building reads low or void (Granada 2026-10-17: p90
+8.9 m where CNIG's building nDSM reads 14.6 m; 17 % of building cells void),
+while structures outside the building class (Alhambra towers, walls, ruins) and
+trees read at full height. So the default-height fill
+(``city2stl.height.survey_fill``) uses it only as a fallback where CNIG sees no
+building. The file's nodata tag says 255 but empty cells hold -9999; both are
+treated as no data.
 
 Coverage: Andalucía (extent check below).
 """

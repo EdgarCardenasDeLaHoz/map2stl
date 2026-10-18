@@ -76,6 +76,19 @@
           <input type="range" id="compositeRiverDepthMm" min="0.1" max="2" value="0.5" step="0.1" aria-label="Deepest river on the print, mm"
                  title="The deepest river or lake carve on the print; the rest keep their depth ratios (3D only)">
           <span id="compositeRiverDepthMmLabel" class="composite-slider-value">0.5 mm</span>
+          <span class="composite-slider-label">Smooth</span>
+          <select id="compositeVectorRivers" aria-label="Smooth river channels (vector)"
+                  title="Cut rivers as smooth vector channels in the export: more faces and a slower export. Auto: on for regions 200 km and larger">
+            <option value="auto" selected>Auto (on for large regions)</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <span></span>
+          <span class="composite-slider-label">Shallowest</span>
+          <input type="range" id="compositeVectorRiversMinDepthMm" min="0" max="0.5" value="0.1" step="0.05"
+                 aria-label="Smooth channels: shallowest river kept, mm"
+                 title="Smooth channels leave out reaches shallower than this on the print">
+          <span id="compositeVectorRiversMinDepthMmLabel" class="composite-slider-value">0.10 mm</span>
         </div>
         <label class="composite-toggle-row">
           <input type="checkbox" id="compositeLakesEnabled" aria-label="Enable lakes contribution"> Lakes
@@ -158,8 +171,20 @@
           <label for="cityWaterOffset" title="Waterway surface height relative to ground (m).">Water off (m)</label>
           <input type="number" id="cityWaterOffset" value="-2.0" min="-20" max="0" step="0.5" class="ctrl-input composite-num">
         </div>
-        <label class="composite-toggle-row" title="Burn slanted roof surfaces (gabled / hipped / pyramidal / skillion / dome) using OSM roof:shape tags. Visible at ≥400 px raster resolution. Slower than flat tops.">
-          <input type="checkbox" id="cityRoofShapes" aria-label="Enable slanted city roof shapes"> 🏠 Slanted roofs
+        <!-- F-DETAIL (modules/layers/city-detail.js): rows in settings/layerGroups.ts, request
+             fields built by export-handlers.js::_cityExtra and city-overlay.js. -->
+        <label class="composite-toggle-row" title="Auto keeps OSM roof shapes and guesses the untagged ones from lidar and imagery. Off: only roofs tagged in OSM.">
+          🏠 Roof shapes
+          <select id="cityRoofShapes" aria-label="Roof shapes">
+            <option value="auto" selected>Auto</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label class="composite-toggle-row" title="Lidar tree canopy from the survey; used only where survey lidar covers the box.">
+          <input type="checkbox" id="cityTrees" checked aria-label="Trees from survey lidar"> 🌳 Trees (survey lidar)
+        </label>
+        <label class="composite-toggle-row" title="Detailed 3D model of 22 Alhambra buildings (Thingiverse, CC BY-SA); only offered where the box covers the Alhambra.">
+          <input type="checkbox" id="cityAlhambra" aria-label="Alhambra reference model"> 🏰 Alhambra model
         </label>
       </div>
     </details>

@@ -161,7 +161,7 @@ describe('frameAspect', () => {
 });
 
 describe('geoAtFrac', () => {
-    const ALL = ['none', 'cosine', 'equidistant', 'mercator', 'lambert', 'miller', 'gall', 'sinusoidal'];
+    const ALL = ['none', 'cosine', 'equidistant', 'mercator', 'lambert', 'miller', 'gall', 'sinusoidal', 'laea', 'lcc'];
     it('inverts projectedFrac for every projection, true and fixed shape', () => {
         for (const md of [false, true]) {
             for (const p of ALL) {

@@ -185,7 +185,7 @@ async def get_terrain_dem(
     dataset: str | None = Query(
         None, description="Land-use dataset: 'esa' or 'jrc'"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     maintain_dimensions: bool | None = Query(
         None, description="Maintain output dimensions after projection"),
     clip_valid_region: bool | None = Query(
@@ -432,7 +432,7 @@ async def get_terrain_water_mask(
     dataset: str | None = Query(
         None, description="Water dataset: 'esa' or 'jrc'"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -567,7 +567,7 @@ async def get_terrain_esa_land_cover(
     dim: int | None = Query(
         None, description="Output grid resolution (pixels per side)"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -709,7 +709,7 @@ async def get_terrain_satellite(
     dim: int | None = Query(
         None, description="Output image resolution (pixels per side)"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -1047,7 +1047,7 @@ async def get_terrain_hydrology(
     width_factor: float | None = Query(
         None, description="HydroRIVERS line width multiplier (default 1.0; higher = thicker rivers)"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     clip_valid_region: bool | None = Query(
         None,
         description="Clip projection padding to valid data extent (recommended).",
@@ -1343,6 +1343,42 @@ async def get_terrain_borders(
     return JSONResponse(content=payload)
 
 
+@router.get("/api/terrain/river-lines", tags=["terrain"])
+async def get_terrain_river_lines(
+    request: Request,
+    bbox: BboxQueryParams = Depends(_parse_bbox_query),
+    min_order: int | None = Query(None, description="Lowest Strahler order (the Rivers size control), 1-10"),
+    view_north: float | None = Query(None, description="Visible area, north (defaults to the region)"),
+    view_south: float | None = Query(None, description="Visible area, south"),
+    view_east: float | None = Query(None, description="Visible area, east"),
+    view_west: float | None = Query(None, description="Visible area, west"),
+    width_px: int | None = Query(None, description="Screen pixels across the visible area"),
+    height_px: int | None = Query(None, description="Screen pixels down the visible area"),
+):
+    """HydroRIVERS reaches as simplified polylines for the Edit map's river lines (view only).
+
+    Work and encoding: ``app/server/core/river_lines.py::river_lines_payload``.
+    """
+    from app.server.core.river_lines import river_lines_payload
+
+    params = request.query_params
+    north, south, east, west = bbox.north, bbox.south, bbox.east, bbox.west
+    err = _validate_bbox(north, south, east, west)
+    if err:
+        return err
+    view_vals = [_parse_float(params, k, None) for k in ("view_north", "view_south", "view_east", "view_west")]
+    view = tuple(view_vals) if all(v is not None for v in view_vals) else None
+    try:
+        payload = await run_sync(
+            river_lines_payload, north, south, east, west,
+            min_order=_parse_int(params, "min_order", 3), view=view,
+            width_px=_parse_int(params, "width_px", 1000), height_px=_parse_int(params, "height_px", 1000))
+    except Exception as e:  # noqa: BLE001 - offline or a bad archive: say so, don't 500 the page
+        logger.warning("River lines unavailable: %s", e)
+        return error_response(f"River lines unavailable: {e}")
+    return JSONResponse(content=payload)
+
+
 #: Largest region (bbox diagonal) trails are fetched for; see get_terrain_trails.
 TRAILS_MAX_DIAG_KM = 300.0
 
@@ -1362,7 +1398,7 @@ async def get_terrain_trails(
     categories: str | None = Query(
         None, description="Comma-separated categories to fetch: 'ski', 'hiking'"),
     projection: str | None = Query(
-        None, description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"),
+        None, description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"),
     clip_valid_region: bool | None = Query(
         None, description="Clip projection padding to valid data extent (recommended)."),
     maintain_dimensions: bool | None = Query(

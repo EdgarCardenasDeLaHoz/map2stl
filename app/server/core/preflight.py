@@ -106,12 +106,16 @@ def _cached_layers(bbox: dict, names: list[str], data: dict) -> tuple[dict, list
     Reads the entry the build would (``city_model_task.city_osm_params``), or
     derives it from a finer / enclosing one exactly as the build would
     (``city_data.lookup_city_layers``)."""
-    from app.server.core.city_data import lookup_city_layers
+    from app.server.core import city_data
     from app.server.core.city_model_task import city_osm_params
 
     tol, min_area = city_osm_params(data)
-    cached, status = lookup_city_layers(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
-                                        names, tol, min_area)
+    cached, status = city_data.lookup_city_layers(
+        bbox["north"], bbox["south"], bbox["east"], bbox["west"], names, tol, min_area)
+    # The survey heights the build applies (city_data.with_survey_heights), so the
+    # counts and the estimate see the same heights.
+    cached = city_data.with_survey_heights(
+        cached, bbox["north"], bbox["south"], bbox["east"], bbox["west"])
     stale = status in ("stale", "stale_buildings")
     have = {n: cached[n] for n in names if isinstance(cached.get(n), dict)}
     return have, [n for n in names if n not in have], stale
@@ -128,6 +132,7 @@ def _fits(w: float, d: float, bed: tuple[float, float]) -> bool:
 
 def preflight(data: dict) -> dict:
     """The pre-flight report for an export request (see the module docstring)."""
+    from app.server.core.city_data import merge_layer_data
     from app.server.core.city_model_task import OSM_LAYERS, normalize_request
     from app.server.core.export import puzzle_spec, terrain_stage
     from app.server.core.export_params import ExportContext
@@ -190,7 +195,7 @@ def preflight(data: dict) -> dict:
         if stale:
             warnings.append("The cached city data predates the current pipeline: the build "
                             "refetches it, so its counts may differ from these")
-        layers.update({n: fc for n, fc in (data.get("layer_data") or {}).items() if n in enabled})
+        layers = merge_layer_data(layers, data.get("layer_data"), enabled)
         missing = [n for n in missing if n not in layers]
         if missing:
             warnings.append("Not cached yet (fetched at build time, not counted here): "

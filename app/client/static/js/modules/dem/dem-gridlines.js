@@ -227,6 +227,7 @@ function drawGridlinesOverlay(containerId = 'demImage') {
         mercator: 'Web Mercator', equidistant: 'Equidistant Cylindrical',
         lambert: 'Lambert Equal-Area', sinusoidal: 'Sinusoidal',
         miller: 'Miller Cylindrical', gall: 'Gall Stereographic',
+        laea: 'Lambert azimuthal (equal-area)', lcc: 'Lambert conic (conformal)',
     }[projection] || projection;
     const badge = spacingLabel ? `${projLabel}  ·  ${spacingLabel}` : projLabel;
     ctx.font = 'bold 13px sans-serif';

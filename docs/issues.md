@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-14_
+_Last updated: 2026-10-17_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,36 @@ _Last updated: 2026-10-14_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Use case: four 600 mm city prints, driven through the API (2026-10-17)
+
+The user asked for Granada, Breckenridge (town, ski trails), San Francisco and Cartagena at about
+600 mm on the longest side, cut into printable pieces. An agent drove the export API in-process
+(FastAPI `TestClient`, the endpoints the UI calls: `GET /api/terrain/dem`, `POST
+/api/export/start`, status, download). For an agent the API is easier than the UI; every gap
+below is one that also costs a UI user a step.
+
+- **No offline fallback when Overpass is down.** All mirrors failed their `/status` probe. The
+  cache held v4 payloads for Granada, Breckenridge and SF, but `city2stl/cache_policy.py` refuses
+  them as stale, so the export failed. The agent had to monkeypatch `CITY_PIPELINE_VERSION`.
+  Wanted: serve a stale cache with a warning when no endpoint answers. Cartagena had no cache at
+  all and stayed blocked.
+- **Export cannot be requested by region name.** The bbox had to be copied from `data.db` by
+  hand, and the wrong San Francisco region was picked first ("San Fran" is the Bay Area,
+  "SanFranciso" is the city and peninsula). Wanted: `region_id` on `/api/export/start`.
+- **No "longest side = N mm" input.** The agent derived `mm_per_px` from the DEM dimension.
+  Wanted: a target size that picks `mm_per_px` (the UI has a print-scale helper; the API does
+  not).
+- **No region preset for layers.** The composite layer spec came from a script helper
+  (`render_regions.layers`), not the API.
+- **Size guard:** the SF region's 26.5 km diagonal is over the 25 km limit, so the export needs
+  `allow_large_city`. The error says so, but the UI has no way to pass it.
+- **Coarse cache wins silently.** The only SF cache was the Cities panel's coarse load
+  (tolerance 3 m, at least 1200 m²), so small buildings are missing and nothing says so.
+- **Trails have their own 7-day cache** (`trails_osm`), so Breckenridge needed a live fetch of
+  about 7 minutes even though its buildings were cached.
+- **No headless preview.** There is no endpoint that returns a PNG of an export, so the agent
+  wrote its own renderer to check the result.
 
 ## Edit map: changing the projection changed nothing visible (fixed 2026-10-14)
 
@@ -88,6 +118,25 @@ the coasts (the open sea showed bathymetry colours, -1552 m at 64.8 N 2.6 E) and
   (then delete `site-packages/~yarrow`, left by the in-use upgrade). The legacy
   `terrain.py::_hydrorivers_layers` path (no `dem_source`) still caches `water=None` as zeros.
   This PC has no `ocean_root` store, so the DEM sea fallback never runs here.
+
+## Projections: wings printed as a flat slab (open; crop is opt-in, 2026-10-17)
+
+- **Symptom:** sinusoidal / laea / lcc grids are full rectangles whose cells outside the bbox are
+  NaN (curved "wings" joined to the border). `prepare_dem` filled them with the lowest elevation, so
+  the print had a slab in the corners; `composite.py` also turned them into 0 m.
+- **Status:** still open. The slab prints by default until the projected frame (Cover mode)
+  lands. A crop exists but is opt-in (`dem.crop_wings`, default false): on the Europe region
+  under laea it kept 452 x 478 of 800 x 622 cells (43% of the area) and shrank the print to
+  452 mm, so the user chose the frame instead (2026-10-17).
+- **Opt-in crop:** with `dem.crop_wings` true, `ExportContext.from_request`
+  (`app/server/core/export_params.py::_crop_wings`) crops the grid, `carve_m`, `lake_carve_m` and
+  `still_water` to the largest wing-free rectangle (`geo2stl/projections.py::largest_valid_rect`) and
+  shrinks `bbox` by the kept fraction of columns / rows so the mm-per-m scale holds. Interior NaN voids
+  still get the fill. Composite keeps wings NaN (`COMPOSITE_CACHE_VERSION` 10).
+- **Still wrong:** the client's printed-size label (`modules/export/print-scale.js::modelScale`,
+  `widthMm = cols * mmPerPx`) is computed from the uncropped grid, so it over-reports the print;
+  buildings / vector features place through the (now shrunk) bbox as a plate carree, which is already
+  inexact for non-linear projections. The "projected frame" feature replaces this crop.
 
 ## Active bugs — Extrude tab audit (2026-10-13)
 
@@ -182,6 +231,46 @@ the rest below.
   - The `rotation` setting has no consumer.
 - **PA-F Frontend**: two client stacks (`main.js` + `vue/`); three.js r128 loads from a
   CDN (`app/client/templates/index.html`). See F-FE1.
+
+## Mesh and export faults found in the Granada detail study (2026-10-17)
+
+- **`numpy2stl` `generate.py::array_to_mesh` is not watertight on pinched masks:** two
+  cells that touch only at a corner produce a non-manifold edge.
+- **`city2stl` `shade.py::color_for` matches part names by substring,** so a part whose name
+  contains another part's name gets the wrong colour.
+- **The city cache holds duplicate outlines:** the same footprint appears once as `building`
+  and again as `building:part`, so both are extruded.
+
+## F-DETAIL: open faults after the first full Granada export (2026-10-17)
+
+- **Roof classification was slow on a cold cache — fixed 2026-10-17 (KO):** the first full
+  Granada export spent ~10 min in "Loading OSM layers", inside `city_data.py::with_roof_shapes`
+  (23,969 buildings), with no progress message, and every server restart repeated it.
+  - Now each answer is stored per footprint in `<CACHE_ROOT>/roof_shapes.sqlite`
+    (`city2stl/roof_cache.py`); only footprints never seen are classified, the model predicts
+    in batches of 512, and the fetch and export tasks show "Classifying roofs N of M".
+  - Granada (tiles on disk): cold 124 s, after a restart 3.4 s (23,867 from the cache, same
+    histogram: 19,263 flat, 4,604 gabled). The 23 skipped buildings are retried on each read.
+  - Still open: a cold city still waits ~5 ms a building before its first preview; serving flat
+    roofs while classifying in the background would remove the wait.
+- **Reference landmark `relation/2640220` reports "missing"** (17 of 18 units applied). Several
+  `ref:` free-standing units show `replaced_features: 0`; check that this is expected.
+- **Alcazaba, Abencerrajes, Sultana** are swapped although the study flagged their footprints
+  for a check.
+- **Edit panel:** Reset in Buildings & roads › Composite skips the Trees row; changing Roof shapes
+  takes effect only on the next buildings reload.
+
+## Vector rivers — known faults (2026-10-17)
+
+Rivers cut as vector solids (`app/server/core/export.py::river_features`, request
+`vector_rivers`; on by default for regions ≥ 200 km):
+- **No valley snapping:** reaches follow HydroRIVERS lines, not the DEM valley floor the
+  raster carve snaps to, so a channel can cross a canyon wall where the two disagree.
+- **0.05 mm steps** where depth classes meet (a tributary entering its river).
+- **River mouths dent the sea floor:** the channel solids are not clipped by the ocean mask.
+- **Non-linear projections** (mercator, equal-area, `cosine` with `maintain_dimensions`)
+  fall back to the raster carve (`X-Vector-Rivers: raster river carve: …`).
+- **Previews** always show the raster carve.
 
 ## Active data limitations
 

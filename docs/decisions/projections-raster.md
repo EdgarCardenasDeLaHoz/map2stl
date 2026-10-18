@@ -2,6 +2,65 @@
 
 Raster orientation, map-projection order and area measurement. Related: [architecture.md](architecture.md) (row 0 = north), [terrain-dem.md](terrain-dem.md) (project once).
 
+### 2026-10-17 — Europe-sized regions default to Lambert azimuthal equal-area; `laea` and `lcc` are projections
+- **Decision:**
+  - `geo2stl/projections.py` gains `laea` (spherical Lambert azimuthal equal-area) and `lcc`
+    (spherical Lambert conformal conic), both centred on the bbox centre. The raster is the bounding
+    rectangle of the projected bbox (like `sinusoidal`); pixels outside the bbox are filled.
+    `graticule.js::conicAzimuthalModel` mirrors the math for the preview and the graticule.
+  - `lcc` standard parallels are south + span/6 and north - span/6. When the bbox straddles the
+    equator, or the parallels coincide within 1e-6 degrees (`projections.py::lcc_parameters` is
+    None), `lcc` is `equidistant`.
+  - A region without saved settings whose longest ground side is at least
+    `LARGE_PROJECTION_REGION_KM` (1000, `dem/projection-default.js`) starts on `laea`; smaller ones
+    stay on `cosine`. Applied in `regions/regions.js::selectCoordinate` when no settings were
+    saved. A saved projection always wins, and so does one the user picked this session.
+  - `terrain_session._VALID_PROJECTIONS` also lists `miller` and `gall`, which it had omitted.
+- **Why:** sinusoidal shears Spain about 12 degrees on a Europe map. On the Europa box (68.7 N to
+  27.8 N, 16.3 W to 47.3 E) laea gives aspect 1.285 and lcc 1.311, with meridians that lean
+  gradually instead of shearing.
+- **Rejected:**
+  - Albers equal-area conic: needs the same fallback as `lcc` and gives nothing `laea` does not
+    for a region this shape.
+  - Ellipsoidal EPSG:3035: the app works on a sphere everywhere else; the difference is far below
+    a print pixel at the supported detail.
+  - A lower threshold (for example 500 km): cosine is already good there (shear grows with
+    extent), and it would change every country-sized region's default.
+  - Row-affine preview shortcut for conic projections: a conic's rows are not affine in
+    latitude, so `warpPixels` samples each pixel through the inverse.
+- **Supersedes / superseded by:** —
+- **Source:** `geo2stl/projections.py::_ConicAzimuthalModel`, `tests/test_projections_conic_azimuthal.py`
+
+### 2026-10-17 — A projection switch paints its preview before other loaders run, and outlives a newer DEM load
+- **Decision:**
+  - `events/event-listeners-map.js` `_switchProjection` sends the DEM request, warps and draws the
+    in-browser preview (`dem/projection-preview.js`), waits for that frame to paint
+    (`dem/projection-switch.js::afterPaint`), and only then starts the other layers' loaders.
+  - When a newer `loadDEM` aborts the switch's own request (a Detail change with auto-reload,
+    the Load button, a layer autoload), the switch waits for that newer load
+    (`dem/projection-switch.js::awaitNewestDemLoad`, reading `window.loadDEM._controller` and
+    `_promise`) instead of treating the abort as a failure. A cancel (the spinner's ✕) aborts
+    without replacing the controller and still ends the preview; a newer projection pick still
+    makes the older switch stop without touching anything.
+- **Why:** user report on Europa (cosine to sinusoidal, Detail 600): the view looked unchanged
+  and the user re-picked the projection. Two causes, both measured in the browser:
+  - The warp ran after the loaders' synchronous parts. Re-rendering a cached land-cover grid
+    (`layers/water-mask.js::loadEsaLandCover`) takes about 0.8–1 s on Europa, so the preview
+    appeared at about 0.85–1.15 s. With the new order the warp takes 24–137 ms (2–3 layers,
+    capped at 600 px) and is on screen within about 140–250 ms.
+  - A Detail change during the switch (the usage log shows 550 eight seconds after a pick)
+    started a second `loadDEM`, which aborted the switch's DEM. The switch then saw no DEM,
+    ended the preview while the new DEM was still loading, and skipped the satellite and city
+    reloads. Now the preview stays until the newer DEM lands (measured: it ended at 6.3 s, with
+    the DEM, instead of at the abort).
+- **Rejected:**
+  - Making the land-cover reuse path asynchronous only: it would still block the main thread
+    for the same time, just later.
+  - Waiting for `DEM_LOADED`: it never fires when the newer load fails, so the switch would hang.
+- **Supersedes / superseded by:** —
+- **Source:** `tests/js/projectionSwitch.test.js` (the hand-over cases, and `graticule.js::geoAtFrac`
+  checked against pixels from `geo2stl/projections.py::project_grid`).
+
 ### 2026-10-14 — Projection sampling is separable float32; masks stay at order 1; class grids go out as uint8
 - **Decision:**
   - Every projection samples through `geo2stl/projections.py::_sample_grid`: each axis is

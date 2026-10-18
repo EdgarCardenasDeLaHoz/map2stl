@@ -378,7 +378,7 @@ async def get_city_raster(req: CompositeCityRasterRequest):
 #: Bumped when the composite's arithmetic changes, so older cached grids are not
 #: served: 2 = projected base grid kept (not stretched to dim), rivers snapped to
 #: the valley floor, lakes levelled after the median (F-REGION step 4).
-COMPOSITE_CACHE_VERSION = 9   # 9: base DEM and river carve from the shared grid (2026-10-14); 8: drop composites cut while HydroRIVERS failed silently (2026-10-14); 7: dim = longest side after projection (2026-10-13)
+COMPOSITE_CACHE_VERSION = 10   # 10: projection wings stay NaN, not 0 m (2026-10-17); 9: base DEM and river carve from the shared grid (2026-10-14); 8: drop composites cut while HydroRIVERS failed silently (2026-10-14); 7: dim = longest side after projection (2026-10-13)
 # 6: still-water grid cached; 5: large-box lakes from ESA water
 #: Layers whose cells are standing water (water_out["still"] of compute_composite_dem).
 STILL_WATER_SOURCES = ("lakes", "water_esa")
@@ -486,6 +486,11 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
     agree and an Overpass outage is not waited out three times), then rebuilt.
     The base layer failing still raises.
 
+    *water_out*, when given, also receives ``"lake_carve"``: the carve without the
+    river layers (``geo2stl.water_layers.RIVER_FETCH``), for an export that cuts the
+    rivers as vector solids. Setting ``water_out["need_lake_carve"]`` makes a cached
+    composite written before that grid existed count as a miss.
+
     *water_out*, when given, receives ``"still"``: a boolean grid of standing water
     (cells the ``lakes`` layer carves, or the ``water_esa`` mask covers) on the
     composite grid, so the 3D viewer colours lakes like the Edit map (cached too).
@@ -545,7 +550,7 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         source_dim,
         source_shape,
     )
-    from geo2stl.water_layers import pool_deepest, resize_relative
+    from geo2stl.water_layers import RIVER_FETCH, pool_deepest, resize_relative
 
     # dim is the longest side after projection (user decision 2026-10-13): every
     # layer is sampled at the plate-carree size that projects to it and
@@ -553,6 +558,9 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
     bbox = (north, south, east, west)
 
     cached = read_array_cache("composite", cache_key)
+    if (cached is not None and water_out is not None and water_out.get("need_lake_carve")
+            and cached[0].get("lake_carve") is None):
+        cached = None               # written before the lake-only carve was stored
     if cached is not None and cached[0].get("composite") is not None:
         skipped_before = list(cached[1].get("skipped") or [])
         if skipped_before and (time.time() - float(cached[1].get("_cached_at", 0))
@@ -567,10 +575,14 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         still = cached[0].get("still")
         if water_out is not None and still is not None and still.shape == hit.shape:
             water_out["still"] = still.astype(bool)
+        lake = cached[0].get("lake_carve")
+        if water_out is not None and lake is not None and lake.shape == hit.shape:
+            water_out["lake_carve"] = lake
         return _result(hit, carve if carve is not None and carve.shape == hit.shape
                        else np.zeros_like(hit))
 
     carve = None
+    lake_carve = None   # the carve of the relative layers that are not rivers
     terrain = None
     still_parts = []   # standing-water grids (any shape), resized onto the composite below
     skipped: list[str] = []
@@ -631,7 +643,7 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
             if spec.source in STILL_WATER_SOURCES:
                 still_parts.append((spec.source, processed))
             if is_relative:
-                relative.append((processed, float(spec.weight)))
+                relative.append((processed, float(spec.weight), spec.source in RIVER_FETCH))
             elif composite is None:
                 # The first layer sets the grid: the projected grid itself, as
                 # /api/terrain/dem returns it (projected_shape, longest side dim).
@@ -652,14 +664,21 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         if composite is None:
             raise RuntimeError("No layers produced output")
 
-        composite = np.nan_to_num(composite, nan=0.0,
+        # NaN stays NaN: the projection wings (cells outside the bbox) must reach the
+        # export so it can crop them (geo2stl.projections.largest_valid_rect); 0 m
+        # there printed as a slab. Only the infinities are clamped.
+        composite = np.nan_to_num(composite, nan=np.nan,
                                   posinf=np.finfo(np.float32).max,
                                   neginf=np.finfo(np.float32).min)
-        for processed, weight in relative:
+        for processed, weight, is_river in relative:
             layer = np.minimum(np.nan_to_num(
                 resize_relative(processed, composite.shape), nan=0.0), 0.0) * weight
             carve = layer if carve is None else np.minimum(carve, layer)
+            if not is_river:
+                lake_carve = layer if lake_carve is None else np.minimum(lake_carve, layer)
 
+    if lake_carve is None:
+        lake_carve = np.zeros_like(composite)
     if carve is None:
         carve = np.zeros_like(composite)
     elif not TEST_MODE and terrain is not None:
@@ -670,6 +689,7 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         sea = ocean_mask(terrain)
         if sea.any():
             carve = np.where(sea, 0.0, carve)
+            lake_carve = np.where(sea, 0.0, lake_carve)
     still = np.zeros(composite.shape, dtype=bool)
     for source, grid in still_parts:
         g = np.nan_to_num(np.asarray(grid, dtype=np.float32), nan=0.0)
@@ -679,9 +699,11 @@ def _composite_for_key(cache_key, specs, north, south, east, west, dim, projecti
         still |= (g < 0) if source == "lakes" else (g > 0.5)
     if water_out is not None:
         water_out["still"] = still
+        water_out["lake_carve"] = lake_carve
     if skipped and warnings is not None:
         warnings.extend(skipped)
     write_array_cache("composite", cache_key, {"composite": composite, "carve": carve,
+                                               "lake_carve": lake_carve,
                                                "still": still.astype(np.uint8)},
                       {"skipped": skipped} if skipped else None)
     logger.info("Composite cached (%s, %s%s)", cache_key[:8], composite.shape,

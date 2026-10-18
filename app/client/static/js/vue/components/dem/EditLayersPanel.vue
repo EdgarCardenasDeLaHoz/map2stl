@@ -6,8 +6,14 @@
        list is drawn on top: drag a row, or Alt+Up/Down), each layer's opacity on the map (slider on
        the selected row) and Terrain's map-only visibility (mockup
        claude/mockups/2026-10-14-layers-rail/rail.png). Saved per region (presets.js view.layers). -->
-  <aside id="editLayersPanel" class="el-panel" aria-label="Layers">
-    <div class="el-cap">Layers</div>
+  <aside id="editLayersPanel" class="el-panel" :class="{ 'el-collapsed': collapsed }" aria-label="Layers">
+    <!-- Collapsed (◀ Hide, like the settings panel's): only the reopen tab is left. Saved per viewer. -->
+    <button v-if="collapsed" id="layersCollapsedTab" type="button" class="el-tab"
+            title="Show the layers" aria-label="Show the layers" @click="setCollapsed(false)">▶ Layers</button>
+    <template v-else>
+    <div class="el-cap"><span>Layers</span>
+      <button id="layersHideBtn" type="button" class="el-hide" title="Hide the layers list"
+              @click="setCollapsed(true)">◀ Hide</button></div>
     <div v-for="l in rows" :key="l.id" class="el-row" role="button" tabindex="0"
          :class="{ sel: store.selected === l.id, 'el-canvas': l.id === 'canvas', drag: drag.id === l.id && drag.active,
                    'ins-above': insAbove === l.id, 'ins-below': insBelow === l.id }"
@@ -40,6 +46,7 @@
     <div class="el-spacer"></div>
     <div class="el-hint">Top of the list is drawn on top. Drag a layer to move it; switch it off to hide it.
       A layer loads when switched on; its dot turns green when it is ready.</div>
+    </template>
     <div class="el-live" aria-live="polite">{{ announce }}</div>
   </aside>
 </template>
@@ -54,6 +61,7 @@ import { useUiModeStore } from '../../stores/uiMode';
 import { useAppStore } from '../../stores/app';
 import { val } from '../../dom-fields';
 import { bboxDiagonalKm } from '../../../modules/export/print-scale.js';
+import { riverLoadingMessage } from '../../../modules/layers/hydrology-print.js';
 
 const store = useEditLayersStore();
 const ui = useUiModeStore();
@@ -105,10 +113,19 @@ function noRivers(): boolean {
   const h = w().appState?.lastWaterHydrology?.hydroData;
   return !!h && h.feature_count === 0;
 }
+/**
+ * The rivers are being fetched: the hydrology preview (water-hydrology-combined.js) or the
+ * composite's carve (composite-dem.js::_fetchHydro). A large region takes about a minute.
+ */
+function riversLoading(): boolean {
+  const s = app.layerStatus;
+  return s.waterHydrology === 'loading' || s.riverCarve === 'loading';
+}
 function dotClass(l: EditLayer): string {
   if (l.id === 'terrain' && !on(l)) return 'off';
   if (l.id === 'terrain' || l.id === 'canvas') return app.lastDemData ? 'ok' : 'off';
   if (!on(l)) return 'off';
+  if (l.id === 'water' && riversLoading()) return 'busy';
   if (l.id === 'water' && noRivers()) return 'busy';
   return hasPicture(l) ? 'ok' : 'busy';
 }
@@ -117,6 +134,7 @@ function dotClass(l: EditLayer): string {
 const PROJ_NAMES: Record<string, string> = {
   none: 'No projection', cosine: 'Cosine', mercator: 'Mercator', equidistant: 'Equidistant',
   lambert: 'Lambert', miller: 'Miller', gall: 'Gall', sinusoidal: 'Sinusoidal',
+  laea: 'Lambert azimuthal', lcc: 'Lambert conic',
 };
 
 function status(l: EditLayer): string {
@@ -131,6 +149,9 @@ function status(l: EditLayer): string {
     case 'water': {
       if (!on(l)) return 'Not in the model';
       if (!app.lastDemData) return 'Waiting for the terrain';
+      if (riversLoading()) {
+        return riverLoadingMessage(app.selectedRegion as any, parseInt(val('hydroMinOrder'), 10));
+      }
       if (noRivers()) return 'No rivers this size here';
       const src = val('hydroSource') === 'natural_earth' ? 'Natural Earth' : 'HydroRIVERS';
       return `${src} · carved in`;
@@ -172,6 +193,25 @@ function toggle(l: EditLayer, e: Event) {
 /** Save the region's settings (the rail is outside the panels presets.js watches). */
 function save() {
   w().scheduleSettingsAutoSave?.();
+}
+
+// ── ◀ Hide: collapse the list to a reopen tab (like the settings panel's), saved per viewer ──
+const COLLAPSED_KEY = 'map2stl_editLayersCollapsed';
+function readCollapsed(): boolean {
+  try { return localStorage.getItem(COLLAPSED_KEY) === '1'; } catch { return false; }
+}
+const collapsed = ref(readCollapsed());
+function setCollapsed(c: boolean) {
+  collapsed.value = c;
+  try { localStorage.setItem(COLLAPSED_KEY, c ? '1' : '0'); } catch { /* private window */ }
+  // The map gains or loses the panel's width: re-measure it as toggleSettingsPanel does
+  // (view-management.js), after Vue has redrawn the panel.
+  requestAnimationFrame(() => {
+    w().events?.emit(w().EV?.STACKED_UPDATE);
+    w().emitStackUpdate?.();
+    window.dispatchEvent(new Event('resize'));
+    requestAnimationFrame(() => w()._ensureDemViewportSpace?.());
+  });
 }
 
 // ── Opacity on the map: the selected row's slider ──
@@ -350,8 +390,21 @@ onBeforeUnmount(() => {
 }
 .el-cap {
   font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-muted); margin: 0 6px 6px;
+  color: var(--text-muted); margin: 0 6px 6px; display: flex; align-items: center; justify-content: space-between;
 }
+.el-hide {
+  background: none; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted);
+  font-size: 12px; text-transform: none; letter-spacing: 0; padding: 2px 8px; cursor: pointer;
+}
+.el-hide:hover { color: #f5f5f7; background: #2c2c2e; border-color: #38383a; }
+.el-hide:focus-visible, .el-tab:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
+/* Collapsed: a narrow strip holding the vertical reopen tab (as .settings-collapsed-tab). */
+.el-panel.el-collapsed { width: auto; padding: 0; background: none; overflow: visible; }
+.el-tab {
+  writing-mode: vertical-rl; flex: 1; min-height: 120px; padding: 16px 10px; border: none; border-radius: 12px;
+  background: #007acc; color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; cursor: pointer;
+}
+.el-tab:hover { background: #0088e0; }
 .el-row {
   display: flex; flex-direction: column; padding: 8px 8px 8px 4px; border-radius: 12px; cursor: pointer;
   position: relative; user-select: none; touch-action: none;

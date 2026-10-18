@@ -281,6 +281,30 @@ class TestTrails:
         task_mod.run_city_model({**body, "layers": {"trails": {"enabled": True}}}, ExportTask("t2"))
         assert fetched == [1]
 
+    def test_city_task_builds_the_canopy_only_when_trees_are_enabled(self, client, monkeypatch):
+        """F-DETAIL D3: the lidar canopy is opt-in; its mask gets buildings and green."""
+        import app.server.core.city_model_task as task_mod
+        from city2stl.canopy import CanopyLayer
+
+        asked, calls = [], []
+        monkeypatch.setattr(task_mod, "get_city_layers",
+                            lambda n, s, e, w, names, *a, **k: asked.append(list(names))
+                            or {"buildings": _fc(_b(0)), "green": _fc()})
+        monkeypatch.setattr(task_mod, "canopy_layer",
+                            lambda bbox, b, g, scale, preview=False: calls.append((b, g, preview))
+                            or CanopyLayer(reason="test: no survey"))
+        r = client.get("/api/terrain/dem", params={**BBOX, "dim": 60, "projection": "none"})
+        body = {"format": "city", "dem_id": r.json()["dem_id"], "name": "t"}
+        from app.server.core.export_tasks import ExportTask
+
+        task_mod.run_city_model(dict(body), ExportTask("c1"))
+        assert calls == []
+        task_mod.run_city_model({**body, "layers": {"roads": {"enabled": False},
+                                                    "trees": {"enabled": True, "preview": True}}},
+                                ExportTask("c2"))
+        assert len(calls) == 1 and calls[0][2] is True and calls[0][1] is not None
+        assert {"buildings", "green"} <= set(asked[-1])
+
 
 # ---------------------------------------------------------------------------
 # Slab triangulation without Triangle

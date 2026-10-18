@@ -44,6 +44,12 @@ export interface LayerStatus {
     dem: LayerState;
     water: LayerState;
     landCover: LayerState;
+    /** Rivers & lakes preview (water-hydrology-combined.js). */
+    waterHydrology?: LayerState;
+    /** The composite's river carve request (composite-dem.js::_fetchHydro). */
+    riverCarve?: LayerState;
+    /** Other layers set their own key through window.setLayerStatus. */
+    [layer: string]: LayerState | undefined;
 }
 
 export interface DemParams {

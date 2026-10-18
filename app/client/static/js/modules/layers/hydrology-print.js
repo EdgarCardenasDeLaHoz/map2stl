@@ -15,6 +15,39 @@
  * import them directly.
  */
 
+import { bboxLongestSideKm } from '../export/print-scale.js';
+
+/**
+ * Longest ground side (km) from which a region counts as large for rivers: smooth river
+ * channels turn on ('auto'), and loading warns it is slow. Same value as
+ * app/server/core/export_params.py::VECTOR_RIVERS_AUTO_MIN_SIDE_KM.
+ */
+export const LARGE_RIVER_REGION_KM = 200;
+
+/** True when the bbox's longest ground side is at least LARGE_RIVER_REGION_KM. */
+export function isLargeRiverRegion(bbox) {
+    if (!bbox) return false;
+    // Coordinates may arrive as form strings ("12.5"): `+` would concatenate them.
+    const [north, south, east, west] = [bbox.north, bbox.south, bbox.east, bbox.west].map(Number);
+    if (![north, south, east, west].every(Number.isFinite)) return false;
+    return bboxLongestSideKm({ north, south, east, west }) >= LARGE_RIVER_REGION_KM;
+}
+
+/**
+ * What the Rivers & lakes row and the Fetch status line say while the rivers load.
+ * HydroRIVERS at size 1 on the Amazon (1.23M reaches) took 57 s, so a large region
+ * says so; size 1–2 there is the slow case.
+ *
+ * @param {{north:number,south:number,east:number,west:number}|null} bbox
+ * @param {number} [minOrder]  #hydroMinOrder
+ */
+export function riverLoadingMessage(bbox, minOrder) {
+    if (!isLargeRiverRegion(bbox)) return 'Loading rivers…';
+    return Number.isFinite(minOrder) && minOrder <= 2
+        ? 'Loading rivers… large region, about a minute'
+        : 'Loading rivers… large region, may take a while';
+}
+
 /** Fetch > Hydrology `hydroSource` value → composite layer source name. */
 export const HYDRO_TO_RIVER_SOURCE = Object.freeze({
     natural_earth: 'natural_earth_rivers',
@@ -129,6 +162,24 @@ export function readRiverDepthScale(doc = globalThis.document) {
 export function readRiverDepthMm(doc = globalThis.document) {
     const v = parseFloat(doc?.getElementById?.('compositeRiverDepthMm')?.value);
     return Number.isFinite(v) && v > 0 ? v : 0.5;
+}
+
+/**
+ * Smooth river channels (#compositeVectorRivers): the export request's `vector_rivers`,
+ * 'auto' (the server turns it on for regions 200 km and larger), true or false.
+ * Vector channels are cut as solids with smooth walls instead of the pixel-stepped
+ * raster carve; they cost faces and export time. Previews keep the raster carve.
+ */
+export function readVectorRivers(doc = globalThis.document) {
+    const v = doc?.getElementById?.('compositeVectorRivers')?.value;
+    return v === 'on' ? true : v === 'off' ? false : 'auto';
+}
+
+/** Smooth channels: reaches shallower than this on the print are left out, mm
+ *  (#compositeVectorRiversMinDepthMm), default 0.1. */
+export function readVectorRiversMinDepthMm(doc = globalThis.document) {
+    const v = parseFloat(doc?.getElementById?.('compositeVectorRiversMinDepthMm')?.value);
+    return Number.isFinite(v) && v >= 0 ? v : 0.1;
 }
 
 /** Status / toast text when the preview is asked for before a DEM exists. */

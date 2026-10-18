@@ -216,6 +216,8 @@ window.clearAllLayerBuffers = function clearAllLayerBuffers() {
     _gridBakedZoom = { scale: 1, offsetX: 0, offsetY: 0 };
     const gridCanvas = document.getElementById('layerGridCanvas');
     if (gridCanvas) gridCanvas.style.transform = '';
+    const riverCanvas = document.getElementById('riverLinesCanvas');
+    if (riverCanvas) riverCanvas.style.transform = '';
 };
 
 // Multi-layer state: set of active layer keys + per-layer opacity (0–1)
@@ -442,6 +444,7 @@ function _applyTransformCSS(xfm) {
     if (osmOverlay) { osmOverlay.style.transformOrigin = '0 0'; osmOverlay.style.transform = xfm; }
     if (window.appState) window.appState.stackZoom = stackZoom;
     _applyGridCSSDelta();
+    window.riverLinesCSSDelta?.();   // modules/layers/river-lines.js, same idea as the grid
 }
 
 /**
@@ -1040,6 +1043,7 @@ window.applyStackedTransform = function applyStackedTransform() {
     const xfm = `translate(${stackZoom.offsetX}px, ${stackZoom.offsetY}px) scale(${stackZoom.scale})`;
     _applyTransformCSS(xfm);
     window.drawLayerGrid();
+    window.drawRiverLines?.();       // screen-space like the grid: redrawn at the new zoom
 
     // Schedule city re-render only when needed
     if (window.appState?.osmCityData && _activeLayers.has('CityOverlay') && typeof window.renderCityOverlay === 'function') {

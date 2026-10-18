@@ -14,6 +14,10 @@
           <option value="miller">Miller Cylindrical</option>
           <option value="gall">Gall Stereographic</option>
         </optgroup>
+        <optgroup label="Azimuthal and conic">
+          <option value="laea">Lambert azimuthal (equal-area)</option>
+          <option value="lcc">Lambert conic (conformal)</option>
+        </optgroup>
         <optgroup label="Pseudocylindrical">
           <option value="sinusoidal">Sinusoidal (equal-area)</option>
         </optgroup>

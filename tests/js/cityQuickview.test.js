@@ -3,7 +3,7 @@
  * (app/client/static/js/modules/export/city-quickview.js).
  */
 import { describe, it, expect } from 'vitest';
-import { buildingPrisms, demGroundMm, MIN_HEIGHT_MM } from '../../app/client/static/js/modules/export/city-quickview.js';
+import { buildingPrisms, demGroundMm, roofHeightM, roofKind, MIN_HEIGHT_MM } from '../../app/client/static/js/modules/export/city-quickview.js';
 
 // A square 2 x 2 px footprint; lon → x, lat → y directly.
 const square = (h) => ({
@@ -47,5 +47,65 @@ describe('demGroundMm', () => {
         const z = demGroundMm(dem, 4, 2, { z_mm_per_m: 0.01, elev_min_m: 100, base_mm: 5 });
         expect(z(0, 0)).toBeCloseTo(5);
         expect(z(3, 1)).toBeCloseTo(7);
+    });
+});
+
+describe('pitched roofs', () => {
+    // 4 x 2 px footprint (long axis x), 20 m tall at 0.1 mm/m: top = 2 mm above flat ground.
+    const house = (props) => ({
+        properties: { height_m: 20, ...props },
+        geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 2], [0, 2], [0, 0]]] },
+    });
+    const flat = () => opts(() => 0);
+    const maxY = (g) => Math.max(...ys(g));
+
+    it('maps roof:shape to a kind and defaults the roof height to 30 %, capped at 50 %', () => {
+        expect(roofKind({ 'roof:shape': 'Gabled' })).toBe('gable');
+        expect(roofKind({ 'roof:shape': 'pyramidal' })).toBe('hip');
+        expect(roofKind({ 'roof:shape': 'flat' })).toBeNull();
+        expect(roofKind({})).toBeNull();
+        expect(roofHeightM({}, 20)).toBeCloseTo(6);
+        expect(roofHeightM({ 'roof:height': '4 m' }, 20)).toBe(4);
+        expect(roofHeightM({ 'roof:height': '40' }, 20)).toBe(10);
+    });
+
+    it('keeps flat, missing and unknown shapes as the flat prism, byte for byte', () => {
+        const base = buildingPrisms([house({})], flat());
+        for (const shape of ['flat', 'unknown', 'dome']) {
+            const g = buildingPrisms([house({ 'roof:shape': shape, 'roof:height': 5 })], flat());
+            expect(Array.from(g.positions)).toEqual(Array.from(base.positions));
+            expect(Array.from(g.indices)).toEqual(Array.from(base.indices));
+        }
+    });
+
+    it('draws a gable: eave 0.6 mm below the top, ridge at the top along the long axis', () => {
+        const g = buildingPrisms([house({ 'roof:shape': 'gabled' })], flat());
+        expect(g.count).toBe(1);
+        expect(maxY(g)).toBeCloseTo(2);                    // the ridge reaches the flat top
+        const roofYs = new Set(ys(g).map((y) => y.toFixed(3)));
+        expect(roofYs.has('1.400')).toBe(true);            // eave = 2 - 6 m x 0.1
+        // ridge vertices sit mid-width (y = 1 px x 2 mm) at the top
+        const p = g.positions;
+        const ridge = [];
+        for (let i = 0; i < p.length; i += 3) if (Math.abs(p[i + 1] - 2) < 1e-6) ridge.push(p[i + 2]);
+        expect(ridge.length).toBeGreaterThan(0);
+        for (const z of ridge) expect(z).toBeCloseTo(2);
+        for (const idx of g.indices) expect(idx).toBeLessThan(p.length / 3);
+    });
+
+    it('draws a hip as a pyramid with its apex at the top', () => {
+        const g = buildingPrisms([house({ 'roof:shape': 'hipped', 'roof:height': '4' })], flat());
+        expect(maxY(g)).toBeCloseTo(2);
+        const apex = [];
+        for (let i = 0; i < g.positions.length; i += 3) {
+            if (Math.abs(g.positions[i + 1] - 2) < 1e-6) apex.push([g.positions[i], g.positions[i + 2]]);
+        }
+        expect(apex).toEqual([[4, 2]]);                    // centroid (2, 1) px x 2 mm
+    });
+
+    it('leaves a roof under 0.2 mm flat', () => {
+        const g = buildingPrisms([house({ 'roof:shape': 'gabled', 'roof:height': '1' })], flat());   // 0.1 mm
+        const base = buildingPrisms([house({})], flat());
+        expect(g.positions.length).toBe(base.positions.length);
     });
 });

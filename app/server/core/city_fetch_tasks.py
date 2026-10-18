@@ -87,7 +87,7 @@ def get_task(task_id: str) -> CityFetchTask | None:
 
 def start_city_fetch(north: float, south: float, east: float, west: float,
                      layers: list[str], simplify_tolerance: float, min_area: float,
-                     diagonal_km: float | None = None) -> CityFetchTask:
+                     diagonal_km: float | None = None, roof_shapes="auto") -> CityFetchTask:
     """Start (or join) a background fetch; returns its task.
 
     A request identical to one still running joins it instead of starting a
@@ -99,7 +99,8 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
     _cleanup()
     params = {"north": north, "south": south, "east": east, "west": west,
               "layers": list(layers), "simplify_tolerance": simplify_tolerance,
-              "min_area": min_area, "diagonal_km": diagonal_km}
+              "min_area": min_area, "diagonal_km": diagonal_km,
+              "roof_shapes": city_data.roof_shapes_mode(roof_shapes)}
     key = _params_key(params)
     with _lock:
         for task in _tasks.values():
@@ -115,6 +116,9 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
         busy = [n for n, s in task.layer_states.items() if s == "fetching"]
         task.message = f"Fetching {', '.join(busy)}…" if busy else task.message
 
+    def roof_progress(done: int, total: int) -> None:
+        task.message = f"Classifying roofs {done:,} of {total:,}…"
+
     def on_mirror(endpoint: str) -> None:
         task.mirror = endpoint
 
@@ -123,7 +127,8 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
             result = city_data.get_city_layers(
                 north, south, east, west, layers, simplify_tolerance, min_area,
                 progress=progress, on_mirror=on_mirror,
-                should_cancel=task.cancel_event.is_set)
+                should_cancel=task.cancel_event.is_set, roof_shapes=roof_shapes,
+                roof_progress=roof_progress)
         except FetchCancelled:
             _finish(task, "cancelled", "Cancelled")
             return

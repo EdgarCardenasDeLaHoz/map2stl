@@ -11,6 +11,9 @@ Projections available:
 - equidistant: Equidistant Cylindrical (preserves distances along meridians)
 - lambert: Lambert Cylindrical Equal-Area (preserves area)
 - sinusoidal: Sinusoidal projection (equal-area, good for continents)
+- laea: Lambert Azimuthal Equal-Area (spherical), centred on the bbox centre
+- lcc: Lambert Conformal Conic (spherical), standard parallels at 1/6 and 5/6 of the
+  latitude span; falls back to ``equidistant`` when the bbox straddles the equator
 
 Size rule (user decision 2026-10-13): a requested ``dim`` is the longest side of
 the grid *after* projection. :func:`source_dim` is the one place that turns ``dim``
@@ -25,11 +28,13 @@ from typing import Literal
 
 import cv2
 import numpy as np
+from scipy import ndimage
 
 from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ, m_per_deg_lon
 
 ProjectionType = Literal['none', 'cosine', 'mercator',
-                         'equidistant', 'lambert', 'sinusoidal']
+                         'equidistant', 'lambert', 'sinusoidal',
+                         'miller', 'gall', 'laea', 'lcc']
 
 # Earth's radius in meters
 EARTH_RADIUS = 6_371_000
@@ -58,6 +63,90 @@ def _clip_nan_borders(arr: np.ndarray, nan_mask: np.ndarray) -> np.ndarray:
         return arr
 
     return arr
+
+
+def wing_mask(grid: np.ndarray) -> np.ndarray:
+    """Non-finite cells in connected regions that touch the grid border (the "wings").
+
+    sinusoidal / laea / lcc return a full rectangle whose cells outside the bbox are
+    NaN, curved and joined to the border. A NaN void wholly inside the grid (a real
+    DEM hole) is not a wing. Connectivity is 4-neighbour.
+    """
+    bad = ~np.isfinite(np.asarray(grid))
+    if not bad.any():
+        return bad
+    labels, n = ndimage.label(bad)
+    edge = np.unique(np.concatenate(
+        [labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
+    edge = edge[edge > 0]
+    if edge.size == 0:
+        return np.zeros_like(bad)
+    return np.isin(labels, edge)
+
+
+def _max_rect_hist(free: np.ndarray) -> tuple[int, int, int, int]:
+    """Largest all-True rectangle ``(r0, r1, c0, c1)`` (half-open), histogram + stack, O(H*W)."""
+    h, w = free.shape
+    heights = [0] * w
+    best, area = (0, 0, 0, 0), 0
+    for r in range(h):
+        row = free[r].tolist()
+        heights = [hh + 1 if ok else 0 for hh, ok in zip(heights, row, strict=True)]
+        stack: list[int] = []
+        for c in range(w + 1):
+            cur = heights[c] if c < w else 0
+            while stack and heights[stack[-1]] >= cur:
+                top = stack.pop()
+                left = stack[-1] + 1 if stack else 0
+                a = heights[top] * (c - left)
+                if a > area:
+                    area, best = a, (r + 1 - heights[top], r + 1, left, c)
+            stack.append(c)
+    return best
+
+
+def largest_valid_rect(grid: np.ndarray, max_cells: int = 512) -> tuple[int, int, int, int]:
+    """Largest axis-aligned rectangle ``(r0, r1, c0, c1)`` (half-open) free of wing cells.
+
+    Wing cells are :func:`wing_mask`; a grid without any returns the full extent, so
+    projections that fill their rectangle are unchanged. The search runs on a grid
+    coarsened to at most ``max_cells`` per side (a block is a wing if any cell is), then
+    the rectangle grows back one row/column at a time while the new line holds no wing
+    cell, so the result is wing-free at full resolution and costs O(max_cells^2).
+    """
+    h, w = grid.shape[:2]
+    wing = wing_mask(grid[..., 0] if grid.ndim == 3 else grid)
+    if not wing.any():
+        return 0, h, 0, w
+    k = max(1, -(-max(h, w) // max_cells))
+    if k > 1:
+        ph, pw = -(-h // k) * k, -(-w // k) * k
+        padded = np.ones((ph, pw), dtype=bool)   # padding counts as wing: stays outside
+        padded[:h, :w] = wing
+        coarse = padded.reshape(ph // k, k, pw // k, k).any(axis=(1, 3))
+    else:
+        coarse = wing
+    r0, r1, c0, c1 = _max_rect_hist(~coarse)
+    r0, r1, c0, c1 = r0 * k, min(r1 * k, h), c0 * k, min(c1 * k, w)
+    if r1 <= r0 or c1 <= c0:
+        return 0, h, 0, w    # all wing: leave the grid to the caller's own fallback
+    if k > 1:
+        grew = True
+        while grew:
+            grew = False
+            if r0 > 0 and not wing[r0 - 1, c0:c1].any():
+                r0 -= 1
+                grew = True
+            if r1 < h and not wing[r1, c0:c1].any():
+                r1 += 1
+                grew = True
+            if c0 > 0 and not wing[r0:r1, c0 - 1].any():
+                c0 -= 1
+                grew = True
+            if c1 < w and not wing[r0:r1, c1].any():
+                c1 += 1
+                grew = True
+    return r0, r1, c0, c1
 
 
 def get_projection_info() -> dict:
@@ -110,6 +199,21 @@ def get_projection_info() -> dict:
             'description': 'Compromise cylindrical. Moderate shape and area distortion.',
             'preserves': 'Compromise (no property exactly)',
             'best_for': 'General world maps, balanced distortion'
+        },
+        'laea': {
+            'name': 'Lambert Azimuthal Equal-Area',
+            'description': 'Azimuthal equal-area, centred on the region. No shear: meridians '
+                           'lean only gradually away from the centre.',
+            'preserves': 'Area',
+            'best_for': 'Continents and large regions (the EU standard, EPSG:3035)'
+        },
+        'lcc': {
+            'name': 'Lambert Conformal Conic',
+            'description': 'Conic conformal, standard parallels at 1/6 and 5/6 of the latitude '
+                           'span. Preserves local shapes. Falls back to Equidistant Cylindrical '
+                           'when the region straddles the equator.',
+            'preserves': 'Angles and local shapes',
+            'best_for': 'Mid-latitude regions wider than tall'
         }
     }
 
@@ -190,6 +294,11 @@ def expected_aspect_ratio(bbox: tuple[float, float, float, float],
         proj_height = abs(y_n - y_s)
         proj_width = np.radians(east - west) * _X_SCALE[projection]
         return proj_width / proj_height if proj_height else 1.0
+    if projection in _CONIC_AZIMUTHAL:
+        if projection == 'lcc' and lcc_parameters(bbox) is None:
+            return expected_aspect_ratio(bbox, 'equidistant', input_shape)
+        x0, x1, y0, y1 = _conic_azimuthal_model(tuple(bbox), projection).extents
+        return (x1 - x0) / (y1 - y0) if y1 > y0 else 1.0
     raise ValueError(f"Unknown projection: {projection}")
 
 
@@ -336,10 +445,10 @@ def verify_layer_alignment(shapes: dict, bbox: tuple[float, float, float, float]
     lambert/equidistant/miller/gall). Skipped for the absolute check:
     'none'/'cosine' (their true aspect ratio depends on each layer's own
     input pixel shape — see expected_aspect_ratio's docstring) and
-    'sinusoidal' (clip_nans trims its non-rectangular "wings" to a
-    data-dependent-looking but actually bbox-deterministic bounding box that
-    expected_aspect_ratio does not model exactly). The cross-layer
-    comparison alone is sufficient and correct for all three.
+    'sinusoidal', 'laea' and 'lcc' (clip_nans trims their non-rectangular
+    outlines to a bounding box that expected_aspect_ratio does not model
+    exactly). The cross-layer comparison alone is sufficient and correct for
+    all of them.
 
     Intended as a cheap runtime/test guard, not a hot-path check — call it
     where multiple layers for the same bbox/projection are assembled (e.g.
@@ -362,7 +471,7 @@ def verify_layer_alignment(shapes: dict, bbox: tuple[float, float, float, float]
                 f"bbox={bbox} (shapes={shapes})"
             )
 
-    if not maintain_dimensions and projection not in ('none', 'cosine', 'sinusoidal'):
+    if not maintain_dimensions and projection not in ('none', 'cosine', 'sinusoidal', 'laea', 'lcc'):
         expected = expected_aspect_ratio(bbox, projection)
         for name, ratio in ratios.items():
             if not np.isclose(ratio, expected, rtol=rtol):
@@ -393,7 +502,8 @@ def project_coordinates(
     bbox : tuple
         Bounding box as (north, south, east, west) in degrees
     projection : str
-        Projection type: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal'
+        Projection type: 'none', 'cosine', 'mercator', 'equidistant', 'lambert',
+        'sinusoidal', 'miller', 'gall', 'laea', 'lcc'
     maintain_dimensions : bool
         If True, output has same dimensions as input (uses interpolation).
         If False, dimensions may change based on projection.
@@ -475,6 +585,11 @@ def project_coordinates(
         result, metadata = _project_sinusoidal(
             mat, bbox, maintain_dimensions, fill_value, metadata, order=order,
             out_shape=out_shape)
+
+    elif projection in _CONIC_AZIMUTHAL:
+        result, metadata = _project_conic_azimuthal(
+            mat, bbox, projection, maintain_dimensions, fill_value, metadata,
+            order=order, out_shape=out_shape)
 
     elif projection == 'miller':
         result, metadata = _project_cylindrical_y(
@@ -1030,6 +1145,191 @@ def _project_sinusoidal(
     metadata['output_shape'] = (out_m, out_n)
     metadata['center_lon'] = center_lon
 
+    return result, metadata
+
+
+# ---------------------------------------------------------------------------
+# Azimuthal and conic projections (laea, lcc)
+# ---------------------------------------------------------------------------
+# Neither has a rectangular outline, so (like sinusoidal) the output raster is the
+# bounding rectangle of the projected bbox and pixels outside the bbox are filled.
+# Pixel (row i, col j) of an (m, n) output sits at
+#     x = x0 + j / (n - 1) * (x1 - x0),   y = y1 - i / (m - 1) * (y1 - y0)
+# on the unit sphere, north up. graticule.js (geoAtFrac, projectedFrac) mirrors this.
+
+_CONIC_AZIMUTHAL = ('laea', 'lcc')
+#: Boundary samples per bbox edge when measuring the projected extent.
+_EXTENT_SAMPLES = 1001
+_MAX_LAT = 89.9
+
+
+def lcc_parameters(bbox: tuple[float, float, float, float]) -> tuple[float, float] | None:
+    """Standard parallels ``(lat1, lat2)`` in degrees for the Lambert Conformal Conic:
+    south + span/6 and north - span/6. None when the cone is undefined, in which case
+    ``lcc`` behaves like ``equidistant`` (same shape, same sampling): the bbox straddles
+    the equator (south < 0 < north, the cone would flip hemisphere) or the two parallels
+    coincide within 1e-6 degrees.
+    """
+    north, south = float(bbox[0]), float(bbox[1])
+    if south < 0.0 < north:
+        return None
+    span = north - south
+    lat1, lat2 = south + span / 6.0, north - span / 6.0
+    if abs(lat2 - lat1) < 1e-6:
+        return None
+    return (max(-_MAX_LAT, min(_MAX_LAT, lat1)),
+            max(-_MAX_LAT, min(_MAX_LAT, lat2)))
+
+
+def _tan_half(phi):
+    return np.tan(np.pi / 4 + phi / 2)
+
+
+class _ConicAzimuthalModel:
+    """Forward/inverse of a spherical LAEA or LCC (unit sphere) plus the projected
+    extent ``(x0, x1, y0, y1)`` of the bbox. Angles in degrees at the interface."""
+
+    def __init__(self, bbox: tuple[float, float, float, float], projection: str):
+        north, south, east, west = (float(v) for v in bbox)
+        self.projection = projection
+        self.lat0 = np.radians((north + south) / 2.0)
+        self.lon0 = np.radians((east + west) / 2.0)
+        if projection == 'laea':
+            self.forward, self.inverse = self._laea_forward, self._laea_inverse
+        else:
+            lat1, lat2 = lcc_parameters(bbox)
+            p1, p2 = np.radians(lat1), np.radians(lat2)
+            self.n = np.log(np.cos(p1) / np.cos(p2)) / np.log(_tan_half(p2) / _tan_half(p1))
+            self.F = np.cos(p1) * _tan_half(p1) ** self.n / self.n
+            self.rho0 = self.F / _tan_half(self.lat0) ** self.n
+            self.forward, self.inverse = self._lcc_forward, self._lcc_inverse
+        # Extent from the bbox boundary (the extremes of both projections lie on it).
+        ts = np.linspace(0.0, 1.0, _EXTENT_SAMPLES)
+        lats = np.concatenate([south + ts * (north - south), south + ts * (north - south),
+                               np.full_like(ts, north), np.full_like(ts, south)])
+        lons = np.concatenate([np.full_like(ts, west), np.full_like(ts, east),
+                               west + ts * (east - west), west + ts * (east - west)])
+        x, y = self.forward(lats, lons)
+        self.extents = (float(x.min()), float(x.max()), float(y.min()), float(y.max()))
+
+    # -- LAEA (Snyder 24-2 .. 24-5, sphere) ------------------------------------
+    def _laea_forward(self, lat, lon):
+        phi, dl = np.radians(lat), np.radians(lon) - self.lon0
+        s0, c0 = np.sin(self.lat0), np.cos(self.lat0)
+        k = np.sqrt(2.0 / (1.0 + s0 * np.sin(phi) + c0 * np.cos(phi) * np.cos(dl)))
+        return (k * np.cos(phi) * np.sin(dl),
+                k * (c0 * np.sin(phi) - s0 * np.cos(phi) * np.cos(dl)))
+
+    def _laea_inverse(self, x, y):
+        """(lat, lon) in degrees; NaN outside the sphere (rho > 2)."""
+        rho = np.hypot(x, y)
+        ok = rho <= 2.0
+        c = 2.0 * np.arcsin(np.where(ok, rho / 2.0, 0.0))
+        s0, c0 = np.sin(self.lat0), np.cos(self.lat0)
+        safe = np.where(rho > 1e-15, rho, 1.0)
+        sin_phi = np.cos(c) * s0 + np.where(rho > 1e-15, y * np.sin(c) * c0 / safe, 0.0)
+        lat = np.arcsin(np.clip(sin_phi, -1.0, 1.0))
+        lon = self.lon0 + np.arctan2(x * np.sin(c),
+                                     rho * c0 * np.cos(c) - y * s0 * np.sin(c))
+        lat, lon = np.degrees(lat), np.degrees(lon)
+        return np.where(ok, lat, np.nan), np.where(ok, lon, np.nan)
+
+    # -- LCC (Snyder 15-1 .. 15-11, sphere) --------------------------------------
+    def _lcc_forward(self, lat, lon):
+        phi = np.radians(np.clip(lat, -_MAX_LAT, _MAX_LAT))
+        rho = self.F / _tan_half(phi) ** self.n
+        theta = self.n * (np.radians(lon) - self.lon0)
+        return rho * np.sin(theta), self.rho0 - rho * np.cos(theta)
+
+    def _lcc_inverse(self, x, y):
+        sgn = np.sign(self.n)
+        dy = self.rho0 - y
+        rho = sgn * np.hypot(x, dy)
+        theta = np.arctan2(sgn * x, sgn * dy)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            lat = 2.0 * np.arctan((self.F / rho) ** (1.0 / self.n)) - np.pi / 2
+        lon = self.lon0 + theta / self.n
+        return np.degrees(lat), np.degrees(lon)
+
+
+_MODEL_CACHE: dict = {}
+
+
+def _conic_azimuthal_model(bbox: tuple[float, float, float, float],
+                           projection: str) -> _ConicAzimuthalModel:
+    key = (tuple(float(v) for v in bbox), projection)
+    model = _MODEL_CACHE.get(key)
+    if model is None:
+        if len(_MODEL_CACHE) > 64:
+            _MODEL_CACHE.clear()
+        model = _MODEL_CACHE[key] = _ConicAzimuthalModel(key[0], projection)
+    return model
+
+
+def projected_fraction(bbox: tuple[float, float, float, float], projection: str,
+                       lat, lon):
+    """Where ``(lat, lon)`` lands in the ``laea`` / ``lcc`` raster, as fractions
+    ``(fx, fy)`` of its width and height (x 0 = west edge, y 0 = north edge)."""
+    model = _conic_azimuthal_model(tuple(bbox), projection)
+    x0, x1, y0, y1 = model.extents
+    x, y = model.forward(np.asarray(lat, dtype=np.float64), np.asarray(lon, dtype=np.float64))
+    return (x - x0) / (x1 - x0), (y1 - y) / (y1 - y0)
+
+
+def _project_conic_azimuthal(
+    mat: np.ndarray,
+    bbox: tuple[float, float, float, float],
+    projection: str,
+    maintain_dimensions: bool,
+    fill_value: float,
+    metadata: dict,
+    order: int = 1,
+    out_shape: tuple[int, int] | None = None,
+) -> tuple[np.ndarray, dict]:
+    """Lambert Azimuthal Equal-Area (``laea``) or Lambert Conformal Conic (``lcc``).
+
+    Spherical formulas; the centre (lat0, lon0) is the bbox centre, so it works anywhere.
+    Each output pixel is inverse-projected to lat/lon and the input sampled there
+    (bilinear, or nearest for ``order=0``); pixels outside the bbox get ``fill_value``.
+    ``lcc`` falls back to ``equidistant`` when :func:`lcc_parameters` is None.
+    """
+    if projection == 'lcc' and lcc_parameters(bbox) is None:
+        metadata['lcc_fallback'] = 'equidistant'
+        return _project_equidistant(mat, bbox, maintain_dimensions, fill_value,
+                                    metadata, order=order, out_shape=out_shape)
+    north, south, east, west = bbox
+    m, n = mat.shape
+    model = _conic_azimuthal_model(tuple(bbox), projection)
+    x0, x1, y0, y1 = model.extents
+
+    if maintain_dimensions:
+        out_m, out_n = m, n
+    else:
+        aspect = (x1 - x0) / (y1 - y0) if y1 > y0 else 1.0
+        out_m = m
+        out_n = max(1, int(round(m * aspect)))
+        if out_shape:
+            out_m, out_n = out_shape
+
+    xs = np.linspace(x0, x1, out_n) if out_n > 1 else np.array([(x0 + x1) / 2])
+    ys = np.linspace(y1, y0, out_m) if out_m > 1 else np.array([(y0 + y1) / 2])
+    lat, lon = model.inverse(xs[None, :], ys[:, None])      # (out_m, out_n)
+
+    eps_lat, eps_lon = 1e-6 * (north - south), 1e-6 * (east - west)
+    with np.errstate(invalid='ignore'):
+        valid = ((lat >= south - eps_lat) & (lat <= north + eps_lat)
+                 & (lon >= west - eps_lon) & (lon <= east + eps_lon))   # NaN is False
+    row_px = np.clip((north - np.where(valid, lat, north)) / (north - south) * (m - 1), 0, m - 1)
+    col_px = np.clip((np.where(valid, lon, west) - west) / (east - west) * (n - 1), 0, n - 1)
+
+    result = ndimage.map_coordinates(np.asarray(mat, dtype=np.float64), [row_px, col_px],
+                                     order=order, mode='nearest')
+    result[~valid] = fill_value
+
+    metadata['output_shape'] = (out_m, out_n)
+    metadata['projected_extent'] = model.extents
+    metadata['center_lat'] = float(np.degrees(model.lat0))
+    metadata['center_lon'] = float(np.degrees(model.lon0))
     return result, metadata
 
 

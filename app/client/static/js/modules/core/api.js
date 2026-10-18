@@ -257,6 +257,9 @@ window.api = (() => {
         /** GET /api/terrain/hydrology?{params} */
         hydrology: (params, signal) => _fetch(`/api/terrain/hydrology?${params}`, signal ? { signal } : {}),
 
+        /** GET /api/terrain/river-lines?{params} — simplified HydroRIVERS polylines (view only) */
+        riverLines: (params, signal) => _fetch(`/api/terrain/river-lines?${params}`, signal ? { signal } : {}),
+
         /** GET /api/terrain/borders?{params} — country/state border grid (view only) */
         borders: (params, signal) => _fetch(`/api/terrain/borders?${params}`, signal ? { signal } : {}),
 
@@ -314,6 +317,9 @@ window.api = (() => {
 
         /** POST /api/cities/cancel/{id} */
         cancel: (taskId) => _fetch(`/api/cities/cancel/${encodeURIComponent(taskId)}`, { method: 'POST' }),
+
+        /** GET /api/cities/survey-sources?{north,south,east,west} → {sources: [{name, label, available, note}]} */
+        surveySources: (params) => _fetch(`/api/cities/survey-sources?${params}`),
 
         /** POST /api/cities/landmarks {buildings, tallest_n, region} → {landmarks, survey_sources, overrides, ids_missing} */
         landmarks: (body) => _fetch('/api/cities/landmarks', _json(body)),

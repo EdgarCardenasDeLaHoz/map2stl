@@ -92,6 +92,8 @@ def _default_region_settings() -> dict:
             "layers": ["buildings", "roads", "waterways"],
             "simplify_tolerance": 0.5,
             "min_area": 5.0,
+            "roof_shapes": "auto",   # "auto" classifies untagged roofs, "off" leaves them flat
+            "reference_landmarks": False,   # the Alhambra reference model (F-DETAIL D4)
             "building_scale": 0.5,
             "road_depression_m": 0.0,
             "water_depression_m": -2.0,

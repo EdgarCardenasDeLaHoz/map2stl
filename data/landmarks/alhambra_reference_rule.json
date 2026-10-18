@@ -1,0 +1,901 @@
+{
+ "source": "Alhambra by mamutazos, Thingiverse thing 5141408, CC BY-SA (https://www.thingiverse.com/thing:5141408)",
+ "licence": "CC BY-SA",
+ "rule": "exp4_merge/rule_table.csv: swap where the Thingiverse model covers >=90% of the footprint, is >=1 m tall, and its median |delta| to lidar is lower than OSM's; flag (not delete) lidar<2 m and OSM>=5 m",
+ "z_scale_m_per_mm": 3.6828684293392753,
+ "units": [
+  {
+   "key": "relation/2640220",
+   "osm_id": "relation/2640220",
+   "name": "Palacio de Carlos V",
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 2,
+     "cells": 3495,
+     "ours_m": 12.25,
+     "thing_m": 16.66,
+     "lidar_m": 18.41,
+     "median_abs_ours_m": 6.93,
+     "median_abs_thing_m": 1.66
+    },
+    {
+     "label": 29,
+     "cells": 336,
+     "ours_m": 15.41,
+     "thing_m": 2.56,
+     "lidar_m": 8.64,
+     "median_abs_ours_m": 6.8,
+     "median_abs_thing_m": 4.37
+    },
+    {
+     "label": 58,
+     "cells": 244,
+     "ours_m": 14.33,
+     "thing_m": 13.12,
+     "lidar_m": 11.86,
+     "median_abs_ours_m": 3.62,
+     "median_abs_thing_m": 2.26
+    },
+    {
+     "label": 260,
+     "cells": 4,
+     "ours_m": 10.38,
+     "thing_m": 6.72,
+     "lidar_m": 5.45,
+     "median_abs_ours_m": 4.91,
+     "median_abs_thing_m": 1.2
+    },
+    {
+     "label": 290,
+     "cells": 8,
+     "ours_m": 10.37,
+     "thing_m": 12.64,
+     "lidar_m": 12.05,
+     "median_abs_ours_m": 2.48,
+     "median_abs_thing_m": 0.86
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "way/26935518",
+   "osm_id": "way/26935518",
+   "name": "Alcazaba",
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 3,
+     "cells": 2399,
+     "ours_m": 11.91,
+     "thing_m": 3.94,
+     "lidar_m": 0.22,
+     "median_abs_ours_m": 11.18,
+     "median_abs_thing_m": 3.18
+    }
+   ],
+   "flag_lower": true
+  },
+  {
+   "key": "ref:35",
+   "osm_id": null,
+   "name": "Iglesia de Santa María de la Alhambra",
+   "layer": "churches",
+   "labels": [
+    {
+     "label": 35,
+     "cells": 9,
+     "ours_m": 0.0,
+     "thing_m": 9.46,
+     "lidar_m": 15.51,
+     "median_abs_ours_m": 14.32,
+     "median_abs_thing_m": 11.3
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5892308,
+      37.1764688
+     ],
+     [
+      -3.5892167,
+      37.1765221
+     ],
+     [
+      -3.5890962,
+      37.1765019
+     ],
+     [
+      -3.5891142,
+      37.1764328
+     ],
+     [
+      -3.5890323,
+      37.1764189
+     ],
+     [
+      -3.5890583,
+      37.1763195
+     ],
+     [
+      -3.5891209,
+      37.1763301
+     ],
+     [
+      -3.5891342,
+      37.1762795
+     ],
+     [
+      -3.5892748,
+      37.1763032
+     ],
+     [
+      -3.5892611,
+      37.176355
+     ],
+     [
+      -3.5892991,
+      37.1763613
+     ],
+     [
+      -3.5893018,
+      37.1763511
+     ],
+     [
+      -3.5893246,
+      37.1763549
+     ],
+     [
+      -3.5893218,
+      37.1763661
+     ],
+     [
+      -3.5893651,
+      37.1763735
+     ],
+     [
+      -3.5893676,
+      37.1763638
+     ],
+     [
+      -3.5893873,
+      37.1763671
+     ],
+     [
+      -3.5893846,
+      37.1763776
+     ],
+     [
+      -3.5894572,
+      37.1763898
+     ],
+     [
+      -3.5894418,
+      37.1764482
+     ],
+     [
+      -3.5894276,
+      37.1765024
+     ],
+     [
+      -3.5893551,
+      37.1764902
+     ],
+     [
+      -3.5893517,
+      37.1765032
+     ],
+     [
+      -3.589334,
+      37.1765003
+     ],
+     [
+      -3.5893372,
+      37.1764874
+     ],
+     [
+      -3.5892919,
+      37.1764799
+     ],
+     [
+      -3.5892888,
+      37.1764918
+     ],
+     [
+      -3.5892723,
+      37.176489
+     ],
+     [
+      -3.5892755,
+      37.1764763
+     ],
+     [
+      -3.5892308,
+      37.1764688
+     ]
+    ]
+   ],
+   "footprint_source": "OSM churches layer, 'Iglesia de Santa María de la Alhambra'",
+   "centroid": [
+    -3.589324829910217,
+    37.17641851202688
+   ]
+  },
+  {
+   "key": "way/117369758",
+   "osm_id": "way/117369758",
+   "name": "Iglesia de Santa María de la Alhambra",
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 37,
+     "cells": 289,
+     "ours_m": 6.15,
+     "thing_m": 22.63,
+     "lidar_m": 17.62,
+     "median_abs_ours_m": 10.68,
+     "median_abs_thing_m": 5.3
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "way/117358140",
+   "osm_id": "way/117358140",
+   "name": null,
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 52,
+     "cells": 274,
+     "ours_m": 10.54,
+     "thing_m": 3.64,
+     "lidar_m": 4.77,
+     "median_abs_ours_m": 6.21,
+     "median_abs_thing_m": 2.09
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "way/1476959785",
+   "osm_id": "way/1476959785",
+   "name": null,
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 69,
+     "cells": 197,
+     "ours_m": 13.33,
+     "thing_m": 6.85,
+     "lidar_m": 4.54,
+     "median_abs_ours_m": 6.89,
+     "median_abs_thing_m": 2.38
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "relation/20204471",
+   "osm_id": "relation/20204471",
+   "name": null,
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 88,
+     "cells": 114,
+     "ours_m": 13.74,
+     "thing_m": 8.83,
+     "lidar_m": 6.56,
+     "median_abs_ours_m": 6.13,
+     "median_abs_thing_m": 2.42
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "ref:89",
+   "osm_id": null,
+   "name": "Torre de la Vela",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 89,
+     "cells": 78,
+     "ours_m": 11.83,
+     "thing_m": 25.78,
+     "lidar_m": 24.46,
+     "median_abs_ours_m": 13.53,
+     "median_abs_thing_m": 1.68
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5923965,
+      37.1770941
+     ],
+     [
+      -3.5922256,
+      37.177103
+     ],
+     [
+      -3.5922199,
+      37.1770335
+     ],
+     [
+      -3.592215,
+      37.1769736
+     ],
+     [
+      -3.5922448,
+      37.176972
+     ],
+     [
+      -3.5923858,
+      37.1769647
+     ],
+     [
+      -3.5923965,
+      37.1770941
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre de la Vela'",
+   "centroid": [
+    -3.5923052578059544,
+    37.17703386201821
+   ]
+  },
+  {
+   "key": "way/117369769",
+   "osm_id": "way/117369769",
+   "name": null,
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 102,
+     "cells": 124,
+     "ours_m": 10.35,
+     "thing_m": 8.52,
+     "lidar_m": 7.03,
+     "median_abs_ours_m": 4.18,
+     "median_abs_thing_m": 1.31
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "way/197859974",
+   "osm_id": "way/197859974",
+   "name": "Sala de los Reyes",
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 104,
+     "cells": 142,
+     "ours_m": 12.24,
+     "thing_m": 8.25,
+     "lidar_m": 10.28,
+     "median_abs_ours_m": 1.95,
+     "median_abs_thing_m": 1.72
+    }
+   ],
+   "flag_lower": false
+  },
+  {
+   "key": "ref:127",
+   "osm_id": null,
+   "name": "Torre Quebrada",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 127,
+     "cells": 43,
+     "ours_m": 10.71,
+     "thing_m": 19.21,
+     "lidar_m": 20.14,
+     "median_abs_ours_m": 9.75,
+     "median_abs_thing_m": 3.73
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.591252,
+      37.1772227
+     ],
+     [
+      -3.5912024,
+      37.1772199
+     ],
+     [
+      -3.5912151,
+      37.177076
+     ],
+     [
+      -3.5912605,
+      37.1770785
+     ],
+     [
+      -3.5913178,
+      37.1770817
+     ],
+     [
+      -3.5913052,
+      37.1772257
+     ],
+     [
+      -3.591252,
+      37.1772227
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre Quebrada'",
+   "centroid": [
+    -3.591259998200897,
+    37.17715070399912
+   ]
+  },
+  {
+   "key": "ref:129",
+   "osm_id": null,
+   "name": "Torre del Cubo",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 129,
+     "cells": 27,
+     "ours_m": 12.44,
+     "thing_m": 8.27,
+     "lidar_m": 9.93,
+     "median_abs_ours_m": 7.05,
+     "median_abs_thing_m": 2.75
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5911127,
+      37.1775632
+     ],
+     [
+      -3.5910908,
+      37.1775538
+     ],
+     [
+      -3.5910717,
+      37.177534
+     ],
+     [
+      -3.5910697,
+      37.1775054
+     ],
+     [
+      -3.5910728,
+      37.1774608
+     ],
+     [
+      -3.5911329,
+      37.1774587
+     ],
+     [
+      -3.5911538,
+      37.1774592
+     ],
+     [
+      -3.5912201,
+      37.1774608
+     ],
+     [
+      -3.5912201,
+      37.1775071
+     ],
+     [
+      -3.5912201,
+      37.1775273
+     ],
+     [
+      -3.5912077,
+      37.1775456
+     ],
+     [
+      -3.591192,
+      37.1775581
+     ],
+     [
+      -3.5911655,
+      37.1775673
+     ],
+     [
+      -3.5911127,
+      37.1775632
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre del Cubo'",
+   "centroid": [
+    -3.5911370571017622,
+    37.17755104952305
+   ]
+  },
+  {
+   "key": "ref:142",
+   "osm_id": null,
+   "name": "Torre del Homenaje",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 142,
+     "cells": 60,
+     "ours_m": 11.05,
+     "thing_m": 27.21,
+     "lidar_m": 22.4,
+     "median_abs_ours_m": 11.49,
+     "median_abs_thing_m": 5.16
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5912557,
+      37.1773348
+     ],
+     [
+      -3.5911834,
+      37.1773348
+     ],
+     [
+      -3.5911833,
+      37.1774415
+     ],
+     [
+      -3.5913058,
+      37.1774416
+     ],
+     [
+      -3.5913058,
+      37.1773645
+     ],
+     [
+      -3.5913058,
+      37.1773466
+     ],
+     [
+      -3.5913058,
+      37.1773348
+     ],
+     [
+      -3.5912557,
+      37.1773348
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre del Homenaje'",
+   "centroid": [
+    -3.5912427007606245,
+    37.17738918715763
+   ]
+  },
+  {
+   "key": "way/196485671",
+   "osm_id": "way/196485671",
+   "name": "Torre de los Abencerrajes",
+   "layer": "buildings",
+   "labels": [
+    {
+     "label": 204,
+     "cells": 48,
+     "ours_m": 13.23,
+     "thing_m": 8.62,
+     "lidar_m": 0.31,
+     "median_abs_ours_m": 12.81,
+     "median_abs_thing_m": 7.73
+    }
+   ],
+   "flag_lower": true
+  },
+  {
+   "key": "ref:263",
+   "osm_id": null,
+   "name": "Torre de Barba",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 263,
+     "cells": 11,
+     "ours_m": 13.42,
+     "thing_m": 5.3,
+     "lidar_m": 3.67,
+     "median_abs_ours_m": 9.75,
+     "median_abs_thing_m": 1.45
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5898207,
+      37.1760299
+     ],
+     [
+      -3.5898379,
+      37.1760016
+     ],
+     [
+      -3.5899525,
+      37.1760458
+     ],
+     [
+      -3.5899353,
+      37.1760741
+     ],
+     [
+      -3.5898207,
+      37.1760299
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre de Barba'",
+   "centroid": [
+    -3.5898868410519267,
+    37.17603851214095
+   ]
+  },
+  {
+   "key": "ref:266",
+   "osm_id": null,
+   "name": "Torre de la Sultana",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 266,
+     "cells": 22,
+     "ours_m": 14.2,
+     "thing_m": 11.3,
+     "lidar_m": 0.1,
+     "median_abs_ours_m": 13.82,
+     "median_abs_thing_m": 10.51
+    }
+   ],
+   "flag_lower": true,
+   "footprint": [
+    [
+     [
+      -3.5920391,
+      37.1768963
+     ],
+     [
+      -3.592039,
+      37.1769065
+     ],
+     [
+      -3.592039,
+      37.1769165
+     ],
+     [
+      -3.5919406,
+      37.1769163
+     ],
+     [
+      -3.5919405,
+      37.1769091
+     ],
+     [
+      -3.5919404,
+      37.1768994
+     ],
+     [
+      -3.5919401,
+      37.1768774
+     ],
+     [
+      -3.5920391,
+      37.1768776
+     ],
+     [
+      -3.5920391,
+      37.1768963
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre de la Sultana'",
+   "centroid": [
+    -3.5919867995752175,
+    37.17689511601139
+   ]
+  },
+  {
+   "key": "ref:269",
+   "osm_id": null,
+   "name": "Torre de los Carros",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 269,
+     "cells": 17,
+     "ours_m": 12.77,
+     "thing_m": 2.54,
+     "lidar_m": 3.2,
+     "median_abs_ours_m": 9.47,
+     "median_abs_thing_m": 2.47
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5893598,
+      37.1759021
+     ],
+     [
+      -3.5893416,
+      37.1759359
+     ],
+     [
+      -3.58932,
+      37.1759281
+     ],
+     [
+      -3.5893071,
+      37.1759234
+     ],
+     [
+      -3.5892475,
+      37.1759039
+     ],
+     [
+      -3.5892657,
+      37.17587
+     ],
+     [
+      -3.5893115,
+      37.1758856
+     ],
+     [
+      -3.5893389,
+      37.1758949
+     ],
+     [
+      -3.5893598,
+      37.1759021
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre de los Carros'",
+   "centroid": [
+    -3.5893035341528967,
+    37.175902482163025
+   ]
+  },
+  {
+   "key": "ref:275",
+   "osm_id": null,
+   "name": "Torre del Criado del Doctor Ortiz",
+   "layer": "towers",
+   "labels": [
+    {
+     "label": 275,
+     "cells": 14,
+     "ours_m": 10.56,
+     "thing_m": 9.88,
+     "lidar_m": 7.77,
+     "median_abs_ours_m": 2.84,
+     "median_abs_thing_m": 2.14
+    }
+   ],
+   "flag_lower": false,
+   "footprint": [
+    [
+     [
+      -3.5914735,
+      37.1773426
+     ],
+     [
+      -3.5914508,
+      37.1773111
+     ],
+     [
+      -3.5914407,
+      37.1772971
+     ],
+     [
+      -3.5913876,
+      37.1773226
+     ],
+     [
+      -3.5913955,
+      37.1773366
+     ],
+     [
+      -3.591421,
+      37.1773689
+     ],
+     [
+      -3.5914735,
+      37.1773426
+     ]
+    ]
+   ],
+   "footprint_source": "OSM towers layer, 'Torre del Criado del Doctor Ortiz'",
+   "centroid": [
+    -3.5914295795721864,
+    37.17733324687082
+   ]
+  }
+ ],
+ "flagged_kept": [
+  {
+   "label": 6,
+   "name": "Parador de San Francisco",
+   "osm_id": "relation/2640382",
+   "ours_m": 10.77,
+   "lidar_m": 1.3,
+   "decision": "keep: absent from Thingiverse"
+  },
+  {
+   "label": 90,
+   "name": null,
+   "osm_id": "way/1476959801",
+   "ours_m": 8.29,
+   "lidar_m": 0.08,
+   "decision": "keep: absent from Thingiverse"
+  },
+  {
+   "label": 109,
+   "name": null,
+   "osm_id": "way/1015086690",
+   "ours_m": 10.39,
+   "lidar_m": 1.05,
+   "decision": "keep: absent from Thingiverse"
+  },
+  {
+   "label": 116,
+   "name": null,
+   "osm_id": "way/1476959796",
+   "ours_m": 10.86,
+   "lidar_m": 0.36,
+   "decision": "keep: absent from Thingiverse"
+  },
+  {
+   "label": 150,
+   "name": "Torre del Agua",
+   "osm_id": "way/92528702",
+   "ours_m": 10.83,
+   "lidar_m": 0.5,
+   "decision": "keep: Thingiverse covers <90%"
+  },
+  {
+   "label": 152,
+   "name": null,
+   "osm_id": "way/196485668",
+   "ours_m": 10.59,
+   "lidar_m": 1.23,
+   "decision": "keep: Thingiverse covers <90%"
+  },
+  {
+   "label": 191,
+   "name": null,
+   "osm_id": "way/1015086687",
+   "ours_m": 10.3,
+   "lidar_m": 0.15,
+   "decision": "keep: absent from Thingiverse"
+  },
+  {
+   "label": 207,
+   "name": null,
+   "osm_id": "way/1015086692",
+   "ours_m": 10.08,
+   "lidar_m": 1.66,
+   "decision": "keep: absent from Thingiverse"
+  }
+ ],
+ "n_labels_swapped": 22,
+ "n_flagged": 11
+}

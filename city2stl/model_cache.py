@@ -82,7 +82,9 @@ def polygons_key(name: str, features_digest: str, bbox: dict, scale, dem_shape, 
     return digest(MODEL_CACHE_VERSION, "polygons", name, features_digest,
                   {k: float(bbox[k]) for k in ("north", "south", "east", "west")},
                   asdict(scale), list(dem_shape),
-                  {"line_width_m": style.line_width_m, "min_width_mm": style.min_width_mm},
+                  {"line_width_m": style.line_width_m, "min_width_mm": style.min_width_mm,
+                   # only when set, so the keys of every other layer stay as they were
+                   **({"round_lines": True} if getattr(style, "round_lines", False) else {})},
                   constants)
 
 

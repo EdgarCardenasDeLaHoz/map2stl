@@ -31,6 +31,17 @@ export function bboxDiagonalKm(bbox) {
 }
 
 /**
+ * Longest ground side of a bbox in km, width at the mid-latitude: the size
+ * geo2stl/geo.py::bbox_size_m measures (export_params.py::resolve_vector_rivers).
+ */
+export function bboxLongestSideKm(bbox) {
+    const latMid = ((bbox.north + bbox.south) / 2) * Math.PI / 180;
+    const dy = Math.abs(bbox.north - bbox.south) * M_PER_DEG_LAT;
+    const dx = Math.abs(bbox.east - bbox.west) * M_PER_DEG_LON * Math.cos(latMid);
+    return Math.max(dx, dy) / 1000;
+}
+
+/**
  * Horizontal and vertical scale of the printed model.
  *
  * @param {Object} p

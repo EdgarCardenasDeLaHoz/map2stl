@@ -98,7 +98,10 @@ class RoofShapeModel:
         row = self.row(ring, tags, crop)
         if row is None:
             return None, 0.0
-        p = float(self.predict_rows([row])[0])
+        return self.shape_for(float(self.predict_rows([row])[0]))
+
+    def shape_for(self, p):
+        """``(shape, confidence)`` for a pitched probability *p* from :meth:`predict_rows`."""
         if p > self.threshold:
             return PITCHED_SHAPE, p
         return FLAT_SHAPE, 1.0 - p

@@ -3125,6 +3125,13 @@
             font-size: 36px;
         }
 
+        /* River lines canvas — screen space, under the grid. No !important transform:
+           river-lines.js moves it with an inline transform during a gesture. */
+        .river-lines-overlay {
+            z-index: 11;
+            pointer-events: none;
+        }
+
         /* Grid overlay canvas — non-interactive, exempt from zoom */
         .layer-grid-overlay {
             z-index: 12;   /* above the buildings and .layer-top-overlay */

@@ -18,6 +18,8 @@ _Last updated: 2026-10-14._ The one place for "what's next".
 
 | Plan | State | Next step |
 |---|---|---|
+| [F-FRAME](active/F-FRAME-projected-frame.md) | approved 2026-10-17 | P0, P1, P6 mockups done; paused for F-DETAIL |
+| [F-DETAIL](active/F-DETAIL-survey-detail.md) | in progress 2026-10-17 | D1-D5 built and exported on Granada; roof results cached on disk (cold 124 s, warm 3.4 s); open faults in issues.md |
 | [F-ARCH](active/F-ARCH-consolidation.md) | mostly done (steps 1–9, 12, 13, two-stage pipeline) | the leftover rows listed under Architecture below |
 | [F-CITYMODEL](active/F-CITYMODEL-vector-city-model.md) | mostly done (merged solid, 3MF, puzzle, build speed) | volume check and build spec (below) |
 | [F-COMPOSITE3](active/F-COMPOSITE3-server-side-composite.md) | pass 1 done | pass 2: land cover and the parity test |

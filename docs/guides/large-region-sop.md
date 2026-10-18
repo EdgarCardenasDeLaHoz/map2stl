@@ -36,6 +36,11 @@ lakes ≥ 1 ha 2 m below the shore. 0.5 mm per pixel. Run through the app's rout
 - **Mesh**: the terrain TIN stays within 0.05 mm of the heightfield everywhere, river
   channels included (checked by sampling the STL top at every pixel); a carved channel
   is not simplified away. Rivers add no export time (base vs rivers within the run-to-run spread of ±8 s).
+- **Smooth river channels** (Edit → Rivers & lakes): *Auto* cuts the rivers as smooth
+  vector channels in the export for regions 200 km and larger, and keeps the pixel carve
+  below that; *On* / *Off* override it. Smooth channels add faces and export time, and the
+  preview still shows the pixel carve. Reaches shallower than 0.1 mm on the print are left
+  out (advanced: *Shallowest smooth river*).
 - **River placement** (height of the carved cell above the lowest ground within ±4 px):
   Grand Canyon 98 m median before valley snapping, **15 m after** (main river 151 → 30 m);
   Rhine 0 m; Sierra 3 m.

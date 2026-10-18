@@ -21,6 +21,11 @@ Findings from wiring them (2026-09-27):
   (EPSG:25830, nodata tag 255 but voids hold -9999). Over Granada Cathedral about a quarter of the
   window is void, mostly the cathedral's own roofs, so an nDSM override there falls back to nearest
   fill or is refused below 30 % coverage; CNIG's 2.5 m building model covers it fully.
+- REDIAM MDHN licence (checked 2026-10-17, not confirmed): free reuse with attribution; CC BY 4.0
+  is likely (a REDIAM record on IDEE says so for another product, and the Andalucía decree of
+  Nov 2024 makes environmental data free and open), but no licence text for the MDHN itself was
+  found. Confirm in its catalogue record on portalrediam.cica.es before shipping exports with the
+  lidar canopy (`city2stl/canopy.py`) to others.
 - ČÚZK DMP 1G includes vegetation (it is a surface model), so DMP − DMR over a footprint is the roof
   plus any overhanging tree.
 - The Cartagena below is Cartagena de Indias (Colombia). Cartagena in Spain is covered by CNIG's
@@ -37,8 +42,12 @@ Three rasters over the plate's `osm_bbox_nsew`, sampled four times across a plat
 - **bare earth** — the ground beneath it
 - **height above ground** — their difference, which is what a plate's residual layer is trying to be
 
-Three countries publish the third one directly and save the subtraction: France (`MNH`), Andalucía
-(`MDHN`), and Spain nationally (`MDSNE`, buildings only).
+Two countries publish the third one directly and save the subtraction: France (`MNH`) and Spain
+nationally (`MDSNE`, buildings only). Andalucía's `MDHN` looks like the same thing but is a
+**vegetation** height model (its metadata: "modelo de alturas de la vegetación"): cells of the
+lidar building class are suppressed, so ordinary buildings read low or void, while structures not
+classed as buildings (Alhambra towers, walls, ruins) and trees read at full height. See
+[building-heights.md](../decisions/building-heights.md) (2026-10-17).
 
 ## United States — one route for all of it
 
@@ -71,7 +80,7 @@ does not answer from this machine at all.
 | Paris | IGN LiDAR HD | 0.5 m surface, bare earth, and height above ground | WMS returning a float GeoTIFF over any window — `https://data.geopf.fr/wms-r` |
 | Prague | ČÚZK DMP 1G / DMR 5G | irregular lidar, served as raster | ArcGIS image service, `https://ags.cuzk.gov.cz/arcgis2/rest/services/{dmp1g,dmr5g}/ImageServer/exportImage` |
 | Salzburg | BEV Austria ALS | 1 m surface and bare earth | cloud-optimized GeoTIFF, 50 km tiles; the city straddles two of them |
-| Granada | REDIAM Andalucía | 1 m surface, bare earth, and height above ground | cloud-optimized GeoTIFF, one 284 GB regional mosaic read through a window |
+| Granada | REDIAM Andalucía | 1 m surface, bare earth, and vegetation height (classified buildings suppressed) | cloud-optimized GeoTIFF, one 284 GB regional mosaic read through a window |
 | Barcelona | ICGC | 0.25 m lidar surface and bare earth (2022) | **the WMS renders a picture, not values** — use the point cloud at `https://datacloud.icgc.cat/datacloud/lidar-territorial/laz_unzip/` |
 | Bilbao | geoEuskadi 2017 | 2.2 pts/m², classified, 500 m tiles | plain directory index under `https://www.geo.euskadi.eus/lidar/DatosDescarga/` |
 | Valencia | CNIG PNOA (national), not the regional service | 5 pts/m² point cloud, or the 0.5 m surface raster | the regional service is click-only and publishes no surface model over Valencia at all |

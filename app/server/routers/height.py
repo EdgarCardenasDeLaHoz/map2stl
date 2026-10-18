@@ -51,7 +51,7 @@ class HeightFetchRequest(BoundingBox):
     )
     projection: str = Field(
         "none",
-        description="Map projection: 'none', 'cosine', 'mercator', 'sinusoidal'"
+        description="Map projection: 'none', 'cosine', 'mercator', 'equidistant', 'lambert', 'sinusoidal', 'miller', 'gall', 'laea' (Lambert azimuthal equal-area), 'lcc' (Lambert conformal conic)"
     )
     clip_valid_region: bool = Field(
         True,

@@ -7,7 +7,9 @@ city2stl/height/service.py — Height-provider registry, selection and per-build
   - ``_select_providers(bbox, names)``  requested providers, or all that cover *bbox*
   - ``set_opentopo_api_key(key)``      rebind the OpenTopography-backed providers
   - ``enhance_city_data(payload, ...)`` fill ``default`` building heights from
-                                        3DEP lidar, then the fine raster providers
+                                        3DEP lidar (US), then validated survey
+                                        lidar (``survey_fill``: Spain), then the
+                                        fine raster providers
 
 Synchronous and app-free; the app imports it directly (``app/server/core/city_data.py``,
 ``app/server/routers/height.py``, ``app/server/routers/auth.py``). The OpenTopography
@@ -135,13 +137,13 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
 
     bbox = (north, south, east, west)
     # Measured lidar first: it answers per footprint, so whatever it cannot
-    # measure is left on "default" for the raster sources below.
+    # measure is left on "default" for the raster sources below. 3DEP covers the
+    # US; the survey fill covers the regions in `survey_fill.FILL_SOURCES`.
     lidar = _enhance_from_lidar(features, bbox)
+    survey = _enhance_from_survey(payload, bbox)
+    features = payload["buildings"]["features"]
     if not _count_default(features):
-        payload["height_enhancement"] = _with_lidar({
-            "source_name": LIDAR_SOURCE_NAME, "providers_used": [],
-            "providers_too_coarse": [], "resolution_m": 1.0, "stats": {},
-        }, lidar)
+        payload["height_enhancement"] = _measured_only(lidar, survey)
         return payload
     # The provider list comes from `_REGISTRY` -- the same one `/api/height/*`
     # answers from -- and not from a tuple written out here. This function used
@@ -197,7 +199,7 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
                 "cover this bbox (%s); buildings keep the OSM fallback height",
                 BUILDING_RESOLUTION_LIMIT_M, ", ".join(too_coarse),
             )
-            payload["height_enhancement"] = _with_lidar({
+            payload["height_enhancement"] = _with_measured({
                 "source_name": "osm_only_coarse",
                 "providers_used": [],
                 "providers_too_coarse": too_coarse,
@@ -205,12 +207,9 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
                 "stats": {"skipped": True,
                           "reason": "no provider finer than "
                                     f"{BUILDING_RESOLUTION_LIMIT_M:.0f} m"},
-            }, lidar)
-        elif lidar:
-            payload["height_enhancement"] = _with_lidar({
-                "source_name": LIDAR_SOURCE_NAME, "providers_used": [],
-                "providers_too_coarse": [], "resolution_m": 1.0, "stats": {},
-            }, lidar)
+            }, lidar, survey)
+        elif lidar or _survey_filled(survey):
+            payload["height_enhancement"] = _measured_only(lidar, survey)
         return payload
 
     merged = merge_height_rasters(results, target_shape=(dim, dim))
@@ -222,17 +221,18 @@ def enhance_city_data(payload: dict[str, Any], north: float, south: float, east:
         source_name=merged.source_name,
     )
     payload["buildings"] = enhanced["buildings"]
-    payload["height_enhancement"] = _with_lidar({
+    payload["height_enhancement"] = _with_measured({
         "source_name": merged.source_name,
         "providers_used": [item.source_name for item in results],
         "providers_too_coarse": too_coarse,
         "resolution_m": float(merged.resolution_m),
         "stats": enhanced.get("stats") or {},
-    }, lidar)
+    }, lidar, survey)
     return payload
 
 
 LIDAR_SOURCE_NAME = "lidar_3dep_copc"
+SURVEY_SOURCE_NAME = "survey"
 
 
 def _count_default(features: list[dict]) -> int:
@@ -276,9 +276,49 @@ def _enhance_from_lidar(features: list[dict], bbox: tuple) -> dict | None:
     return stats if stats.get("tiles") else None
 
 
-def _with_lidar(info: dict, lidar: dict | None) -> dict:
-    """Record the lidar pass in a ``height_enhancement`` block."""
+def _enhance_from_survey(payload: dict, bbox: tuple) -> dict | None:
+    """Measure the ``default`` buildings from validated survey lidar
+    (``city2stl.height.survey_fill``), replacing ``payload["buildings"]``.
+
+    Returns the fill stats, or None when no fill was tried (nothing on default,
+    no validated survey over the bbox). Never raises: a failing survey leaves the
+    buildings on ``default`` for the raster providers.
+    """
+    from city2stl.height.survey_fill import fill_default_heights
+
+    try:
+        fc, stats = fill_default_heights(payload["buildings"], bbox)
+    except Exception as exc:
+        logger.warning("Survey height fill failed: %s", exc)
+        return None
+    payload["buildings"] = fc
+    return stats
+
+
+def _survey_filled(survey: dict | None) -> bool:
+    return bool(survey and survey.get("filled"))
+
+
+def _measured_only(lidar: dict | None, survey: dict | None) -> dict:
+    """``height_enhancement`` when only the per-footprint lidar passes ran."""
     if lidar:
-        info["providers_used"] = [LIDAR_SOURCE_NAME, *info["providers_used"]]
+        base = {"source_name": LIDAR_SOURCE_NAME, "resolution_m": 1.0}
+    else:
+        base = {"source_name": SURVEY_SOURCE_NAME,
+                "resolution_m": float((survey or {}).get("resolution_m") or 0.0)}
+    return _with_measured({**base, "providers_used": [], "providers_too_coarse": [],
+                           "stats": {}}, lidar, survey)
+
+
+def _with_measured(info: dict, lidar: dict | None, survey: dict | None = None) -> dict:
+    """Record the lidar and survey passes in a ``height_enhancement`` block."""
+    used = list(info["providers_used"])
+    if _survey_filled(survey):
+        used = [*survey["by_source"], *used]
+    if lidar:
+        used = [LIDAR_SOURCE_NAME, *used]
         info["lidar"] = lidar
+    if survey:
+        info["survey"] = survey
+    info["providers_used"] = used
     return info

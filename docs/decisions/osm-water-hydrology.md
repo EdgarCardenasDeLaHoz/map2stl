@@ -4,6 +4,81 @@ Fetching OSM through Overpass/osmnx, telling outages from empty answers, water a
 rasterisation, and rivers and lakes carved into the terrain. Related: [composite.md](composite.md),
 [trails.md](trails.md).
 
+### 2026-10-17 — The river carve burns reaches in numpy, cell for cell what GEOS + GDAL burnt
+- **Decision:** `map2stl/geo2stl/water_layers.py::_carve_chunk` no longer sends buffers through GeoJSON to rasterio. All orders are filled in one vectorised pass by `map2stl/geo2stl/polygon_fill.py::burn_polygons_max`, which replicates GDAL's scanline rule (inverse geotransform term by term, row centres at `y + 0.5`, crossings at `floor(x + 0.5)`, bottom horizontal edges filled by ring orientation). Reaches that simplify to one segment (99.5 % on the Amazon) skip GEOS too: `burn_segment_buffers_max` builds the `quad_segs=2` buffer with GEOS's own arithmetic (`stadium_rings`). Buffers with a vertex within `FRAGILE_TOL_PX` (1e-7 px) of a row centre, or a crossing that close to a column boundary, go back to `shapely.buffer` (0.5 % of segments), as do multi-segment, near-zero-length and tiny-radius reaches. `RIVER_CARVE_VERSION` is unchanged because the grid is identical.
+- **Why:** Amazon (N 15 S -19 E -45 W -85, dim 800, all orders, 1.23M reaches). Rasterising through GeoJSON cost ~6.7 s per worker chunk, and `shapely.buffer` cost another ~6.4 s. One serial worker chunk (307k reaches) went from 19.0 s to 11.0 s. With 4 workers, `river_depth_by_order` took 30–48 s before and 23–24 s after on the same noisy machine. Snapping (`snap_reaches_to_valley`, ~5 s per chunk) is now the largest cost. The full grid (10 orders × 801 × 942) differs from the old one in 0 of 854,846 carved cells.
+- **Rejected:** keeping GeoJSON + GDAL, which made the fill 3× slower than the numpy pass for the same cells. Rejected bit-exact buffer vertices: `cos`/`sin` differ from GEOS's libm by 1 ulp on 7 of 305k reaches. That is harmless away from a cell boundary, which is why the fragile test exists rather than trusting the vertices everywhere.
+- **Supersedes / superseded by:** —
+- **Source:** `tests/test_polygon_fill.py` (against `numpy2stl.raster.burn_polygons` at three scales).
+
+### 2026-10-17 — Rivers size defaults to Most; a saved choice wins, and All warns on a large region
+- **Decision:** the Rivers size control (`#hydroMinOrder`: Big only 5 / Most 3 / All 1) starts at
+  Most for every region (`app/server/routers/settings.py::_default_region_settings`). A region's
+  saved `hydrology.min_order` is kept as it is. On a region whose longest ground side is 200 km or
+  more, the client constant `app/client/static/js/modules/layers/hydrology-print.js::LARGE_RIVER_REGION_KM`
+  (the same value as `app/server/core/export_params.py::VECTOR_RIVERS_AUTO_MIN_SIDE_KM`) makes the
+  Rivers hint warn when All or size 2 is picked (`layerGroups.ts::riversHint`) and makes the
+  loading line say "large region" (`riverLoadingMessage`).
+- **Why:** user report 2026-10-17: the Amazon loaded every stream and took about a minute. Most
+  was already the default; the Amazon showed All because its saved settings carried
+  `min_order = 1` (autosave writes it for nearly every region). HydroRIVERS at size 1 on the
+  Amazon is 1.23M reaches and took 57 s.
+- **Rejected:** forcing Most on large regions over a saved value — it would undo a choice the
+  user made on purpose, and a preset load would disagree with the panel; a second threshold for
+  the client — one 200 km number for vector rivers and for the warning keeps "large" one idea.
+- **Supersedes / superseded by:** —
+
+### 2026-10-17 — Vector rivers on by default for regions ≥ 200 km
+- **Decision:** exports cut rivers as vector solids (HydroRIVERS reaches extruded and
+  boolean-cut into the terrain) by default when the bbox's longest ground side is 200 km or
+  more (`app/server/core/export_params.py::VECTOR_RIVERS_AUTO_MIN_SIDE_KM`); smaller regions keep
+  the raster carve. The request's `vector_rivers` is `"auto"` (default), `true` or `false`
+  (`resolve_vector_rivers`). Each reach is cut to its raster print depth (same depth reference)
+  in 0.05 mm classes, and reaches under `vector_rivers_min_depth_mm` (0.1 mm) are left out.
+  Lakes, the sea and every preview keep the raster carve; a non-linear projection falls back to
+  it (`vector_rivers_blocker`). UI: Edit → Rivers & lakes → *Smooth river channels*
+  (Auto / On / Off; the shallowest-reach slider is advanced).
+- **Why:** user request 2026-10-17 ("add vector rivers as an option in the export", then on by
+  default for big regions). The study below found the vector network reads cleanly where the
+  carve's 0.5 mm staircase fuses into blobs, and that the cost lay in reaches too shallow to
+  print and in one global union. With the 0.1 mm floor and a threaded per-tile union
+  (`city2stl/city_model.py::union_polygons`), the Amazon print (600 mm, order >= 3, cached data)
+  builds in 55 s (composite 15 s, mesh 40 s) at 1.97 GB peak RAM, 877,670 faces, watertight,
+  29,751 reaches kept of 315,707, against 931 s and 5.9 GB in the study. Below 200 km the
+  carve's staircase is fine enough and vectors only add faces: the Rhine gorge (57 km, 600 px,
+  0.25 mm/px) went from 390,698 to 401,050 faces (+2.6 %), 2.0 to 2.1 s, both watertight.
+- **Rejected:** on for every region — no visible gain on small prints for the faces; a face
+  or reach-count threshold — the bbox side is known before any data is read, so the UI can say
+  what Auto will do.
+- **Supersedes / superseded by:** supersedes [2026-10-17 — Rivers stay a raster carve by
+  default](#2026-10-17--rivers-stay-a-raster-carve-by-default-vector-river-solids-are-an-opt-in-for-reaches-deep-enough-to-print-superseded).
+- **Source:** session 2026-10-17; `tests/test_vector_rivers.py`; renders in
+  `output/vector_rivers_check/`.
+
+### 2026-10-17 — Rivers stay a raster carve by default; vector river solids are an opt-in for reaches deep enough to print [superseded]
+- **Decision:** the default keeps carving rivers into the DEM. Extruding HydroRIVERS reaches as
+  solids and boolean-cutting them into the terrain is worth building only as an option
+  ("vector rivers") that keeps reaches carved at least 0.1 mm deep, for large regions.
+- **Why:** measured on 600 mm prints of the Amazon, the American West and Europe (HydroRIVERS
+  order >= 3; `output/river_solids_study/results.md`). Every boolean was watertight (manifold3d,
+  20-62 s, no failed slabs or unions), and the vector channels read as a clean network where
+  the carve is a 0.5 mm staircase that fuses into blobs in the Amazon. But faces grow 2.0-6.1x
+  (Amazon 603k to 3.68M, West 1.23M to 2.44M, Europe 870k to 2.26M), the Amazon build went from
+  17 s to 931 s (672 s unioning about 155k tiny buffers) and from 1.8 to 5.9 GB peak RAM. And
+  80-86 % of reaches are carved 0.05 mm deep or less, under one 0.12 mm layer, so they print
+  the same either way: depth, not width, decides what shows. Every reach was narrower than the
+  0.5 mm minimum width (the widest 0.41 mm), so vector width is always the minimum.
+- **Rejected:** vector solids as the default — 2-6x the faces for reaches that cannot print.
+- **Open (for an implementation):** a depth-class layer in `city2stl/city_model.py`
+  (`DEFAULT_LAYERS`, `feature_polygons` with round caps and joins, `build_on_terrain` taking a
+  per-feature depth); per-reach print depth from `geo2stl/water_layers.py::river_depth_by_order`;
+  a minimum-depth filter and per-tile fetch/union in `geo2stl/hydrology.py::fetch_hydrorivers`;
+  an `ExportContext` flag in `app/server/core/export_params.py`. Known faults: no valley
+  snapping (channels can cross canyon walls), 0.05 mm steps where depth classes meet.
+- **Supersedes / superseded by:** superseded by [2026-10-17 — Vector rivers on by default for
+  regions ≥ 200 km](#2026-10-17--vector-rivers-on-by-default-for-regions--200-km).
+- **Source:** river-solid study, session 2026-10-17 (results and PNGs in `output/river_solids_study/`).
+
 ### 2026-10-09 — osmnx pins an Overpass host to an address that connects, IPv6 or IPv4, not to its IPv4 address
 - **Decision:** `geo2stl/osm.py::install_dns_pin` replaces osmnx's `_http._config_dns` with
   `pin_overpass_host`: the host is pinned to the first of its addresses, in the resolver's order

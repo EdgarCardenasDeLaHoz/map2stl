@@ -70,9 +70,17 @@ SIMPLIFY_TOL_MM = 0.05        # outline simplification tolerance at model scale
 SNAP_MM = 0.01                # coordinate grid for outlines
 MIN_FOOTPRINT_MM2 = 0.3       # smaller footprints cannot print as a distinct feature
 PRINT_MIN_WIDTH_MM = 0.8      # two 0.4 mm extrusion lines: the narrowest reliable feature
+# Segments per quarter circle of a round line buffer (LayerStyle.round_lines). 2 keeps a
+# 0.5 mm river end within 0.04 mm of a true circle (under SIMPLIFY_TOL_MM) at a quarter
+# of shapely's default vertex count; 100k reaches are 100k ends and confluences.
+ROUND_QUAD_SEGS = 2
+# Polygon count above which union_polygons unites in threaded tiles; below it one
+# union_all is as fast. (2026-10-17, 100k synthetic reaches: 31 s plain, 21 s tiled.)
+TILED_UNION_MIN = 5000
+TILED_UNION_TILE_MM = 25.0
 MAX_SLENDERNESS = 8.0         # extruded height <= this x footprint width (snaps off otherwise)
 
-Mode = Literal["extrude", "raised", "engraved", "water"]
+Mode = Literal["extrude", "raised", "engraved", "water", "canopy"]
 Mesh = tuple[np.ndarray, np.ndarray]
 
 
@@ -155,6 +163,13 @@ class LayerStyle:
     layer_height_mm: float = 0.1  # print layer: tops closer than this print as one
     min_gap_mm: float = 0.0       # 0: only touching footprints merge, no gap is closed
     outline_tol_mm: float = 0.0   # 0: merged outlines are not simplified further
+    # Lines buffered with round caps and joins instead of flat / mitre: a river
+    # network's reaches then meet without notches or spikes at the confluences.
+    round_lines: bool = False
+    # engraved: > 0 cuts each feature to its own ``depth_mm`` property, rounded to a
+    # multiple of this step (never less than one step); features of one depth class
+    # are united before they are cut. 0: every feature is cut offset_mm deep.
+    depth_step_mm: float = 0.0
 
 
 DEFAULT_LAYERS: dict[str, LayerStyle] = {
@@ -170,10 +185,19 @@ DEFAULT_LAYERS: dict[str, LayerStyle] = {
     "trails":         LayerStyle("raised", enabled=False, offset_mm=0.3, line_width_m=3.0),
     "green":          LayerStyle("raised", offset_mm=0.2),
     "waterways":      LayerStyle("water", offset_mm=1.0, line_width_m=6.0),
+    # Vector rivers (HydroRIVERS / Natural Earth reaches from the mesh export's
+    # river_features, not from OSM): each reach cut to its own print depth
+    # (``depth_mm``) along the terrain, in 0.05 mm classes; 0.5 mm wide at least,
+    # as the raster carve (app.server.core.export.RIVER_MIN_WIDTH_MM).
+    "rivers":         LayerStyle("engraved", offset_mm=0.5, line_width_m=20.0,
+                                 min_width_mm=0.5, round_lines=True, depth_step_mm=0.05),
+    # Lidar tree canopy (city2stl.canopy): built only when the caller passes a canopy layer
+    # to build_on_terrain (no OSM features; off where no survey covers the box).
+    "trees":          LayerStyle("canopy"),
 }
 # Earlier layers win where layers overlap in the multi-part output.
 LAYER_PRIORITY = ["buildings", "fortifications", "walls", "towers", "churches",
-                  "waterways", "roads", "railways", "trails", "green"]
+                  "waterways", "rivers", "roads", "railways", "trails", "green", "trees"]
 
 # Layers whose *polygons* print as their outline ring (exterior and interior rings
 # buffered by the layer's line width), not as a filled area: a castle precinct or a
@@ -397,7 +421,8 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                      terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
 
-    Lines are buffered by their width (:func:`_line_width_m`). Polygons in
+    Lines are buffered by their width (:func:`_line_width_m`), flat caps and mitre
+    joins unless ``style.round_lines`` (round, :data:`ROUND_QUAD_SEGS`). Polygons in
     ``RING_LAYERS`` (walls, fortifications) become their outline ring: every
     exterior and interior ring buffered by the same width, centred on the
     outline, so they print like a line wall drawn around the area (a polygon
@@ -431,8 +456,12 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
         counts["widened"] += int((width < style.min_width_mm).sum())
         half = np.maximum(width, style.min_width_mm) / 2
         is_line = lines[banded]
-        geoms[lines] = shapely.buffer(geoms[lines], half[is_line], cap_style="flat",
-                                      join_style="mitre")
+        if style.round_lines:
+            geoms[lines] = shapely.buffer(geoms[lines], half[is_line], quad_segs=ROUND_QUAD_SEGS,
+                                          cap_style="round", join_style="round")
+        else:
+            geoms[lines] = shapely.buffer(geoms[lines], half[is_line], cap_style="flat",
+                                          join_style="mitre")
         if rings.any():
             # Outline band: the polygon grown by half the width minus it shrunk by
             # as much (mitre joins, as the lines; holes get their own band).
@@ -1119,19 +1148,84 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
     else:
         top, bottom = ((style.offset_mm, -1.0) if style.mode == "raised"
                        else (1.0, -style.offset_mm))
-        # One slab per connected area: overlapping or touching features (a road
-        # network) would otherwise each carry walls and a bottom inside the others.
-        if len(polys) > 1:
-            merged = shapely.set_precision(shapely.union_all(polys), SNAP_MM)
-            polys = [p for p in shapely.get_parts(merged)
-                     if p.geom_type == "Polygon" and p.area >= MIN_FOOTPRINT_MM2]
-        stats["slabs"] = len(polys)
-        for poly in polys:
-            m = _slab(poly, terrain, top, bottom)
-            if m is not None:
-                solids.append(m)
+        if style.mode == "engraved" and style.depth_step_mm > 0:
+            # Per-feature depth (vector rivers): one group per depth class, each cut
+            # that deep. Classes overlap where a tributary meets its river; the
+            # layer union keeps the deeper cut there.
+            groups = depth_classes(props, style.depth_step_mm, style.offset_mm)
+            stats["depth_classes_mm"] = sorted(groups)
+        else:
+            groups = {-bottom if style.mode == "engraved" else 0.0: list(range(len(polys)))}
+        stats["slabs"] = 0
+        for depth, idx in sorted(groups.items()):
+            group = [polys[k] for k in idx]
+            # One slab per connected area: overlapping or touching features (a road
+            # network) would otherwise each carry walls and a bottom inside the others.
+            if len(group) > 1:
+                merged = shapely.set_precision(union_polygons(group), SNAP_MM)
+                group = [p for p in shapely.get_parts(merged)
+                         if p.geom_type == "Polygon" and p.area >= MIN_FOOTPRINT_MM2]
+            stats["slabs"] += len(group)
+            for poly in group:
+                m = _slab(poly, terrain, top, bottom if style.mode == "raised" else -depth)
+                if m is not None:
+                    solids.append(m)
     stats["solids"] = len(solids)
     return solids, stats
+
+
+def depth_classes(props: list[dict], step_mm: float, default_mm: float) -> dict[float, list[int]]:
+    """{class depth (mm): feature indices}: each feature's ``depth_mm`` (else
+    *default_mm*) rounded to a multiple of *step_mm*, never under one step."""
+    groups: dict[float, list[int]] = {}
+    for k, pr in enumerate(props):
+        try:
+            d = float(pr.get("depth_mm", default_mm))
+        except (TypeError, ValueError):
+            d = default_mm
+        cls = round(max(round(d / step_mm), 1) * step_mm, 6)
+        groups.setdefault(cls, []).append(k)
+    return groups
+
+
+def union_polygons(polys: Sequence[Polygon], tile_mm: float = TILED_UNION_TILE_MM,
+                   workers: int = 4):
+    """``shapely.union_all`` of *polys*, in threaded tiles above :data:`TILED_UNION_MIN`.
+
+    Polygons are binned by centroid into *tile_mm* cells, each cell united on its
+    own, then 2 x 2 blocks of cells merged level by level until one is left. GEOS
+    releases the GIL, so the cells unite in parallel; the last merges are serial
+    when the network is one connected blob, which caps the gain (31 s -> 21 s on
+    100k synthetic reaches, 2026-10-17).
+    """
+    arr = np.asarray(polys, dtype=object)
+    if len(arr) < TILED_UNION_MIN:
+        return shapely.union_all(arr)
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = shapely.get_coordinates(shapely.centroid(arr))
+    ix = (c[:, 0] // tile_mm).astype(np.int64)
+    iy = (c[:, 1] // tile_mm).astype(np.int64)
+    # From 0: with negative cells, -1 // 2 == -1 never merges into cell 0 and the
+    # level loop below would not end.
+    ix -= ix.min()
+    iy -= iy.min()
+    cells: dict[tuple[int, int], list[int]] = {}
+    for k, key in enumerate(zip(ix.tolist(), iy.tolist(), strict=True)):
+        cells.setdefault(key, []).append(k)
+    with ThreadPoolExecutor(workers) as ex:
+        keys = list(cells)
+        cur = dict(zip(keys, ex.map(shapely.union_all, [arr[cells[k]] for k in keys]),
+                       strict=True))
+        while len(cur) > 1:
+            nxt: dict[tuple[int, int], list] = {}
+            for (a, b), g in cur.items():
+                nxt.setdefault((a // 2, b // 2), []).append(g)
+            keys = list(nxt)
+            cur = dict(zip(keys, ex.map(
+                lambda gs: shapely.union_all(np.asarray(gs, dtype=object)),
+                [nxt[k] for k in keys]), strict=True))
+    return next(iter(cur.values()))
 
 
 def _layer_solid(name: str, feats: list[dict], style: LayerStyle, terrain: Terrain,
@@ -1182,6 +1276,29 @@ def _layer_solid(name: str, feats: list[dict], style: LayerStyle, terrain: Terra
         mc.write_mesh(mc.NS_SOLIDS, key, v, f, meta)
     rep = {**rep, "seconds": {"polygons": round(t1 - t0, 2), "geometry": round(t2 - t1, 2),
                               "union": round(time.perf_counter() - t2, 2)}}
+    return u, rep, key
+
+
+def _canopy_solid(canopy, terrain: Terrain, style: LayerStyle, terrain_digest: str,
+                  cache: bool) -> tuple[mf.Manifold | None, dict, str]:
+    """The ``trees`` layer's union solid, report block and cache key (``city_solids`` cache)."""
+    from city2stl import canopy as cn
+    from city2stl import model_cache as mc
+
+    key = (mc.digest(mc.MODEL_CACHE_VERSION, "trees", cn.CANOPY_VERSION, canopy.digest(),
+                     terrain_digest, terrain.scale.mm_per_px, terrain.scale.z_mm_per_m,
+                     terrain.bbox, style.enabled) if cache else "")
+    hit = mc.read_mesh(mc.NS_SOLIDS, key) if cache else None
+    if hit is not None:
+        v, f, meta = hit
+        return (to_manifold(v, f, strict=False) if len(f) else None),             {**meta["report"], "cached": True}, key
+    solids, stats = cn.canopy_solids(canopy, terrain, terrain.scale.z_mm_per_m)
+    u, rejected = union(solids)
+    rep = {**stats, "rejected": rejected, "provider": canopy.provider, "preview": canopy.preview,
+           "canopy_ha": canopy.stats.get("mask_ha")}
+    if cache:
+        v, f = from_manifold(u) if u is not None else (np.zeros((0, 3)), np.zeros((0, 3), np.int64))
+        mc.write_mesh(mc.NS_SOLIDS, key, v, f, {"report": rep})
     return u, rep, key
 
 
@@ -1309,6 +1426,7 @@ def build_city_model(
     landmark_overrides: dict | None = None,
     cache: bool = True,
     trail_context: dict | None = None,
+    canopy=None,
 ) -> CityModel:
     """Terrain from ``dem_m`` (metres, row 0 north, already projected like the
     app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection}).
@@ -1325,7 +1443,7 @@ def build_city_model(
                             terrain_max_error_mm=terrain_max_error_mm, simplify=simplify,
                             layer_overrides=layer_overrides,
                             landmark_overrides=landmark_overrides, cache=cache,
-                            trail_context=trail_context)
+                            trail_context=trail_context, canopy=canopy)
 
 
 #: Layers whose OSM query also returns features the buildings layer already has
@@ -1399,6 +1517,7 @@ def build_on_terrain(
     landmark_overrides: dict | None = None,
     cache: bool = True,
     trail_context: dict | None = None,
+    canopy=None,
 ) -> CityModel:
     """The feature stage: OSM layers on a finished terrain heightfield.
 
@@ -1491,6 +1610,16 @@ def build_on_terrain(
             report["layers"][name].update(trail_stats)
         if u is not None:
             (cuts if style.mode in ("engraved", "water") else adds)[name] = u
+    tstyle = styles.get("trees")
+    if canopy and tstyle is not None and tstyle.enabled and bbox:
+        t0 = time.perf_counter()
+        u, rep, layer_keys["trees"] = _canopy_solid(canopy, terrain, tstyle, terrain_digest, cache)
+        rep["seconds"] = {"total": round(time.perf_counter() - t0, 2)}
+        report["layers"]["trees"] = {"mode": tstyle.mode, **rep}
+        if u is not None:
+            adds["trees"] = u
+    elif canopy is not None and not canopy and getattr(canopy, "reason", ""):
+        report["layers"]["trees"] = {"mode": "canopy", "off": canopy.reason}
     if plan is not None:
         report["landmarks"] = plan.report
 

@@ -572,17 +572,30 @@ async function _hydroContribution(demW, demH) {
     return values;
 }
 
+/** Carve requests in flight; layerStatus.riverCarve is 'loading' while any is. */
+let _hydroFetchesRunning = 0;
+
+/**
+ * One dem-merge for the rivers/lakes carve. While it runs, layerStatus.riverCarve is
+ * 'loading', so the Rivers & lakes row in the Edit Layers panel says the rivers are loading.
+ */
 async function _fetchHydro(body) {
-    const { data, error } = await (window.api?.composite?.demMerge(body)
-        ?? Promise.resolve({ data: null, error: 'api not ready' }));
-    if (error || !data || data.error) {
-        console.warn('[composite] rivers/lakes fetch failed:', error || data?.error);
-        return null;
+    _hydroFetchesRunning++;
+    window.setLayerStatus?.('riverCarve', 'loading');
+    try {
+        const { data, error } = await (window.api?.composite?.demMerge(body)
+            ?? Promise.resolve({ data: null, error: 'api not ready' }));
+        if (error || !data || data.error) {
+            console.warn('[composite] rivers/lakes fetch failed:', error || data?.error);
+            return null;
+        }
+        const vals = window.decodeDemValues?.(data);
+        const [h, w] = data.dimensions || [];
+        if (!vals?.length || !h || !w) return null;
+        return { vals: new Float32Array(vals), w, h };
+    } finally {
+        if (--_hydroFetchesRunning === 0) window.setLayerStatus?.('riverCarve', 'loaded');
     }
-    const vals = window.decodeDemValues?.(data);
-    const [h, w] = data.dimensions || [];
-    if (!vals?.length || !h || !w) return null;
-    return { vals: new Float32Array(vals), w, h };
 }
 
 /**
@@ -1073,6 +1086,12 @@ window.setupCompositeDemControls = function setupCompositeDemControls() {
     const depthMmLabel = document.getElementById('compositeRiverDepthMmLabel');
     depthMm?.addEventListener('input', () => {
         if (depthMmLabel) depthMmLabel.textContent = `${parseFloat(depthMm.value).toFixed(1)} mm`;
+    });
+    // Smooth channels' shallowest reach (mm): export only, like the print depth.
+    const vrMin = document.getElementById('compositeVectorRiversMinDepthMm');
+    const vrMinLabel = document.getElementById('compositeVectorRiversMinDepthMmLabel');
+    vrMin?.addEventListener('input', () => {
+        if (vrMinLabel) vrMinLabel.textContent = `${parseFloat(vrMin.value).toFixed(2)} mm`;
     });
 
     // Wire per-channel enable toggles (DEM + each city sub-layer).
