@@ -27,6 +27,11 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     height (city2stl.landmarks;
                     resolved before the build, a bad mesh / no survey data fails the
                     task with the reason; report.json "landmarks" says what applied)
+    panorama_heights  a skyline region report ("Cartagena_v19_extras", a report folder or a
+                    heights.json path): its corroborated + single buildings replace the
+                    default / raster heights of the footprints they overlap (never a tag,
+                    landmark or survey height; city2stl.panorama_heights). report.json
+                    "panorama_heights" counts rows, applied and skipped
     puzzle          {piece_mm | cols+rows | col_edges_mm+row_edges_mm, knob_width_mm,
                      knob_depth_mm, knob_shape, clearance_mm, method, engrave,
                      layout, bed_mm}   (app/server/core/puzzle.py)
@@ -60,6 +65,8 @@ from app.server.core.preflight import build_check
 from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.city_model import build_on_terrain, resolve_layers
 from city2stl.landmarks import LandmarkError
+from city2stl.panorama_heights import apply_panorama_heights
+from city2stl.panorama_heights import load_rows as load_panorama_rows
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +170,16 @@ def run_city_model(data: dict, task: ExportTask) -> None:
     # Layers the caller edited locally (e.g. SDK roof classification) replace the
     # cached OSM copy, which has no record of those edits.
     layers.update({n: fc for n, fc in (data.get("layer_data") or {}).items() if n in enabled})
+    panorama_report = None
+    if data.get("panorama_heights") and isinstance(layers.get("buildings"), dict):
+        task.update(18, "Applying panorama heights...")
+        try:
+            rows = load_panorama_rows(data["panorama_heights"])
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            task.fail(f"Panorama heights: {exc}")
+            return
+        layers["buildings"], panorama_report = apply_panorama_heights(layers["buildings"], rows)
+        logger.info("Panorama heights applied: %s", panorama_report)
     trail_context = None
     if "trails" in enabled:   # optional layer: fetched only when the request enables it
         task.update(20, "Loading trails...")
@@ -190,6 +207,8 @@ def run_city_model(data: dict, task: ExportTask) -> None:
                              landmark_overrides=landmark_overrides,
                              trail_context=trail_context)
     report = dict(model.report)
+    if panorama_report is not None:
+        report["panorama_heights"] = panorama_report
     if p.composite_error:
         report["composite_error"] = p.composite_error
 
