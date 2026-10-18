@@ -185,6 +185,15 @@ the rest below.
 
 ## Active data limitations
 
+### Overpass `/status` probe rejects every mirror (2026-10-17)
+- `geo2stl.osm.healthy_overpass_endpoints` gave every mirror a 20 s `/status` probe; overpass-api.de
+  timed out, kumi answered 500, mail.ru 504 with the osmnx user agent, so a city fetch failed with
+  "No Overpass endpoint answered its /status probe" although mail.ru served the real queries.
+  Workaround used for Cartagena: a scratch run that put mail.ru first. A cached city now falls
+  back to an outdated copy with `stale_cache_warning` (`city_data._serve_stale_or_raise`), but only
+  when that copy has every requested layer; a cache with some layers still fetches the rest.
+- Fix to make: tolerate a failed probe by trying the query anyway, and send a custom user agent.
+
 ### 0h. The local SRTM h5 store is sparse; missing tiles were a silent flat 0 (2026-10-14)
 - `strm_h5/strm_data.h5` holds 94 tiles (of ~870 SRTM land tiles). "Amazon" (N15 S-19
   E-45 W-85, `h5_local`) needs 56 and the store has 12 (the Andes), so 44 tiles came back as
