@@ -26,8 +26,11 @@ import logging
 import math
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import requests
+
+from geo2stl.cache import image_dir
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,14 @@ DARK_SKY_VALUE = 90.0
 DARK_SKY_LUMA = 85.0
 DIM_SKY_VALUE = 110.0
 MAX_CATEGORIES = 40
+
+
+def img_dir(cache: Path) -> Path:
+    """The downloaded-photo folder of a ``runs/commons_cache/<region>`` dir.
+
+    ``$MAP2STL_IMAGES/commons/<region>`` when set (``geo2stl.cache.image_dir``), else ``<cache>/img``.
+    """
+    return image_dir(cache / "img", "commons", cache.name)
 
 
 @dataclass(frozen=True)

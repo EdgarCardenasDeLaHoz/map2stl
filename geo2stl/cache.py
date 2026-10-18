@@ -52,6 +52,22 @@ _MAP2STL_DIR = Path(__file__).resolve().parents[1]
 _CACHE_ENV = os.environ.get("MAP2STL_CACHE") or os.environ.get("STRM2STL_CACHE")
 CACHE_ROOT = Path(_CACHE_ENV).expanduser() if _CACHE_ENV else _MAP2STL_DIR / "cache"
 
+
+def image_dir(default: str | os.PathLike, *kind: str) -> Path:
+    """Folder for a bulk JPEG cache: ``$MAP2STL_IMAGES/<kind...>`` when set, else *default*.
+
+    The JPEG caches (satellite tiles, roof tiles, Commons photos) are tens of thousands of
+    small, regeneratable files; syncing them through OneDrive costs more than losing them.
+    Point ``MAP2STL_IMAGES`` at an unsynced folder (not ``%LOCALAPPDATA%``, which the Claude
+    desktop app sandboxes), e.g. ``setx MAP2STL_IMAGES C:/Users/<you>/data/map2stl-images``.
+    Read at call time, so tests can patch it.
+    Layout: ``roof_tiles/``, ``tiles/<provider>/``, ``satellite/<region>/tiles/<scene>/``,
+    ``commons/<region>/``.
+    """
+    root = os.environ.get("MAP2STL_IMAGES")
+    return Path(root).expanduser().joinpath(*kind) if root else Path(default)
+
+
 # Per-namespace TTLs in seconds
 NAMESPACE_TTL = {
     "dem":        30 * 86400,   # 30 days

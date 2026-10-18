@@ -20,13 +20,15 @@ import os
 import numpy as np
 
 from geo2stl import imagery
+from geo2stl.cache import image_dir
 
 TILE = imagery.TILE_SIZE
 # Shared with the rest of the project's caches rather than kept beside the
 # module, so a checkout can be wiped without losing the tiles.
-CACHE = os.path.join(
+# ``$MAP2STL_IMAGES`` moves it out of the synced tree (``geo2stl.cache.image_dir``).
+CACHE = str(image_dir(os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "cache", "roof_tiles")
+    "cache", "roof_tiles"), "roof_tiles"))
 _session = None
 
 

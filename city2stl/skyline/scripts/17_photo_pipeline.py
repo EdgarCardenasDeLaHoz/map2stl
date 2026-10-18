@@ -706,7 +706,7 @@ def _card_images(args, r: dict, m: dict, towers, osm: dict) -> dict:
     from city2stl.skyline import photo_cards as pc
 
     cache = ROOT / "runs" / "commons_cache" / args.region
-    img_path = cache / "img" / f"{r['key']}.jpg"
+    img_path = cp.img_dir(cache) / f"{r['key']}.jpg"
     if "prof" not in _CARDS:
         _CARDS["prof"] = dict(np.load(cache / "profiles.npz"))
         _CARDS["bg"] = pc.background_polygons(osm["buildings"]["features"], towers)

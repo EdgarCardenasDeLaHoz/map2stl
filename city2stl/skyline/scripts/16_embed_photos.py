@@ -50,8 +50,8 @@ def main() -> int:
 
     d = ROOT / "runs" / "commons_cache" / args.region
     meta = [m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8")) if "px" in m]
-    img_dir = d / "img"
-    img_dir.mkdir(exist_ok=True)
+    img_dir = cp.img_dir(d)
+    img_dir.mkdir(parents=True, exist_ok=True)
     S = requests.Session()
     S.headers["User-Agent"] = cp.UA
     for m in meta:

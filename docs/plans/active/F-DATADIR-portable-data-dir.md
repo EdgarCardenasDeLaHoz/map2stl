@@ -34,6 +34,7 @@ a separate break. Writers and their sizes here:
 | Written path | Resolved by | Size here |
 |---|---|---|
 | `cache/` | `geo2stl/cache.py::CACHE_ROOT` — honours `MAP2STL_CACHE` / `STRM2STL_CACHE` | **12 GB** |
+| bulk JPEG caches (roof tiles, imagery tiles, satellite scenes, Commons photos) | `geo2stl/cache.py::image_dir` — honours `MAP2STL_IMAGES` (2026-10-17, shipped) | 1.1 GB, 34k files |
 | `output/` | three independent `/ "output"` joins; there is no `OUTPUT_DIR` constant | **1.9 GB** |
 | `output/usage/<date>.jsonl` | `app/server/routers/usage.py::usage_dir` — already env-overridable | small |
 | `output/height_reports/` | `app/server/routers/reports.py::_ROOTS` | small |

@@ -96,12 +96,12 @@ def rescreen(region: str, masks) -> None:
             img = np.asarray(_I.open(io.BytesIO(r.content)).convert("RGB"))
             _outline(row, img, arrs, masks)
             if "px" in row:
-                (d / "img").mkdir(exist_ok=True)
-                _I.fromarray(img).save(d / "img" / f"{row['key']}.jpg", quality=88)
+                cp.img_dir(d).mkdir(parents=True, exist_ok=True)
+                _I.fromarray(img).save(cp.img_dir(d) / f"{row['key']}.jpg", quality=88)
             n_dark += 1
             time.sleep(0.4)
-        elif "px" in row and "quality" not in row and (d / "img" / f"{row['key']}.jpg").exists():
-            img = np.asarray(_I.open(d / "img" / f"{row['key']}.jpg").convert("RGB"))
+        elif "px" in row and "quality" not in row and (cp.img_dir(d) / f"{row['key']}.jpg").exists():
+            img = np.asarray(_I.open(cp.img_dir(d) / f"{row['key']}.jpg").convert("RGB"))
             row["quality"] = cp.skyline_quality(img, arrs[row["key"]], row["px"][1])
             row["sky_value"] = cp.sky_value(img)
             n_q += 1

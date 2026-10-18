@@ -125,3 +125,21 @@ def test_default_tile_cache_dir_follows_cache_root(tmp_path, monkeypatch):
     monkeypatch.setattr(geo_cache, "CACHE_ROOT", tmp_path)
     assert imagery.default_tile_cache_dir() == tmp_path / "tiles" / "esri"
     assert imagery.default_tile_cache_dir("other") == tmp_path / "tiles" / "other"
+
+
+def test_images_env_moves_bulk_jpeg_caches(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from city2stl.skyline import commons_photos as cp
+    from geo2stl import cache as geo_cache
+    monkeypatch.setattr(geo_cache, "CACHE_ROOT", tmp_path / "arrays")
+    monkeypatch.delenv("MAP2STL_IMAGES", raising=False)
+    assert geo_cache.image_dir("x/y", "a", "b") == Path("x/y")
+    assert imagery.default_tile_cache_dir() == tmp_path / "arrays" / "tiles" / "esri"
+    region = tmp_path / "runs" / "commons_cache" / "miami"
+    assert cp.img_dir(region) == region / "img"
+
+    monkeypatch.setenv("MAP2STL_IMAGES", str(tmp_path / "imgs"))
+    assert geo_cache.image_dir("x/y", "a", "b") == tmp_path / "imgs" / "a" / "b"
+    assert imagery.default_tile_cache_dir() == tmp_path / "imgs" / "tiles" / "esri"
+    assert cp.img_dir(region) == tmp_path / "imgs" / "commons" / "miami"

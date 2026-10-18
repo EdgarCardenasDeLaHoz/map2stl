@@ -193,3 +193,21 @@ How a DEM plus vector layers becomes one printable solid: the two-stage pipeline
 - **Why:** Seville killed the server twice (Windows access violation in Triangle, exit 139, no traceback); a `try/except` cannot catch a C fault. Repair, not rejection, because courtyard buildings are legitimate. Seville meshing legitimately takes 305 s, Cordoba 598 s (old limit 120 s).
 - **Supersedes / superseded by:** the old mesher is gone; the lesson stands — draped slabs no longer use Triangle ([2026-09-27 build speed](#2026-09-27--city-builds-are-fast-through-print-layer-merging-content-keyed-caches-and-no-triangle-in-draped-slabs)).
 - **Source:** decisions.md 2026-09-04 degenerate-rings entry.
+
+## 2026-10-17: Bulk JPEG caches live outside OneDrive (`MAP2STL_IMAGES`)
+
+- **Decision:** the regenerable JPEG caches are read and written under `$MAP2STL_IMAGES` when it is set,
+  through one helper, `geo2stl.cache.image_dir(default, *kind)`. Unset, the old in-tree paths are used.
+  - Layout: `roof_tiles/`, `tiles/<provider>/`, `satellite/<region>/tiles/<scene>/`, `commons/<region>/`.
+  - Callers: `roof_tiles.CACHE`, `imagery.default_tile_cache_dir`, `commons_photos.img_dir` (scripts 13, 16, 17),
+    `20_satellite_heights.py`.
+- **Why:** 34,508 JPEGs (1.12 GB, 33,480 of them under 100 KB). OneDrive's cost is per file, so the upload and
+  download churn broke builds, git and pip (file handles, cloud-only placeholders). None of it needs a backup:
+  it all refetches.
+- **Rejected:** a junction (hides the move from the code, breaks on the other PC); `%LOCALAPPDATA%` (the Claude
+  desktop app is MSIX-sandboxed and silently redirects writes); folding it into `MAP2STL_CACHE` (that is the array
+  cache and is wanted separately).
+- **Reviewed outputs** (benchmark and region-report renders, review thumbs, mockups; about 100 MB) are not
+  regenerable cheaply, so they stay in OneDrive as a few zips, one per run.
+- **Each PC** sets its own `MAP2STL_IMAGES` (here `C:/Users/eac84/data/map2stl-images`). Without it the app still
+  works and refetches into the old folders.

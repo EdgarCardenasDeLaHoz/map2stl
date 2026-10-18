@@ -162,9 +162,10 @@ def default_tile_cache_dir(provider: str = TILE_PROVIDER) -> Path:
     """Shared tile cache of *provider*: ``CACHE_ROOT/tiles/<provider>``.
 
     Reads ``geo2stl.cache.CACHE_ROOT`` at call time, so ``$MAP2STL_CACHE``
-    and tests that patch the root move it too.
+    and tests that patch the root move it too; ``$MAP2STL_IMAGES`` moves it
+    to ``<images>/tiles/<provider>`` (``geo2stl.cache.image_dir``).
     """
-    return Path(_geo_cache.CACHE_ROOT) / "tiles" / provider
+    return _geo_cache.image_dir(Path(_geo_cache.CACHE_ROOT) / "tiles" / provider, "tiles", provider)
 
 
 def tile_cache_path(cache_dir: str | os.PathLike, zoom: int, x: int, y: int) -> Path:

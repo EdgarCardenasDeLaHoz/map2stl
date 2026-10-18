@@ -61,6 +61,7 @@ from city2stl.height.satellite import footprints_from_records  # noqa: E402
 from city2stl.height.satellite import measure as sm  # noqa: E402
 from city2stl.height.satellite import readings as sr  # noqa: E402
 from city2stl.height.satellite import scene as ss  # noqa: E402
+from geo2stl.cache import image_dir  # noqa: E402
 
 log = logging.getLogger("satellite_heights")
 RUNS = Path(__file__).resolve().parents[1] / "runs"
@@ -176,6 +177,7 @@ def main(argv=None) -> int:
         return merge_joint(readings_path(a.region), Path(a.merge_joint))
     t0 = time.time()
     rd = region_dir(a.region)
+    tiles_root = image_dir(rd / "tiles", "satellite", a.region, "tiles")   # $MAP2STL_IMAGES
     rd.mkdir(parents=True, exist_ok=True)
     recs, bbox = load_records(a.region)
     fps = footprints_from_records(recs)
@@ -198,14 +200,14 @@ def main(argv=None) -> int:
     names = [n for n in names if n != ref] + [ref]   # reference last (w4 order)
     stats = {}
     for n in names:
-        d = rd / "tiles" / n
+        d = tiles_root / n
         if a.seed_tiles and (Path(a.seed_tiles) / n).is_dir():
             d.mkdir(parents=True, exist_ok=True)
             for p in (Path(a.seed_tiles) / n).glob("18_*.jpg"):
                 if not (d / p.name).exists():
                     shutil.copy2(p, d / p.name)
     # footprints measured: centre tile cached in the reference scene, inside its outline
-    ref_src = ss.TileSource(rd / "tiles" / ref)
+    ref_src = ss.TileSource(tiles_root / ref)
     lat0 = float(np.mean([f["lat"] for f in fps])) if fps else lat_c
     M = ss.mpp(lat0)
     log.info("before: %d of %d footprints on cached %s tiles", len(on_tiles(fps, ref_src)), len(fps), ref)
@@ -220,7 +222,7 @@ def main(argv=None) -> int:
         cfg = ss.wayback_config(cfg_path)
         for n in names:
             need = scene_tiles([f for f in fps if f["fid"] in inside[n]], M)
-            stats[n] = ss.fetch_tiles(cfg[scenes_rel[n]]["itemURL"], rd / "tiles" / n, need)
+            stats[n] = ss.fetch_tiles(cfg[scenes_rel[n]]["itemURL"], tiles_root / n, need)
             log.info("tiles %s %s", n, stats[n])
         ref_src.refresh()
     sel = [f for f in on_tiles(fps, ref_src) if f["fid"] in inside[ref]]
@@ -237,7 +239,7 @@ def main(argv=None) -> int:
     fixed_sun = {k: tuple(map(float, v.split(","))) for k, v in (s.split("=", 1) for s in a.sun)}
     scenes = []
     for n in names:
-        src = ss.TileSource(rd / "tiles" / n)
+        src = ss.TileSource(tiles_root / n)
         sc = ss.Scene(name=n, tiles=src, date=n[:10].replace("-", ""), sensor=n[11:])
         if n not in geom:
             log.info("fitting %s", n)
