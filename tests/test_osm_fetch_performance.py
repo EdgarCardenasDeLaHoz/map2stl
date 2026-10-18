@@ -135,3 +135,13 @@ def test_slow_lakes_are_skipped_then_cached(monkeypatch):
         fetch.fetch_osm_lakes(2.0, 1.0, 2.0, 1.0, wait_s=0.05)
     time.sleep(0.6)                                       # the fetch went on in the background
     assert fetch.fetch_osm_lakes(2.0, 1.0, 2.0, 1.0, wait_s=0.05)["features"] == [{"id": 7}]
+
+
+def test_unconfirmed_endpoints_put_reachable_mirrors_first(monkeypatch):
+    """With every /status probe failed, a mirror that answered HTTP comes before a silent one."""
+    a, *rest = osm.OVERPASS_ENDPOINTS
+    monkeypatch.setattr(osm, "_REACHED", {a: False, **dict.fromkeys(rest, True)})
+    monkeypatch.setattr(osm, "_FAILED_AT", {})
+    assert osm.unconfirmed_overpass_endpoints() == [*rest, a]
+    monkeypatch.setattr(osm, "_FAILED_AT", {rest[0]: osm.time.monotonic()})
+    assert osm.unconfirmed_overpass_endpoints() == [*rest[1:], a, rest[0]]

@@ -192,7 +192,10 @@ the rest below.
   Workaround used for Cartagena: a scratch run that put mail.ru first. A cached city now falls
   back to an outdated copy with `stale_cache_warning` (`city_data._serve_stale_or_raise`), but only
   when that copy has every requested layer; a cache with some layers still fetches the rest.
-- Fix to make: tolerate a failed probe by trying the query anyway, and send a custom user agent.
+- **Fixed 2026-10-18:** the probe already sent osmnx's user agent. When no mirror passes it,
+  `city2stl.fetch.fetch_osm_data` now tries them all (`geo2stl.osm.unconfirmed_overpass_endpoints`:
+  a mirror that answered HTTP first, one that failed a real query last) and fails over per layer.
+  `geo2stl/trails.py` still uses the strict list. A partial cache still does not serve stale.
 
 ### 0h. The local SRTM h5 store is sparse; missing tiles were a silent flat 0 (2026-10-14)
 - `strm_h5/strm_data.h5` holds 94 tiles (of ~870 SRTM land tiles). "Amazon" (N15 S-19

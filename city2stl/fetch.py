@@ -44,6 +44,7 @@ from geo2stl.geo import M_PER_DEG_LAT  # noqa: E402
 from geo2stl.osm import OVERPASS_ENDPOINTS as _OVERPASS_ENDPOINTS  # noqa: E402
 from geo2stl.osm import healthy_overpass_endpoints as _healthy_overpass_endpoints  # noqa: E402
 from geo2stl.osm import mark_overpass_failure, use_overpass_endpoint  # noqa: E402
+from geo2stl.osm import unconfirmed_overpass_endpoints as _unconfirmed  # noqa: E402,E501
 
 # Per-request budget for the Overpass queries themselves. A city-sized
 # buildings query on a healthy mirror is ~60 s; 300 s leaves room for a loaded
@@ -368,6 +369,10 @@ def fetch_osm_data(
         raise RuntimeError("osmnx is not installed. Run: pip install osmnx") from exc
 
     healthy = _healthy_overpass_endpoints()
+    if not healthy:
+        # A failed /status probe is not proof the mirror cannot answer queries; try them all.
+        logger.warning("No Overpass mirror answered /status; trying them all anyway")
+        healthy = _unconfirmed()
     if not healthy:
         raise RuntimeError(
             "No Overpass endpoint answered its /status probe: "
