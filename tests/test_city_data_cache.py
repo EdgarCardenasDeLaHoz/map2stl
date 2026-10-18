@@ -184,3 +184,56 @@ class TestAnyToleranceRead:
 
     def test_nothing_cached(self, tmp_data_dir):
         assert self._read() == ({}, None)
+
+
+class TestStaleFallbackWhenOverpassIsDown:
+    def _down(self, exc=None):
+        from city2stl.fetch import OverpassUpstreamError
+        return patch("app.server.core.city_data.fetch_osm_data",
+                     side_effect=exc or OverpassUpstreamError("All 2 Overpass mirror(s) failed"))
+
+    def _call(self, tol=0.5, min_area=5.0):
+        return city_data.get_city_layers(BBOX["north"], BBOX["south"], BBOX["east"], BBOX["west"],
+                                         ["buildings", "roads", "waterways"], tol, min_area)
+
+    def test_outdated_payload_is_served_with_a_warning_and_not_rewritten(self, tmp_data_dir):
+        old = _payload([_building(100, 100, 20, 10)])
+        old["city_pipeline_version"] = CITY_PIPELINE_VERSION - 2
+        key = _seed(old, tol=0.5, min_area=5.0)
+        with self._down():
+            out = self._call()
+        assert out["buildings"]["features"]
+        assert "outdated cached copy" in out["stale_cache_warning"]
+        assert read_osm_cache(key)["city_pipeline_version"] == CITY_PIPELINE_VERSION - 2
+
+    def test_a_finer_outdated_entry_is_derived_for_the_request(self, tmp_data_dir):
+        old = _payload([_building(100, 100, 20, 10), _building(300, 300, 3, 3)])
+        old["city_pipeline_version"] = CITY_PIPELINE_VERSION - 2
+        _seed(old, tol=0.5, min_area=5.0)
+        with self._down():
+            out = self._call(tol=3.0, min_area=20.0)
+        assert len(out["buildings"]["features"]) == 1
+        assert out["stale_cache_warning"]
+
+    def test_the_osmnx_less_runtime_error_for_no_healthy_mirror_also_falls_back(self, tmp_data_dir):
+        old = _payload([_building(100, 100, 20, 10)])
+        old["city_pipeline_version"] = CITY_PIPELINE_VERSION - 2
+        _seed(old, tol=0.5, min_area=5.0)
+        with self._down(RuntimeError("No Overpass endpoint answered its /status probe: a, b")):
+            assert self._call()["stale_cache_warning"]
+
+    def test_no_cache_at_all_still_raises(self, tmp_data_dir):
+        import pytest
+
+        from city2stl.fetch import OverpassUpstreamError
+        with self._down(), pytest.raises(OverpassUpstreamError):
+            self._call()
+
+    def test_an_unrelated_runtime_error_is_not_swallowed(self, tmp_data_dir):
+        import pytest
+        old = _payload([_building(100, 100, 20, 10)])
+        old["city_pipeline_version"] = CITY_PIPELINE_VERSION - 2
+        _seed(old, tol=0.5, min_area=5.0)
+        with self._down(RuntimeError("osmnx is not installed")), pytest.raises(RuntimeError):
+            self._call()
+

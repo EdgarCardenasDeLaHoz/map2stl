@@ -30,11 +30,12 @@ import logging
 import mimetypes
 import os
 import re
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from city2stl.skyline.report_index import parse_pano_rows, seed_source, stat
 from city2stl.skyline.tier_display import (
@@ -195,6 +196,51 @@ def _mtime(path: Path) -> str | None:
         return None
 
 
+#: ``claude/scripts/pack_run_images.py`` zips a run's JPEGs into ``<run>/images.zip`` (OneDrive cost is per
+#: file). The viewer reads them back out of the zip, so a packed run still shows its images.
+_PACKED = "images.zip"
+
+
+def _packed_names(report_dir: Path, sub: str) -> list[str]:
+    """File names under ``<sub>/`` inside ``report_dir/images.zip`` (empty when there is none)."""
+    zp = report_dir / _PACKED
+    if not zp.is_file():
+        return []
+    try:
+        with zipfile.ZipFile(zp) as z:
+            return sorted(n.split("/", 1)[1] for n in z.namelist()
+                          if n.startswith(sub + "/") and "/" not in n[len(sub) + 1:] and n[len(sub) + 1:])
+    except (OSError, zipfile.BadZipFile) as e:
+        logger.warning("Cannot read %s: %s", zp, e)
+        return []
+
+
+def _packed_member(root_key: str, rel_path: str) -> tuple[bytes, str] | None:
+    """Bytes of ``rel_path`` from the nearest ``images.zip`` above it, or None.
+
+    Same containment rule as ``_safe_path``: the path is normalised and must stay under the root.
+    """
+    root = _ROOTS.get(root_key) or _REG_ROOTS.get(root_key)
+    if root is None or not root.is_dir():
+        return None
+    base = root.resolve()
+    target = Path(os.path.normpath(base / rel_path))
+    if not target.is_relative_to(base) or target.suffix.lower() not in (".jpg", ".jpeg"):
+        return None
+    for folder in target.parents:
+        if folder == base.parent or not folder.is_relative_to(base):
+            break
+        zp = folder / _PACKED
+        if zp.is_file():
+            name = target.relative_to(folder).as_posix()
+            try:
+                with zipfile.ZipFile(zp) as z:
+                    return z.read(name), mimetypes.guess_type(name)[0] or "image/jpeg"
+            except (KeyError, OSError, zipfile.BadZipFile):
+                return None
+    return None
+
+
 def _count(dir_path: Path, pattern: str) -> int:
     return len(list(dir_path.glob(pattern))) if dir_path.is_dir() else 0
 
@@ -228,10 +274,10 @@ def _region_entry(report_dir: Path) -> dict:
         entry["heights_json"] = f"{url_base}/heights.json"
 
     web_dir = report_dir / "web_images"
-    if web_dir.is_dir():
-        entry["web_images"] = [f"{url_base}/web_images/{p.name}"
-                               for p in sorted(web_dir.iterdir())
-                               if p.suffix.lower() in (".jpg", ".jpeg", ".png")]
+    names = {p.name for p in web_dir.iterdir()
+             if p.suffix.lower() in (".jpg", ".jpeg", ".png")} if web_dir.is_dir() else set()
+    names |= set(_packed_names(report_dir, "web_images"))
+    entry["web_images"] = [f"{url_base}/web_images/{n}" for n in sorted(names)]
 
     if index_path.is_file():
         try:
@@ -553,7 +599,13 @@ def _safe_path(root_key: str, rel_path: str) -> Path:
 @router.get("/reports/files/{root_key}/{rel_path:path}")
 async def reports_file(root_key: str, rel_path: str):
     """Serve one artifact file out of a report directory."""
-    path = _safe_path(root_key, rel_path)
+    try:
+        path = _safe_path(root_key, rel_path)
+    except HTTPException as e:
+        packed = _packed_member(root_key, rel_path) if e.status_code == 404 else None
+        if packed is None:
+            raise
+        return Response(packed[0], media_type=packed[1], headers={"Cache-Control": "no-cache"})
     mime, _ = mimetypes.guess_type(str(path))
     # Reports are rewritten in place by a re-run, so a cached copy would show the previous batch.
     return FileResponse(path, media_type=mime or "application/octet-stream",

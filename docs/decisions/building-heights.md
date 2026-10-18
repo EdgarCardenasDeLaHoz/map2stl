@@ -7,6 +7,26 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-17 — The city export can take corroborated + single panorama heights, opt-in; tag and prior rows stay out
+- **Decision (user, 2026-10-17):** a city export request may carry `panorama_heights` (a region report
+  name, folder or `heights.json`). `city2stl/panorama_heights.py` replaces the height of a footprint
+  that has the default or a raster height with the report's `effective_height_m`, for tiers
+  `corroborated` and `single` only; source becomes `panorama_corroborated` / `panorama_single`, the
+  old value is kept as `height_prev_m` / `height_prev_source`, and report.json gets a
+  `panorama_heights` block (rows, applied, skipped).
+- **Why these tiers:** `tag` rows already carry the OSM tag (and the exporter reads the tag itself),
+  `prior` rows are the height model's guess, `survey` rows are lidar the exporter fetches on its own.
+  Never replaced: `osm_tag`, `osm_levels`, `landmark`, `survey*`, `lidar*`: a measurement or a
+  stated height beats one panorama reading.
+- **Why by footprint overlap (IoU ≥ 0.5, best overlap wins):** a report is built from an earlier fetch
+  of the area, so OSM ids and vertices do not match.
+- **Measured (Cartagena, v19_extras, OSM fetched 2026-10-17, 3,104 buildings):** 147 rows → 133
+  features changed (21 corroborated, 112 single), 13 rows kept because the footprint has an OSM tag
+  or levels, 1 without a footprint match. The Bocagrande tower rows rise in the 3D export where the
+  base build had raster / default heights.
+- **Not validated:** the panorama heights are only as good as their tiers (see the 2026-10-12
+  entries); the option is off by default.
+
 ### 2026-10-17 — The survey fill covers the landmark layers and walls, and treats a bare 10.0 m height tag as a fallback
 - **Decision:** `city2stl/height/survey_fill.py::fill_layer_heights` fills `towers`, `churches`,
   `fortifications` and `walls` as well as `buildings` (walls are lines, buffered 1.5 m each side).

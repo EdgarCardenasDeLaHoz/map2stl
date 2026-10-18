@@ -151,6 +151,23 @@ class TestFileServing:
         assert res.status_code == 200
         assert res.headers["content-type"] == "image/png"
 
+
+    def test_packed_images_are_served_and_listed(self, client, report_tree):
+        import zipfile
+        d = report_tree / "region_reports" / "testville_skyline_report"
+        with zipfile.ZipFile(d / "images.zip", "w") as z:
+            z.writestr("assets/photos/a.jpg", b"JPEGDATA")
+            z.writestr("web_images/w.jpg", b"WEB")
+        res = client.get("/reports/files/region/testville_skyline_report/assets/photos/a.jpg")
+        assert res.status_code == 200 and res.content == b"JPEGDATA"
+        assert res.headers["content-type"] == "image/jpeg"
+        entry = [r for r in client.get("/api/reports/index").json()["regions"]
+                 if r["dir"] == "testville_skyline_report"][0]
+        assert entry["web_images"] == ["/reports/files/region/testville_skyline_report/web_images/w.jpg"]
+        # a name that is not in the zip, a non-image, and a path out of the run stay 404
+        for rel in ("assets/photos/none.jpg", "index.html.jpg", "../../x/assets/photos/a.jpg"):
+            assert client.get(f"/reports/files/region/testville_skyline_report/{rel}").status_code == 404
+
     @pytest.mark.parametrize("rel", [
         "../secret.txt",
         "testville_skyline_report/../../secret.txt",

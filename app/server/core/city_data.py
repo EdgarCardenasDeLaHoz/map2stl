@@ -34,7 +34,7 @@ from city2stl.cache_policy import (
     city_cache_missing_height_source,
     city_cache_stale_buildings_only,
 )
-from city2stl.fetch import FetchCancelled, fetch_osm_data
+from city2stl.fetch import FetchCancelled, OverpassUpstreamError, fetch_osm_data
 from city2stl.height.service import enhance_city_data
 from city2stl.height.survey_fill import fill_layer_heights, fillable
 from city2stl.heights import apply_low_default_heights
@@ -111,8 +111,17 @@ def get_city_layers(north: float, south: float, east: float, west: float,
     logger.info("OSM layers %s not cached for %s; fetching", missing, key[:8])
     hooks = {k: v for k, v in (("progress", progress), ("on_mirror", on_mirror),
                                ("should_cancel", should_cancel)) if v}
-    fetched = fetch_osm_data(north, south, east, west, missing, simplify_tolerance, min_area,
-                             **hooks)
+    try:
+        fetched = fetch_osm_data(north, south, east, west, missing, simplify_tolerance, min_area,
+                                 **hooks)
+    except OverpassUpstreamError as exc:
+        return _serve_stale_or_raise(exc, north, south, east, west, layers,
+                                     simplify_tolerance, min_area, key)
+    except RuntimeError as exc:
+        if "Overpass" not in str(exc):
+            raise
+        return _serve_stale_or_raise(exc, north, south, east, west, layers,
+                                     simplify_tolerance, min_area, key)
     if "buildings" in fetched:
         if should_cancel and should_cancel():
             raise FetchCancelled("City fetch cancelled")
@@ -368,6 +377,42 @@ def with_low_default_heights(payload: dict) -> dict:
         return payload
     logger.info("Lowered %d ruins / enclosures to the 3 m default", n)
     return {**payload, "buildings": fc}
+
+
+def _serve_stale_or_raise(exc: Exception, north, south, east, west, layers, tol, min_area,
+                          key: str) -> dict:
+    """No Overpass mirror answered: serve an outdated cached payload, flagged, or re-raise.
+
+    The payload is the exact entry or one derived from a finer / enclosing entry, taken
+    whatever its pipeline version (an old payload still has the right footprints; its
+    heights may be older). It carries ``stale_cache_warning`` and is never written back,
+    so the next request tries Overpass again.
+    """
+    stale = _stale_payload(north, south, east, west, layers, tol, min_area, key)
+    if not stale:
+        raise exc
+    version = int(stale.get("city_pipeline_version") or 0)
+    msg = (f"Overpass is not answering ({exc}); using an outdated cached copy of the city "
+           f"data (pipeline v{version}, current v{CITY_PIPELINE_VERSION}). Re-fetch once "
+           f"Overpass is back.")
+    logger.warning(msg)
+    return {**stale, "cache_key": key, "stale_cache_warning": msg}
+
+
+def _stale_payload(north, south, east, west, layers, tol, min_area, key: str) -> dict:
+    """Any cached payload holding every requested layer, outdated or not, else ``{}``."""
+    def has_all(p: dict) -> bool:
+        return bool(p) and all(_is_fc(p.get(n)) for n in layers)
+
+    exact = read_osm_cache(key) or {}
+    if has_all(exact):
+        return exact
+    for cand in _candidates(north, south, east, west, tol, min_area):
+        src = read_osm_cache(cand["key"]) or {}
+        if has_all(src):
+            return derive_city_payload(src, float(cand["tol"]), float(cand["min_area"]),
+                                       north, south, east, west, float(tol), float(min_area))
+    return {}
 
 
 # ---------------------------------------------------------------------------

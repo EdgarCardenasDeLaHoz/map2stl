@@ -137,6 +137,8 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - DEM handoff: `dem_id` handles `map2stl/app/server/core/dem_store.py::DemStore`; the one cache key `map2stl/app/server/core/dem_cache.py::dem_cache_key` (`DEM_CACHE_SCHEMA_VERSION`)
 - Background tasks and download: `map2stl/app/server/core/export_tasks.py` (`start_export_task`, `get_task_status`, `get_task_file`)
 - City export task (layers, trails, landmark overrides): `map2stl/app/server/core/city_model_task.py::run_city_model` (`normalize_request`, `city_osm_params`)
+- Panorama (skyline report) heights into a city export, opt-in `panorama_heights`: `map2stl/city2stl/panorama_heights.py::apply_panorama_heights` — [why](decisions/building-heights.md)
+- OSM city layers served from an outdated cache when Overpass is down: `map2stl/app/server/core/city_data.py::_serve_stale_or_raise` (`_stale_payload`)
 - Live 3D preview (TIN capped at `PREVIEW_MAX_FACES`, strided DEMs): `map2stl/app/server/core/export.py::generate_mesh_preview` (`_preview_mesh`)
 - Terrain puzzle: `map2stl/app/server/core/export.py::generate_puzzle` (`puzzle_spec`); cutting, engraving, plates `map2stl/app/server/core/puzzle.py` (`plan_grid`, `choose_method`, `knob_size`, `cut_pieces`, `cut_to_zip`, `volume_check`)
 - Puzzle fit for FDM (clearance 0.45, corner radius, bottom chamfer) and the fit-test coupon: `map2stl/app/server/core/puzzle.py::fit_test_mesh` (`DEFAULT_KNOB_SHAPE` = notched, `DEFAULT_CLEARANCE_MM`, `CORNER_RADIUS_MM`, `CHAMFER_MM`), route `map2stl/app/server/core/export.py::generate_fit_test`, button `export-handlers.js::downloadFitTest`
