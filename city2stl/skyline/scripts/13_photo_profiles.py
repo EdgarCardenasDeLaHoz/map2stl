@@ -32,13 +32,14 @@ from PIL import Image
 
 from city2stl.skyline import commons_photos as cp
 from city2stl.skyline import skyline_match as sm
+from city2stl.skyline.local_dirs import local_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WIDTH = 1600
 
 
 def cache_dir(region: str) -> Path:
-    return ROOT / "runs" / "commons_cache" / region
+    return local_dir("commons_cache") / region
 
 
 def load_profiles(region: str) -> tuple[list[dict], dict[str, np.ndarray]]:

@@ -22,10 +22,11 @@ import numpy as np
 import requests
 
 from ._core.util import _load_env_file_if_present
+from .local_dirs import local_dir
 
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 STREETVIEW_IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"
-_SV_IMAGE_CACHE_DIR = Path(__file__).parent / "runs" / "image_cache"
+_SV_IMAGE_CACHE_DIR = local_dir("image_cache")
 
 # Retry/backoff policy for the image endpoint. Previously any non-200 was
 # treated as "no imagery available" and returned None with no retry and no

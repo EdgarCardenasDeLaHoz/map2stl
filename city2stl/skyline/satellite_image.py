@@ -29,14 +29,15 @@ import hashlib
 import json
 import math
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from geo2stl import imagery
 
-_CACHE_DIR = Path(__file__).parent / "runs" / "satellite_image_cache"
+from .local_dirs import local_dir
+
+_CACHE_DIR = local_dir("satellite_image_cache")
 
 # Total-tile cap. At 256×256 px per tile the disk footprint is ~25 KB/tile
 # JPEG and ~200 KB/tile raw, so 400 tiles ≈ 10 MB cached / 80 MB in memory
