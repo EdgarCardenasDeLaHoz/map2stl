@@ -11,9 +11,7 @@ import json
 import numpy as np
 import pytest
 from rasterio.transform import Affine
-
-from city2stl import landmarks as lm
-from tests.test_landmarks import (
+from test_landmarks import (
     BBOX,
     BUILDINGS,
     CATHEDRAL,
@@ -24,6 +22,8 @@ from tests.test_landmarks import (
     _fc,
     _flat_scale,
 )
+
+from city2stl import landmarks as lm
 
 # One free-standing tower: only the towers layer has it (no osm_id), at 50 m in OSM.
 T_LON, T_LAT = -3.5995, 37.1745
