@@ -7,6 +7,32 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
 [../research/roof-shape-research.md](../research/roof-shape-research.md); classifier reference:
 [../reference/roof-shape-model.md](../reference/roof-shape-model.md).
 
+### 2026-10-18 — Alhambra reference swap cuts courtyards and keeps taller OSM buildings
+- **Decision:** `city2stl/landmarks.py::ndsm_solid` cuts reference cells under
+  `REFERENCE_OPEN_M` (2.0 m raw) out of a `reference` solid (`_open_cells`, 3x3 opening drops
+  one-cell specks); `_depinch` sets those cells to 0 instead of flooring them at `REFERENCE_MIN_M`.
+  `LandmarkPlan._kept_osm` keeps an OSM building inside a reference outline when its `height_m`
+  beats the reference median over its footprint (`reference_support`) by more than
+  `KEEP_OSM_ABOVE_M` (1.5 m), or when under `KEEP_OSM_MIN_COVER` (50%) of it has reference
+  cells above the threshold; kept footprints are subtracted from the solid (`exclude`).
+  `building:part` features and the outline itself are never kept. `REFERENCE_SOLID_VERSION`
+  (in each override's `spec`, so in `model_cache.overrides_digest`) rebuilds stale solids.
+- **Why:** the Alcazaba outline has no hole and the 1 m floor refilled its Plaza de Armas
+  (reference median inside 5.3 m, only 7% of cells under 1 m); the `REPLACE_OVERLAP` rule also
+  removed 10 / 6 / 4 OSM features under three outlines for blurry ~1 m-cell geometry. User,
+  2026-10-18: "Cut courtyards, keep OSM".
+- **Per-unit cutoff (same day):** a rule unit may carry `open_m` (set to 5.0 on the Alcazaba,
+  `way/26935518`); `reference_landmarks` puts it in the override's `spec` and depinches the raw
+  raster again for that unit, and `_open_cells` / `reference_support` read it via `_open_m`.
+  `REFERENCE_SOLID_VERSION` is 3. Why: Thingiverse raised the Alcazaba's plaza floor to about
+  3 m (median 2.9 m) against 0.22 m lidar, so the 2 m cutoff opened only 29% of it; 5 m opens
+  85%. Rejected: raising the global `REFERENCE_OPEN_M` (opens low roofs in the Nasrid units);
+  subtracting the Thingiverse-minus-lidar bias (it lowers the ramparts too).
+- **Rejected:** subtracting OSM `place=square` / pedestrian areas — not in the plan's inputs, and
+  the reference's own low cells already mark the open ground; keeping `building:part`
+  features — they belong to the swapped building (existing tests swap them on purpose).
+- **Supersedes / superseded by:** refines the 2026-10-17 reference entry below; —.
+
 ### 2026-10-17 — Classified roofs are cached on disk per footprint, keyed by checkpoint hash + geometry + tags
 - **Decision:** `city_data.py::_classify_buildings` looks each untagged building up in
   `<CACHE_ROOT>/roof_shapes.sqlite` (`city2stl/roof_cache.py`) and classifies only the misses; the

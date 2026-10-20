@@ -13,6 +13,12 @@ feature of the :data:`FILL_LAYERS` (``buildings``, and the landmark layers ``tow
   estimate, not a measurement; the payload keeps no raw tag, so a bare 10.0 is read as
   that estimate. A feature the survey cannot measure keeps its tagged height.
 
+**Survey wins when far off** (user decision 2026-10-17): every *other* ``osm_tag`` feature is
+also measured, and replaced only when the survey height differs from the tag by more than
+:data:`TAG_OVERRIDE_MIN_DIFF_M` (``height_source = "survey"``, the tag kept in
+``osm_tag_height_m``). Within that it keeps the tag. ``osm_levels``, ``merged`` and
+``user_override`` features are never touched. Bulk-10 m tags above are always filled.
+
 Lines (city walls) are measured on a strip :data:`LINE_HALF_WIDTH_M` either side.
 The measurement:
 
@@ -81,6 +87,8 @@ _MIN_ERODE_CELLS = 20
 FILL_LAYERS: tuple[str, ...] = ("buildings", "towers", "churches", "fortifications", "walls")
 #: A tagged height of exactly this is the mappers' round-number estimate (see the docstring).
 BULK_TAG_HEIGHT_M = 10.0
+#: An ``osm_tag`` height is replaced by the survey's only when they differ by more than this.
+TAG_OVERRIDE_MIN_DIFF_M = 3.0
 #: A line (city wall) is measured on this strip either side of it.
 LINE_HALF_WIDTH_M = 1.5
 _M_PER_DEG = 111_320.0
@@ -209,14 +217,20 @@ def fillable(props: dict | None) -> bool:
     return False
 
 
+def _is_tag(props: dict | None) -> bool:
+    return (props or {}).get("height_source") == "osm_tag"
+
+
 def _default_polygons(features: list[dict]) -> dict[int, object]:
-    """``{index: shapely geometry}`` of the :func:`fillable` features. Polygons as they are,
-    lines buffered by :data:`LINE_HALF_WIDTH_M`."""
+    """``{index: shapely geometry}`` of the :func:`fillable` features and of every other
+    ``osm_tag`` feature (checked against the survey). Polygons as they are, lines buffered
+    by :data:`LINE_HALF_WIDTH_M`."""
     from shapely.geometry import shape
 
     out = {}
     for i, feat in enumerate(features):
-        if not fillable(feat.get("properties")):
+        props = feat.get("properties")
+        if not (fillable(props) or _is_tag(props)):
             continue
         geom = feat.get("geometry") or {}
         kind = geom.get("type")
@@ -259,8 +273,10 @@ def fill_layer_heights(layers: dict, bbox, *,
     each source is read once for all layers. ``stats`` is None when no fill was tried:
     nothing fillable, or no validated survey covers ``bbox``. Otherwise it is a dict
     with ``source``, ``fallback``, ``resolution_m``, ``defaults``, ``filled``,
-    ``by_source``, ``unmeasured`` and ``layers`` (``{name: {"defaults", "filled"}}``),
-    plus ``skipped`` or ``error`` when the fill could not run. A failing fallback leaves
+    ``by_source``, ``unmeasured``, ``tag_checked``, ``tag_replaced`` and ``layers``
+    (``{name: {"defaults", "filled", "tag_replaced"}}``; ``defaults`` / ``filled`` /
+    ``unmeasured`` count only the :func:`fillable` features, the other ``osm_tag``
+    features are ``tag_checked`` and, when the survey is far off, ``tag_replaced``), plus ``skipped`` or ``error`` when the fill could not run. A failing fallback leaves
     the primary's heights in place. The input is never mutated; a new dict (with new
     collections for the layers that changed) is returned when anything changed.
     """
@@ -275,16 +291,21 @@ def fill_layer_heights(layers: dict, bbox, *,
         polys.update({(name, i): g for i, g in _default_polygons(features).items()})
     if not polys:
         return layers, None
+    fill_keys = {k for k in polys if fillable(feats[k[0]][k[1]].get("properties"))}
+    if not fill_keys and not any(_is_tag(feats[k[0]][k[1]].get("properties")) for k in polys):
+        return layers, None
     src = source_for(bbox)
     if src is None:
         return layers, None
     fetch = fetch or _fetch_default
-    per_layer = {n: {"defaults": sum(1 for k in polys if k[0] == n), "filled": 0}
-                 for n in feats}
+    per_layer = {n: {"defaults": sum(1 for k in polys if k[0] == n and k in fill_keys),
+                     "filled": 0, "tag_replaced": 0} for n in feats}
+    n_tag = len(polys) - len(fill_keys)
     stats: dict = {"source": src.primary, "fallback": src.fallback, "resolution_m": None,
-                   "defaults": len(polys), "filled": 0, "by_source": {},
-                   "unmeasured": len(polys),
-                   "layers": {n: v for n, v in per_layer.items() if v["defaults"]}}
+                   "defaults": len(fill_keys), "filled": 0, "by_source": {},
+                   "unmeasured": len(fill_keys), "tag_checked": n_tag, "tag_replaced": 0,
+                   "layers": {n: v for n, v in per_layer.items()
+                              if any(k[0] == n for k in polys)}}
     res = fill_resolution(bbox)
     if res is None:
         stats["skipped"] = f"bbox needs cells coarser than {MAX_FILL_RESOLUTION_M} m"
@@ -322,21 +343,32 @@ def fill_layer_heights(layers: dict, bbox, *,
                 if v is not None:
                     heights[k] = (v, src.fallback)
 
+    # A tagged (non-fillable) row: the survey replaces the tag only when far off.
+    for k in [k for k in heights if k not in fill_keys]:
+        tag_h = feats[k[0]][k[1]]["properties"].get("height_m")
+        shown = round(max(MIN_HEIGHT_M, min(MAX_HEIGHT_M, heights[k][0])), 1)
+        if isinstance(tag_h, (int, float)) and abs(shown - tag_h) <= TAG_OVERRIDE_MIN_DIFF_M:
+            del heights[k]
     if not heights:
         return layers, stats
     new_features = {n: list(f) for n, f in feats.items()}
     for (name, i), (v, source) in heights.items():
         feat = feats[name][i]
-        props = {**(feat.get("properties") or {}),
+        old = feat.get("properties") or {}
+        props = {**old,
                  "height_m": round(max(MIN_HEIGHT_M, min(MAX_HEIGHT_M, v)), 1),
                  "height_source": SOURCE, "survey_source": source}
+        if _is_tag(old):
+            props["osm_tag_height_m"] = old.get("height_m")
         new_features[name][i] = {**feat, "properties": props}
         stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
-        per_layer[name]["filled"] += 1
-    stats["filled"] = len(heights)
-    stats["unmeasured"] = len(polys) - len(heights)
-    logger.info("Survey height fill: %d of %d fallback heights measured (%s; %s)",
-                stats["filled"], len(polys), stats["by_source"],
+        per_layer[name]["tag_replaced" if (name, i) not in fill_keys else "filled"] += 1
+    stats["tag_replaced"] = sum(1 for k in heights if k not in fill_keys)
+    stats["filled"] = len(heights) - stats["tag_replaced"]
+    stats["unmeasured"] = len(fill_keys) - stats["filled"]
+    logger.info("Survey height fill: %d of %d fallback heights measured, %d of %d tagged "
+                "heights replaced (%s; %s)",
+                stats["filled"], len(fill_keys), stats["tag_replaced"], n_tag, stats["by_source"],
                 {n: v["filled"] for n, v in per_layer.items()})
     out = dict(layers)
     for name in {k[0] for k in heights}:

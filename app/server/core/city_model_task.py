@@ -16,7 +16,9 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     solids, with vector_rivers_min_depth_mm (export.mesh_terrain_stage)
     (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
-                    (trails are off unless enabled here; only then are they fetched;
+                    (trails are off unless enabled here, except that where the box holds OSM
+                    downhill ski runs they turn on by themselves, unless the request sets
+                    layers.trails.enabled either way: wants_ski_trails; only then fetched;
                     trees, the lidar canopy, only with {"trees": {"enabled": true,
                     "preview"?: bool}}, off where no survey covers the box: wants_trees)
     layer_data      {layer: FeatureCollection} to use instead of the cached OSM layer
@@ -68,6 +70,7 @@ import os
 import tempfile
 import zipfile
 
+import numpy as np
 from numpy2stl import write3MF
 
 from app.server.config import COARSE_MIN_BUILDING_AREA_M2
@@ -84,7 +87,7 @@ from app.server.core.landmarks import resolve as resolve_landmarks
 from app.server.core.preflight import build_check
 from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.canopy import canopy_layer
-from city2stl.city_model import build_on_terrain, resolve_layers
+from city2stl.city_model import build_on_terrain, is_downhill_piste, resolve_layers
 from city2stl.landmarks import LandmarkError, reference_landmarks
 from city2stl.panorama_heights import apply_panorama_heights
 from city2stl.panorama_heights import load_rows as load_panorama_rows
@@ -165,6 +168,45 @@ def wants_trees(data: dict) -> bool:
     return isinstance(t, dict) and t.get("enabled") is True
 
 
+MOUNTAIN_RELIEF_M = 300.0   # relief below which a box is not checked for ski runs
+
+
+def has_downhill_pistes(trails: dict | None) -> bool:
+    """Whether a trails FeatureCollection holds a downhill run (``is_downhill_piste``)."""
+    return any(is_downhill_piste(f.get("properties") or {})
+               for f in (trails or {}).get("features") or [])
+
+
+def wants_ski_trails(data: dict, bbox: dict, dem_values) -> bool:
+    """F-PISTES: the trails layer turns on by itself where the box holds OSM downhill runs.
+
+    An explicit ``layers.trails.enabled`` (true or false) always wins, so the user's Off
+    stays off. Otherwise the trails cache is read first; on a miss the fetch (one Overpass
+    call, then cached 7 days, shared with the Cities panel's trails) is made only when the
+    DEM's relief is at least ``MOUNTAIN_RELIEF_M``, so a flat city build never queries
+    for trails. Boxes over the size guard are left alone.
+    """
+    t = (data.get("layers") or {}).get("trails")
+    if isinstance(t, dict) and "enabled" in t:
+        return False
+    try:
+        check_city_area(bbox["north"], bbox["south"], bbox["east"], bbox["west"],
+                        ["trails"], bool(data.get("allow_large_city")))
+        trails = _trails(bbox, cached_only=True)
+        if trails is None:
+            z = np.asarray(dem_values, dtype=float)
+            z = z[np.isfinite(z) & (z > -1000)]
+            if not z.size or float(z.max() - z.min()) < MOUNTAIN_RELIEF_M:
+                return False
+            trails = _trails(bbox)
+    except CityAreaTooLarge:
+        return False
+    except Exception as exc:   # an Overpass failure must not fail the build
+        logger.warning("Ski-run check skipped: %s", exc)
+        return False
+    return has_downhill_pistes(trails)
+
+
 def run_city_model(data: dict, task: ExportTask) -> None:
     data = normalize_request(data)
     name = data.get("name") or "city"
@@ -178,6 +220,10 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         return
     bbox = p.bbox
 
+    if wants_ski_trails(data, bbox, p.dem_values):   # F-PISTES: runs on by default
+        layers_req = data.get("layers") or {}
+        data = {**data, "layers": {**layers_req, "trails": {
+            **(layers_req.get("trails") or {}), "enabled": True}}}
     styles = resolve_layers(data.get("layers"))
     enabled = [n for n, s in styles.items() if s.enabled]
     # Size guard (F-REGION): no city layers, trails included, on boxes > 25 km

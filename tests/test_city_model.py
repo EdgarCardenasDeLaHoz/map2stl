@@ -7,14 +7,19 @@ import zipfile
 
 import numpy as np
 import pytest
+import shapely
 import trimesh
+from shapely.geometry import Polygon, box
 
 from city2stl.city_model import (
     DEFAULT_LAYERS,
+    SNAP_MM,
+    LayerStyle,
     build_city_model,
     building_cover,
     choose_scale,
     drop_building_copies,
+    feature_polygons,
     resolve_layers,
 )
 
@@ -141,6 +146,66 @@ class TestCityExportTask:
         assert mesh.is_watertight
         report = json.loads(z.read("report.json"))
         assert report["scale"]["z_mode"] == "true"
+
+
+def _line(props, lon0=-3.60, lon1=-3.58, lat=37.18):
+    return {"geometry": {"type": "LineString", "coordinates": [[lon0, lat], [lon1, lat]]},
+            "properties": props}
+
+
+class TestSkiRuns:
+    """F-PISTES: downhill run lines print 30 m wide, and the layer turns on where they exist."""
+
+    @staticmethod
+    def _width_mm(props):
+        m = build_city_model(_hill(), BBOX, {"trails": _fc(_line(props))},
+                             layer_overrides={"trails": {"enabled": True}})
+        ys = m.parts["trails"].vertices[:, 1]
+        return float(ys.max() - ys.min())
+
+    def test_downhill_line_is_wider_than_a_footpath(self):
+        run = self._width_mm({"piste:type": "downhill"})
+        path = self._width_mm({"highway": "path"})
+        assert run > 2 * path   # 30 m against 3 m (the path is widened to the 0.8 mm print minimum)
+
+    def test_piste_kind(self):
+        from city2stl.city_model import PISTE_LINE_WIDTH_M, _line_width_m, is_downhill_piste
+        style = DEFAULT_LAYERS["trails"]
+        assert PISTE_LINE_WIDTH_M == 30.0
+        assert _line_width_m("trails", {"piste:type": "downhill"}, style) == 30.0
+        assert _line_width_m("trails", {"route": "piste"}, style) == 30.0
+        assert _line_width_m("trails", {"piste:type": "nordic", "route": "piste"}, style) == 3.0
+        assert _line_width_m("trails", {"highway": "path"}, style) == 3.0
+        assert _line_width_m("trails", {"piste:type": "downhill", "width": "12"}, style) == 12.0
+        assert not is_downhill_piste({"piste:type": float("nan")})
+
+    def test_default_on_only_where_pistes_exist(self, monkeypatch):
+        import app.server.core.city_model_task as tm
+        run, path = _fc(_line({"piste:type": "downhill"})), _fc(_line({"highway": "path"}))
+        mountain, flat = [0.0, 900.0] * 8, [100.0, 120.0] * 8
+        calls = []
+
+        def fake(bbox, cached_only=False):
+            calls.append(cached_only)
+            return None if cached_only else fake.fc
+        monkeypatch.setattr(tm, "_trails", fake)
+        fake.fc = run
+        assert tm.wants_ski_trails({}, BBOX, mountain)
+        assert calls == [True, False]            # cache miss, then one fetch
+        calls.clear()
+        assert not tm.wants_ski_trails({}, BBOX, flat)
+        assert calls == [True]                   # flat box: no Overpass call
+        fake.fc = path
+        assert not tm.wants_ski_trails({}, BBOX, mountain)   # paths alone do not count
+
+    def test_explicit_choice_wins(self, monkeypatch):
+        import app.server.core.city_model_task as tm
+        monkeypatch.setattr(tm, "_trails", lambda bbox, cached_only=False: _fc(
+            _line({"piste:type": "downhill"})))
+        mountain = [0.0, 900.0] * 8
+        assert tm.wants_ski_trails({"layers": {}}, BBOX, mountain)
+        assert not tm.wants_ski_trails({"layers": {"trails": {"enabled": False}}}, BBOX, mountain)
+        assert not tm.wants_ski_trails({"layers": {"trails": {"enabled": True}}}, BBOX, mountain)
 
 
 class TestCityOsmParams:
@@ -524,3 +589,54 @@ class TestPrintability:
             {"geometry": ell, "properties": {"height_m": 15, "roof:shape": "hipped"}})})
         assert m.report["layers"]["buildings"]["rejected"] == 0
         assert "buildings" in m.parts
+
+
+class _MmTerrain:
+    """Stand-in terrain: features are already in model mm, so projection is the identity."""
+
+    rect = box(-50, -50, 500, 500)
+
+    def project(self, geoms):
+        return geoms
+
+    def m_to_mm(self, metres):
+        return np.asarray(metres, dtype=float)
+
+
+def _holed_feature(ext, holes):
+    rings = [ext, *holes]
+    return {"geometry": {"type": "Polygon", "coordinates": [[list(p) for p in r] for r in rings]},
+            "properties": {}}
+
+
+class TestFeaturePolygonsHoles:
+    # Palacio de Carlos V (OSM relation/2640220) after projection and snapping, in mm,
+    # shifted to the origin. On the SNAP_MM grid a one-step negative buffer emptied it.
+    CARLOS_EXT = [[26.3, 21.8], [22.07, 0.0], [0.0, 4.3], [4.23, 26.1], [26.3, 21.8]]
+    CARLOS_INT = [[10.9, 18.41], [9.45, 17.43], [8.38, 16.05], [7.83, 14.56], [7.73, 12.66],
+                  [8.22, 10.98], [9.2, 9.53], [10.58, 8.46], [12.29, 7.86], [13.97, 7.81],
+                  [15.64, 8.3], [17.09, 9.28], [18.16, 10.66], [18.78, 12.41], [18.8, 14.05],
+                  [18.32, 15.73], [17.34, 17.18], [15.96, 18.25], [14.32, 18.84], [12.57, 18.9],
+                  [10.9, 18.41]]
+
+    def test_courtyard_building_on_snap_grid_survives(self):
+        feat = _holed_feature(self.CARLOS_EXT, [self.CARLOS_INT])
+        src = shapely.set_precision(Polygon(self.CARLOS_EXT, [self.CARLOS_INT]), SNAP_MM)
+        polys, _, counts = feature_polygons("buildings", [feat], LayerStyle("extrude"), _MmTerrain())
+        assert counts["dropped"] == 0
+        assert len(polys) == 1
+        assert polys[0].area == pytest.approx(src.area, rel=0.01)
+        assert len(polys[0].interiors) == 1
+
+    def test_pinched_hole_is_still_opened(self):
+        ext = [(0, 0), (20, 0), (20, 20), (0, 20), (0, 0)]
+        hole = [(10, 0), (18, 0.5), (2, 0.5), (10, 0)]      # shallow wedge touching the outline at (10, 0)
+        assert Polygon(ext, [hole]).is_valid
+        feat = _holed_feature(ext, [hole])
+        polys, _, counts = feature_polygons("buildings", [feat], LayerStyle("extrude"), _MmTerrain())
+        assert counts["dropped"] == 0
+        total = sum(p.area for p in polys)
+        assert total == pytest.approx(400 - 4, rel=0.01)
+        for p in polys:
+            shell = shapely.LinearRing(p.exterior)
+            assert not any(shapely.LinearRing(h).intersects(shell) for h in p.interiors)

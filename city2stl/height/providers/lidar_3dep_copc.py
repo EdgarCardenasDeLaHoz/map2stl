@@ -293,9 +293,10 @@ def ndsm_for_bbox(bbox, resolution_m: float = 1.0):
 def _grid_ndsm(bbox, res: float):
     from pyproj import Transformer
 
-    from ._survey import SurveyError, as_nsew
+    from ._survey import SurveyError, as_nsew, lonlat_grid
 
     n, s, e, w = as_nsew(bbox)
+    lonlat_grid((n, s, e, w), res)   # an oversized grid fails now, not after the download
     try:
         items = _search_items((n, s, e, w))
     except requests.RequestException as exc:

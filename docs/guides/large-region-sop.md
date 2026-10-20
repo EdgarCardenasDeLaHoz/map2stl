@@ -147,8 +147,8 @@ refresh them). A red outline marks the control each step talks about.
    watertightness in the toast).
 
    ![Export finished](img/region/07-export-finished.png)
-   *2 × 2 puzzle: the cut lines in the preview are the piece boundaries (drag to move
-   one; label "2×2 · drag cuts"); "PUZZLE ready" at the bottom.*
+   *2 × 2 puzzle: the cut lines in the preview are the piece boundaries (shown when
+   Cut lines is set to Show or Move; in Move, drag one to move that cut); "PUZZLE ready" at the bottom.*
 
 8. **QA**: `X-Watertight` / toast (single-file exports), slicer size, and look at a river in the slicer's
    layer preview: it should show in at least two layers.

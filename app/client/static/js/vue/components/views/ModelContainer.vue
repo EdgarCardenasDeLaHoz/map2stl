@@ -125,6 +125,14 @@
                 <input type="checkbox" class="mswitch" role="switch" aria-label="Split into pieces"
                        :checked="splitOn" @change="onSplitToggle">
               </div>
+              <div v-if="splitOn" class="mrow">
+                <div class="mname">Cut lines</div>
+                <div class="mseg mseg-inline" role="radiogroup" aria-label="Cut lines in the preview">
+                  <button v-for="v in CUT_VIEWS" :key="v.id" type="button" role="radio"
+                          :aria-checked="store.cutView === v.id" :class="{ on: store.cutView === v.id }"
+                          :title="v.title" @click="setCutView(v.id)">{{ v.label }}</button>
+                </div>
+              </div>
             </section>
 
             <!-- ═══ DOWNLOAD ═══ -->
@@ -283,7 +291,8 @@
                   </label>
                 </div>
                 <div class="mhint">
-                  Drag the red cut lines in the preview to move a cut.
+                  {{ store.cutView === 'edit' ? 'Drag a red line in the preview to move that cut.'
+                     : 'Choose Move to drag the cuts in the preview.' }}
                   <button type="button" class="btn btn-xs" style="margin-left:4px;"
                           title="Back to equal pieces" @click="resetCuts">Reset cuts</button>
                 </div>
@@ -595,6 +604,16 @@ function onSplitToggle(e: Event) {
   formTick.value++;
 }
 
+const CUT_VIEWS = [
+  { id: 'hidden', label: 'Hide', title: 'No cut lines in the preview' },
+  { id: 'show', label: 'Show', title: 'Show where the pieces are cut; dragging only turns the view' },
+  { id: 'edit', label: 'Move', title: 'Show the cuts and drag one to move it' },
+] as const;
+function setCutView(v: 'hidden' | 'show' | 'edit') {
+  store.cutView = v;
+  (window as any).updatePuzzlePreview?.();
+}
+
 function useBedGrid() {
   const f = bedFit.value;
   if (!f) return;
@@ -743,6 +762,8 @@ function cancelExport() {
   font-size: 12px; cursor: pointer;
 }
 .mseg button.on { background: #3a3a3c; color: #f5f5f7; font-weight: 600; }
+.mseg-inline { width: 168px; margin-bottom: 0; }
+.mseg-inline button { padding: 5px 8px; }
 .mdownload { width: 100%; padding: 10px 0; font-size: 14px; font-weight: 600; border-radius: 12px; margin-bottom: 8px; }
 .mchecks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 4px; font-size: 12px; }
 .mchecks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }

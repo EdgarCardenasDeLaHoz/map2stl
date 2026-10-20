@@ -21,7 +21,7 @@
  */
 const PART_COLORS = {
     roads: '#b08b6a', waterways: '#6b93b0', green: '#8aa47a', railways: '#6e6e6e',
-    trails: '#a8886a',
+    trails: '#a8886a', trees: '#5f8a4e',
 };
 const BUILDING_PARTS = new Set(['buildings', 'churches', 'towers', 'walls', 'fortifications']);
 

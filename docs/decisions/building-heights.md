@@ -7,6 +7,20 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-17 — Survey wins when far off: an osm_tag height is replaced by the survey's beyond 3 m [restored 2026-10-18 after a OneDrive conflict dropped it]
+- **Decision (user, 2026-10-17):** in the survey fill (`city2stl/height/survey_fill.py::fill_layer_heights`) an `osm_tag` feature
+  (any value) that a validated survey covers is replaced when the measured height differs from the tag by more than
+  `TAG_OVERRIDE_MIN_DIFF_M` (3.0 m): `height_source "survey"`, `survey_source` as usual, the tag kept in `osm_tag_height_m`.
+  Within 3 m the tag stays. `osm_levels`, `merged` and `user_override` rows are never touched. Bare 10.0 m tags (`BULK_TAG_HEIGHT_M`)
+  keep their earlier behaviour: always filled. Stats: `tag_checked`, `tag_replaced` (also per layer); `filled` / `defaults` count only
+  fillable rows.
+- **Why:** the tag can be a mapper's guess (Torre de la Vela, del Homenaje and de Comares carry an explicit `height=10` in OSM); lidar
+  is a measurement, but within 3 m the two agree about as well as the survey can be trusted, so the tag is not overwritten.
+- **Rejected:** replacing every tag — survey noise would overwrite good tags; never replacing tags — leaves 10 m towers at 10 m.
+- **Supersedes / superseded by:** refines the fill's "bare 10.0 m `osm_tag` only" rule; — .
+- **Source:** conflict copy `city2stl/height/survey_fill-DESKTOP-TMJM22C.py`. Granada cached payload then: 113 tags checked, 77
+  replaced (Vela 10 -> 28.8 m, Comares 10 -> 36.5 m, Homenaje 10 -> 23.0 m).
+
 ### 2026-10-17 — The city export can take corroborated + single panorama heights, opt-in; tag and prior rows stay out
 - **Decision (user, 2026-10-17):** a city export request may carry `panorama_heights` (a region report
   name, folder or `heights.json`). `city2stl/panorama_heights.py` replaces the height of a footprint

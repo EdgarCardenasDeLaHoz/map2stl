@@ -503,19 +503,16 @@ def _fill_nearest(a: np.ndarray) -> np.ndarray:
     return a[tuple(idx)]
 
 
-def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float,
-               ground_hi: float, z_per_m: float, min_height_mm: float) -> list[Mesh]:
-    """A solid whose top is the nDSM clipped exactly to ``footprint`` (model mm)."""
-    from numpy2stl.core.extrude import close_surface, orient_ccw
-    from scipy.ndimage import map_coordinates
+def _crop(ov: LandmarkOverride, bounds: tuple, terrain):
+    """``(arr, transform, k, off)``: the raster window around ``bounds`` (model mm).
 
-    from city2stl.city_model import triangulate_polygon
-
+    A stored regional raster is large, so everything below works on this window; ``k`` /
+    ``off`` map lon/lat to model mm (``terrain._lonlat_affine``).
+    """
     arr = np.asarray(ov.ndsm, dtype=np.float64)
     t = ov.transform
-    # Work on the raster window around the footprint (a stored regional raster is large).
     k, off = terrain._lonlat_affine()
-    x0, y0, x1, y1 = footprint.bounds
+    x0, y0, x1, y1 = bounds
     lons = (np.array([x0, x1]) - off[0]) / k[0]
     lats = (np.array([y0, y1]) - off[1]) / k[1]
     cs, rs = ~t * (lons, lats)
@@ -524,11 +521,83 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
     if c1 > c0 and r1 > r0 and (r1 - r0, c1 - c0) != arr.shape:
         arr = arr[r0:r1, c0:c1]
         t = t @ Affine.translation(c0, r0)
-    h, w = arr.shape
-    # Cell centres in model mm, and the footprint's coverage by measured cells.
+    return arr, t, k, off
+
+
+def _cell_centres(t, k, off, h: int, w: int) -> np.ndarray:
     cols, rows = np.meshgrid(np.arange(w) + 0.5, np.arange(h) + 0.5)
     lon, lat = t * (cols.ravel(), rows.ravel())
-    centres = np.column_stack([lon, lat]) * k + off
+    return np.column_stack([lon, lat]) * k + off
+
+
+def _open_m(ov: LandmarkOverride) -> float:
+    """The unit's open-ground cutoff (m): its spec's ``open_m``, else :data:`REFERENCE_OPEN_M`."""
+    return float(ov.spec.get("open_m", REFERENCE_OPEN_M))
+
+
+def _open_cells(arr: np.ndarray, t, k, off, open_m: float | None = None):
+    """Polygon (model mm) of the reference cells below ``open_m`` (default
+    :data:`REFERENCE_OPEN_M`), or None.
+
+    One-cell specks are dropped (3x3 opening) so a thin gap in a roof does not cut a sliver.
+    """
+    from scipy.ndimage import binary_opening
+
+    if open_m is None:
+        open_m = REFERENCE_OPEN_M
+    low = np.isfinite(arr) & (arr < open_m)
+    low = binary_opening(low, structure=np.ones((3, 3), bool))
+    if not low.any():
+        return None
+    r, c = np.nonzero(low)
+    lo = np.column_stack(t * (c, r)) * k + off
+    hi = np.column_stack(t * (c + 1, r + 1)) * k + off
+    boxes = shapely.box(np.minimum(lo[:, 0], hi[:, 0]), np.minimum(lo[:, 1], hi[:, 1]),
+                        np.maximum(lo[:, 0], hi[:, 0]), np.maximum(lo[:, 1], hi[:, 1]))
+    return shapely.union_all(boxes)
+
+
+def reference_support(ov: LandmarkOverride, poly: Polygon, terrain) -> tuple[float, float]:
+    """``(median_m, covered)`` of the reference over ``poly`` (model mm).
+
+    ``covered`` is the share of the footprint's cells above the unit's open cutoff
+    (:data:`REFERENCE_OPEN_M` unless its spec sets ``open_m``);
+    ``median_m`` their median height (NaN when none). A footprint smaller than a cell reads
+    the cell under its representative point.
+    """
+    arr, t, k, off = _crop(ov, poly.bounds, terrain)
+    h, w = arr.shape
+    if h == 0 or w == 0:
+        return float("nan"), 0.0
+    centres = _cell_centres(t, k, off, h, w)
+    inside = shapely.contains_xy(poly, centres[:, 0], centres[:, 1])
+    vals = arr.ravel()[inside]
+    if not len(vals):
+        pt = shapely.get_coordinates(poly.representative_point())[0]
+        d = np.hypot(centres[:, 0] - pt[0], centres[:, 1] - pt[1])
+        vals = arr.ravel()[[int(np.argmin(d))]]
+    solid = np.isfinite(vals) & (vals >= _open_m(ov))
+    covered = float(solid.mean())
+    return (float(np.median(vals[solid])) if solid.any() else float("nan")), covered
+
+
+def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float,
+               ground_hi: float, z_per_m: float, min_height_mm: float,
+               exclude=None) -> list[Mesh]:
+    """A solid whose top is the nDSM clipped exactly to ``footprint`` (model mm).
+
+    For a ``reference`` override the cells below the unit's open cutoff (courtyards) are
+    cut out of the solid, and ``exclude`` (kept OSM buildings) is subtracted from it.
+    """
+    from numpy2stl.core.extrude import close_surface, orient_ccw
+    from scipy.ndimage import map_coordinates
+
+    from city2stl.city_model import triangulate_polygon
+
+    arr, t, k, off = _crop(ov, footprint.bounds, terrain)
+    h, w = arr.shape
+    # Cell centres in model mm, and the footprint's coverage by measured cells.
+    centres = _cell_centres(t, k, off, h, w)
     inside = shapely.contains_xy(footprint, centres[:, 0], centres[:, 1])
     if not inside.any():
         # Footprint smaller than a cell: sample at its outline only.
@@ -538,6 +607,22 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
     if coverage < MIN_NDSM_COVERAGE:
         raise LandmarkError(f"{ov.source}: measured heights cover only {coverage:.0%} of the "
                             f"footprint (need {MIN_NDSM_COVERAGE:.0%})")
+    cut = []
+    if ov.kind == "reference":
+        opened = _open_cells(arr, t, k, off, _open_m(ov))
+        if opened is not None:
+            cut.append(opened)
+    if exclude is not None and not exclude.is_empty:
+        cut.append(exclude)
+    if cut:
+        footprint = shapely.make_valid(footprint.difference(shapely.union_all(cut)))
+        parts = [g for g in shapely.get_parts(footprint)
+                 if g.geom_type == "Polygon" and not g.is_empty]
+        if not parts:
+            raise LandmarkError(f"{ov.source}: nothing left of the footprint after cutting "
+                                "courtyards and kept OSM buildings")
+        footprint = shapely.union_all(parts)
+        inside = shapely.contains_xy(footprint, centres[:, 0], centres[:, 1])
     filled = _fill_nearest(arr)
     local = bool(ov.spec.get("local_ground"))
     cell_mm = float(np.mean(np.abs([t.a * k[0], t.e * k[1]])))
@@ -616,6 +701,27 @@ class LandmarkPlan:
         area = shapely.area(arr)
         return shapely.area(shapely.intersection(arr, u)) >= REPLACE_OVERLAP * np.maximum(area, 1e-12)
 
+    @staticmethod
+    def _kept_osm(ov: LandmarkOverride, polys: list, props: list, mine: np.ndarray,
+                  own: set, terrain) -> list[int]:
+        """Indices of OSM features inside a reference outline that stay in the model.
+
+        The reference is a blurry ~1 m-cell copy, so an OSM building is kept when it is
+        taller than the reference over its footprint by more than :data:`KEEP_OSM_ABOVE_M`,
+        or when the reference has solid cells over less than :data:`KEEP_OSM_MIN_COVER` of it.
+        The outline's own features (``own``) and ``building:part`` features (they belong to
+        the swapped building) are never kept.
+        """
+        kept = []
+        for j in np.flatnonzero(mine):
+            if int(j) in own or _is_part(props[j]):
+                continue
+            median, covered = reference_support(ov, polys[j], terrain)
+            h = _height(props[j])
+            if covered < KEEP_OSM_MIN_COVER or (h is not None and h > median + KEEP_OSM_ABOVE_M):
+                kept.append(int(j))
+        return kept
+
     def take(self, layer: str, polys: list[Polygon], props: list[dict], terrain,
              style) -> tuple[list[Polygon], list[dict], list[Mesh]]:
         if layer != "buildings":
@@ -660,13 +766,18 @@ class LandmarkPlan:
                                     "height_m": round(ov.height_m, 2), "osm_height_m": round(old, 2),
                                     "scaled_features": int(mine.sum())}
                 continue
+            kept: list[int] = []
+            if ov.kind == "reference":
+                kept = self._kept_osm(ov, polys, props, mine, set(ks), terrain)
+                mine[kept] = False
+            exclude = shapely.union_all([polys[j] for j in kept]) if kept else None
             try:
                 if ov.kind == "mesh":
                     got = [mesh_solid(ov, fp, terrain, z_floor, ground_hi, z_per_m,
                                       max(heights) if heights else None)]
                 else:
                     got = ndsm_solid(ov, fp, terrain, z_floor, ground_hi, z_per_m,
-                                     style.min_height_mm)
+                                     style.min_height_mm, exclude=exclude)
             except LandmarkError as exc:
                 logger.warning("landmark %s override not applied: %s", oid, exc)
                 self.report[oid] = {"kind": ov.kind, "status": "failed", "reason": str(exc)}
@@ -676,6 +787,7 @@ class LandmarkPlan:
             self.footprints[oid] = fp
             self.report[oid] = {"kind": ov.kind, "source": ov.source, "status": "applied",
                                 "replaced_features": int(mine.sum()),
+                                "kept_osm_features": len(kept),
                                 "faces": int(sum(len(f) for _, f in got))}
         keep = ~removed
         return ([p for p, kk in zip(polys, keep, strict=True) if kk],
@@ -691,6 +803,17 @@ REFERENCE_DIR = Path(__file__).resolve().parents[1] / "data" / "landmarks"
 #: Depinch floor (m): a reference cell never drops below this above ground, so the top never
 #: collapses onto the terrain and pinches the solid (the rule only swaps buildings >= 1 m tall).
 REFERENCE_MIN_M = 1.0
+#: Raw reference height (m) below which a cell is open ground (a courtyard, a plaza), cut out
+#: of the swapped solid instead of being floored to :data:`REFERENCE_MIN_M`.
+REFERENCE_OPEN_M = 2.0
+#: An OSM building under a reference outline stays when its height beats the reference's
+#: median over its footprint by more than this (m) ...
+KEEP_OSM_ABOVE_M = 1.5
+#: ... or when the reference has solid cells over less than this share of its footprint.
+KEEP_OSM_MIN_COVER = 0.5
+#: Bump when the reference solid's geometry changes: part of each override's ``spec``, so it
+#: is in ``model_cache.overrides_digest`` and stale cached solids rebuild.
+REFERENCE_SOLID_VERSION = 3
 
 
 def load_reference(directory: Path | str | None = None) -> tuple[np.ndarray, object, dict, dict]:
@@ -711,18 +834,24 @@ def load_reference(directory: Path | str | None = None) -> tuple[np.ndarray, obj
     return h, Affine(*meta["transform_affine"]), meta, rule
 
 
-def _depinch(h: np.ndarray) -> np.ndarray:
+def _depinch(h: np.ndarray, open_m: float = REFERENCE_OPEN_M) -> np.ndarray:
     """Heightfield depinching: fill one-cell gaps from their neighbours and floor at
-    :data:`REFERENCE_MIN_M`, so no cell sits on the ground inside a roof."""
+    :data:`REFERENCE_MIN_M`, so no cell sits on the ground inside a roof.
+
+    Cells whose raw height is under ``open_m`` (default :data:`REFERENCE_OPEN_M`) are open
+    ground: they are set to 0 (not floored), which ``ndsm_solid`` cuts out of the solid. Gap
+    filling copies only solid neighbours, so a courtyard does not grow roofs."""
     from scipy.ndimage import maximum_filter
 
     out = np.array(h, dtype=np.float32)
     gap = ~np.isfinite(out)
     if gap.any():
-        near = maximum_filter(np.where(gap, -np.inf, out), size=3)
+        near = maximum_filter(np.where(gap | (out < open_m), -np.inf, out), size=3)
         fill = gap & np.isfinite(near)
         out[fill] = near[fill]
-    return np.where(np.isfinite(out), np.maximum(out, REFERENCE_MIN_M), np.nan).astype(np.float32)
+    solid = np.maximum(out, REFERENCE_MIN_M)
+    return np.where(np.isfinite(out), np.where(out < open_m, 0.0, solid), np.nan
+                    ).astype(np.float32)
 
 
 def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule: dict | None = None,
@@ -732,7 +861,8 @@ def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule:
     Off (``enabled`` false), outside the raster's bbox, or nothing to swap: ``({}, stats)``,
     so the model is unchanged. Otherwise one ``"reference"`` ``LandmarkOverride`` per rule unit: keyed by
     its OSM id, or ``ref:<label>`` with a ``footprint_lonlat`` for the ones OSM carries only in
-    the towers / churches layers. All share one depinched raster; ``ndsm_solid`` crops it.
+    the towers / churches layers. Units share one depinched raster (``ndsm_solid`` crops it), except one with an
+    ``open_m`` in the rule: it gets its own cutoff and its own depinch.
 
     ``raster`` is ``(height_m, transform)`` (tests pass a tiny synthetic one) and ``rule`` the
     ``alhambra_reference_rule.json`` structure; both default to the stored files. ``bbox`` has
@@ -758,12 +888,14 @@ def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule:
             or min(lat_s, lat_n) > bbox["north"] or max(lat_s, lat_n) < bbox["south"]):
         stats["reason"] = "outside the raster"
         return {}, stats
-    ndsm = _depinch(np.asarray(height))
+    raw = np.asarray(height)
+    ndsm = _depinch(raw)
     source = str(rule.get("source") or "reference raster")
     out: dict = {}
     for u in rule["units"]:
         key = u.get("osm_id") or u["key"]
-        spec = {"kind": "reference", "source": source, "local_ground": True}
+        spec = {"kind": "reference", "source": source, "local_ground": True,
+                "solid_version": REFERENCE_SOLID_VERSION}
         if not u.get("osm_id"):
             ring = u.get("footprint")
             cx, cy = u.get("centroid") or (None, None)
@@ -771,7 +903,13 @@ def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule:
                                               and bbox["south"] <= cy <= bbox["north"]):
                 continue
             spec["footprint_lonlat"] = ring
-        out[key] = LandmarkOverride(key, "reference", spec, ndsm=ndsm, transform=t, source=source)
+        unit_ndsm = ndsm
+        if u.get("open_m") is not None:
+            # Per-unit cutoff: depinch the raw raster again with it (the shared one has already
+            # floored the heights between the global and the unit's cutoff).
+            spec["open_m"] = float(u["open_m"])
+            unit_ndsm = _depinch(raw, spec["open_m"])
+        out[key] = LandmarkOverride(key, "reference", spec, ndsm=unit_ndsm, transform=t, source=source)
         stats["labels"] += len(u["labels"])
     stats["units"] = len(out)
     return out, stats

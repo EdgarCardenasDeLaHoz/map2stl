@@ -14,6 +14,8 @@ from rasterio.transform import Affine
 from test_landmarks import (
     BBOX,
     BUILDINGS,
+    C_LAT,
+    C_LON,
     CATHEDRAL,
     SHORT,
     TALL,
@@ -101,7 +103,7 @@ class TestReferenceLandmarks:
         assert model.report["landmarks"]["ref:9"]["status"] == "applied"
 
     def test_heightfield_is_depinched(self):
-        ov, _ = lm.reference_landmarks(BBOX, enabled=True, raster=_raster(0.2, gap=True), rule=RULE)
+        ov, _ = lm.reference_landmarks(BBOX, enabled=True, raster=_raster(2.5, gap=True), rule=RULE)
         ndsm = ov["way/1"].ndsm
         assert np.isfinite(ndsm).all() and ndsm.min() >= lm.REFERENCE_MIN_M
 
@@ -164,3 +166,75 @@ def test_granada_matches_the_study_method_b():
     gb = dict(zip(("north", "south", "east", "west"), meta["bbox_nsew"], strict=True))
     ov, stats = lm.reference_landmarks(gb, enabled=True)
     assert stats["labels"] == 22 and len(ov) >= 17
+
+
+class TestCourtyardsAndKeptOsm:
+    """Reference cells under ``REFERENCE_OPEN_M`` are cut out; taller OSM buildings stay."""
+
+    @staticmethod
+    def _ring_raster(hole=True):
+        """12 m everywhere except a 0.5 m courtyard at the cathedral's centre."""
+        arr, t = _raster(12.0)
+        if hole:
+            lon0, lat0 = C_LON, C_LAT
+            c, r = ~t * (lon0, lat0)
+            c, r = int(c), int(r)
+            arr[r - 12:r + 12, c - 25:c + 25] = 0.5
+        return arr, t
+
+    def test_depinch_keeps_open_cells_open(self):
+        h = np.full((9, 9), 12.0, np.float32)
+        h[3:6, 3:6] = 0.5
+        out = lm._depinch(h)
+        assert (out[3:6, 3:6] == 0.0).all() and out[0, 0] == 12.0
+
+    def test_courtyard_becomes_a_hole(self):
+        ov, _ = lm.reference_landmarks(BBOX, enabled=True, raster=self._ring_raster(), rule=RULE)
+        solid = _build(_fc(CATHEDRAL), ov, layers={"towers": TOWER_LAYER})
+        full_ov, _ = lm.reference_landmarks(BBOX, enabled=True, raster=self._ring_raster(False),
+                                            rule=RULE)
+        full = _build(_fc(CATHEDRAL), full_ov, layers={"towers": TOWER_LAYER})
+        assert solid.report["landmarks"]["way/1"]["status"] == "applied"
+        assert solid.report["merged"]["watertight"]
+        a, b = solid.parts["buildings"], full.parts["buildings"]
+        assert a.volume < 0.8 * b.volume
+
+    def test_taller_osm_building_is_kept_and_cut_from_the_reference(self):
+        ov, _ = lm.reference_landmarks(BBOX, enabled=True, raster=_raster(12.0), rule=RULE)
+        keep = {"geometry": _rect_in(C_LON - 0.0002, C_LAT, 0.00004, 0.00004),
+                "properties": {"osm_id": "way/77", "building": "yes", "height_m": 30.0}}
+        low = {"geometry": _rect_in(C_LON + 0.0002, C_LAT, 0.00004, 0.00004),
+               "properties": {"osm_id": "way/78", "building": "yes", "height_m": 12.5}}
+        model = _build(_fc(CATHEDRAL, keep, low), {"way/1": ov["way/1"]})
+        rep = model.report["landmarks"]["way/1"]
+        assert rep["kept_osm_features"] == 1
+        assert rep["replaced_features"] == 2           # the outline and the 12.5 m one
+        assert model.parts["buildings"].bounds[1, 2] == pytest.approx(_top_mm(model, 30.0), abs=0.1)
+        assert model.merged.is_watertight
+
+    @staticmethod
+    def _floor_raster():
+        """12 m walls around a 3 m floor (the Alcazaba's plaza as the Thingiverse mesh has it)."""
+        arr, t = _raster(12.0)
+        c, r = ~t * (C_LON, C_LAT)
+        c, r = int(c), int(r)
+        arr[r - 12:r + 12, c - 25:c + 25] = 3.0
+        return arr, t
+
+    def test_unit_open_m_opens_a_floor_the_default_keeps(self):
+        raster = self._floor_raster()
+        base, _ = lm.reference_landmarks(BBOX, enabled=True, raster=raster, rule=RULE)
+        rule = {**RULE, "units": [{**RULE["units"][0], "open_m": 5.0}, *RULE["units"][1:]]}
+        wide, _ = lm.reference_landmarks(BBOX, enabled=True, raster=raster, rule=rule)
+        assert "open_m" not in base["way/1"].spec and wide["way/1"].spec["open_m"] == 5.0
+        assert base["way/1"].spec != wide["way/1"].spec        # the cache digest tells them apart
+        assert base["way/1"].ndsm.min() >= 1.0 and wide["way/1"].ndsm.min() == 0.0
+        filled = _build(_fc(CATHEDRAL), base, layers={"towers": TOWER_LAYER})
+        opened = _build(_fc(CATHEDRAL), wide, layers={"towers": TOWER_LAYER})
+        assert opened.report["landmarks"]["way/1"]["status"] == "applied"
+        assert opened.parts["buildings"].volume < 0.95 * filled.parts["buildings"].volume
+
+
+def _rect_in(lon, lat, dlon, dlat):
+    from test_landmarks import _rect
+    return _rect(lon, lat, dlon, dlat)

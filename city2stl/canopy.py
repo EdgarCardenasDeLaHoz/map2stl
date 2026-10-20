@@ -43,6 +43,7 @@ crowns meeting at a corner give a non-manifold edge, the ``array_to_mesh`` fault
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
@@ -137,6 +138,17 @@ class CanopyFetch:
         self.rgb = self.rgb or _default_rgb
 
 
+def _grid_resolution_m(bbox: dict, native_m: float) -> float:
+    """``native_m``, or coarser when the box at ``native_m`` is over the survey grid cap
+    (Breckenridge, 8.2 x 8.9 km at 1 m, is 8164 x 8906 cells against 4096 a side)."""
+    from city2stl.height.providers._survey import M_PER_DEG_LAT, MAX_GRID_SIDE
+
+    lat = math.radians((bbox["north"] + bbox["south"]) / 2)
+    side_m = max((bbox["north"] - bbox["south"]) * M_PER_DEG_LAT,
+                 (bbox["east"] - bbox["west"]) * M_PER_DEG_LAT * math.cos(lat))
+    return max(native_m, side_m / (MAX_GRID_SIDE - 1))
+
+
 def _default_ndsm(bbox: dict, providers: Sequence[str]):
     from city2stl.height.providers import survey
 
@@ -144,7 +156,7 @@ def _default_ndsm(bbox: dict, providers: Sequence[str]):
         p = survey.PROVIDERS.get(name)
         if p is None or not p.covers(bbox):
             continue
-        got = survey.ndsm_for_bbox(name, bbox)
+        got = survey.ndsm_for_bbox(name, bbox, _grid_resolution_m(bbox, p.resolution_m))
         if got is not None:
             return name, got[0], got[1]
     return None

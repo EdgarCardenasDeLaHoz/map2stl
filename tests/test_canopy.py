@@ -275,3 +275,15 @@ class TestInCityModel:
         assert len(a.parts["trees"].faces) == len(b.parts["trees"].faces)
         c = build_on_terrain(z, BBOX, sc, {}, cache=True, canopy=_layer(world, preview=True))
         assert not c.report["layers"]["trees"].get("cached")
+
+
+def test_grid_resolution_stays_under_the_survey_cap():
+    from city2stl.height.providers._survey import MAX_GRID_SIDE, lonlat_grid
+
+    breck = {"north": 39.51, "south": 39.43, "east": -106.03, "west": -106.125}
+    res = cn._grid_resolution_m(breck, 1.0)
+    assert 2.0 < res < 2.5
+    h, w, _ = lonlat_grid(breck, res)          # no SurveyError
+    assert max(h, w) <= MAX_GRID_SIDE
+    granada = {"north": 37.187, "south": 37.169, "east": -3.582, "west": -3.614}
+    assert cn._grid_resolution_m(granada, 1.0) == 1.0   # small boxes keep native resolution

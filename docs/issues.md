@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-18_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,36 @@ _Last updated: 2026-10-17_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Fixed 2026-10-18: Alhambra reference swap filled courtyards and dropped OSM buildings
+
+- **Symptom:** with `reference_landmarks` on, the Alcazaba's Plaza de Armas printed solid and
+  10 / 6 / 4 OSM features under way/26935518, way/1476959785 and way/117369769 were replaced by
+  blurry reference geometry.
+- **Cause:** the outlines have no holes, `_depinch` floored every cell at 1 m, and
+  `LandmarkPlan.take` removed every feature at least 50% inside an outline.
+- **Fix:** `landmarks.py::ndsm_solid` cuts cells under `REFERENCE_OPEN_M`; `LandmarkPlan._kept_osm`
+  keeps taller OSM buildings. Tests: `tests/test_landmarks_reference.py::TestCourtyardsAndKeptOsm`.
+  Not yet measured on the real Granada data. Open: `building:part` features are still replaced.
+  Follow-up: the plaza floor in the raster is about 3 m, so the Alcazaba unit carries `open_m: 5.0`
+  in `alhambra_reference_rule.json` (per-unit cutoff, `REFERENCE_SOLID_VERSION` 3); not yet
+  re-measured on the real data.
+
+## Fixed 2026-10-18: Alhambra: Palacio de Carlos V and other courtyard buildings missing
+
+- **Symptom:** valid buildings with a courtyard (one inner ring) vanished from the print and were
+  counted as `dropped`. Palacio de Carlos V (OSM relation/2640220) went from 402.98 mm2 to 0; 10 of
+  90 holed polygons in the Alhambra area were lost.
+- **Cause:** `city2stl/city_model.py::feature_polygons` shrank and regrew every holed polygon by
+  one `SNAP_MM` step (to open pinched holes) *after* snapping. On the 0.01 mm grid that negative
+  buffer returned an empty polygon for some valid holed polygons (without the grid: 401.7 mm2).
+- **Fix:** `_depinch` touches only polygons whose hole touches the outline or another hole, runs
+  the buffer on the geometry without its precision grid, re-snaps, and keeps the original if the
+  result is empty or under 99% of its area. `MODEL_CACHE_VERSION` 5 -> 6 rebuilds cached solids.
+  Tests: `tests/test_city_model.py::TestFeaturePolygonsHoles`.
+- **Same fault in the flat-roof merge:** `merge_flat_roofs` opened the holes of merged groups the
+  same way, so a merged block around a patio could print as nothing while its members counted as
+  merged. It now calls `_depinch` too.
 
 ## Use case: four 600 mm city prints, driven through the API (2026-10-17)
 
@@ -259,6 +289,17 @@ the rest below.
   for a check.
 - **Edit panel:** Reset in Buildings & roads › Composite skips the Trees row; changing Roof shapes
   takes effect only on the next buildings reload.
+- **Extrude viewer left out the trees — fixed 2026-10-18 (TM):** `model-viewer.js` builds its
+  finished-model request synchronously, and on a region's first load the survey coverage was
+  still 'unknown', so `cityDetailFields` dropped `layers.trees`. The viewer now rebuilds once
+  `window.citySurveyCoverageReady` resolves (Granada: 9 parts, trees 793,816 faces).
+  - Still open: the first, tree-less build keeps running on the server to its end (wasted work).
+- **US trees failed on a dict bbox — fixed 2026-10-18 (TM):** `canopy.py::_default_ndsm` passes
+  `{north, …}` to `covers()`, and `lidar_3dep.py::_is_in_us` unpacked it into its key strings
+  ("'<' not supported between 'str' and 'float'"); every US build with trees failed. It now
+  uses `_survey.intersects`.
+- **Cartagena's sea renders as flat green land:** no water part and no sea colour on the 5 km
+  box. Not investigated.
 
 ## Vector rivers — known faults (2026-10-17)
 

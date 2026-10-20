@@ -187,7 +187,7 @@ def test_nothing_on_default_fetches_nothing():
     t, rasters = _rasters()
     calls = []
     fc = {"type": "FeatureCollection",
-          "features": [_feature(_cells(t, 10, 40, 10, 40), source="osm_tag", h=12.0)]}
+          "features": [_feature(_cells(t, 10, 40, 10, 40), source="osm_levels", h=12.0)]}
     out, stats = survey_fill.fill_default_heights(fc, BBOX, fetch=_fetcher(rasters, calls))
     assert (out, stats, calls) == (fc, None, [])
 
@@ -331,7 +331,7 @@ def test_fill_layer_heights_covers_landmark_layers_and_lines():
             _feature(_cells(t, 10, 40, 10, 40), name="A")]},
         "towers": {"type": "FeatureCollection", "features": [
             _feature(_cells(t, 60, 80, 10, 40), source="osm_tag", h=10.0, name="T10"),
-            _feature(_cells(t, 60, 80, 60, 90), source="osm_tag", h=12.0, name="T12"),
+            _feature(_cells(t, 60, 80, 60, 90), source="osm_tag", h=4.0, name="T12"),
             _feature(_cells(t, 10, 40, 60, 90), source="osm_tag", h=10.0, name="Tx",
                      height="10")]},
         "walls": {"type": "FeatureCollection", "features": [_line(t, 25, 10, 40, name="W")]},
@@ -345,16 +345,17 @@ def test_fill_layer_heights_covers_landmark_layers_and_lines():
     p = _by_name(out["towers"])
     assert (p["T10"]["height_m"], p["T10"]["height_source"], p["T10"]["survey_source"]) \
         == (11.0, "survey", "rediam_mdhn")
-    assert (p["T12"]["height_m"], p["T12"]["height_source"]) == (12.0, "osm_tag")
+    assert (p["T12"]["height_m"], p["T12"]["height_source"]) == (4.0, "osm_tag")   # survey 3 m: within 3 m
     assert p["Tx"]["height_source"] == "osm_tag", "an explicit height=10 tag is kept"
     w = _by_name(out["walls"])["W"]
     assert (w["height_source"], w["height_m"]) == ("survey", 14.0)
     assert out["roads"] is layers["roads"], "layers outside FILL_LAYERS are untouched"
     assert [c[0] for c in calls] == ["cnig_mdsn", "rediam_mdhn"], "one read per source"
-    assert stats["layers"] == {"buildings": {"defaults": 1, "filled": 1},
-                               "towers": {"defaults": 1, "filled": 1},
-                               "walls": {"defaults": 1, "filled": 1}}
+    assert stats["layers"] == {"buildings": {"defaults": 1, "filled": 1, "tag_replaced": 0},
+                               "towers": {"defaults": 1, "filled": 1, "tag_replaced": 0},
+                               "walls": {"defaults": 1, "filled": 1, "tag_replaced": 0}}
     assert (stats["defaults"], stats["filled"], stats["unmeasured"]) == (3, 3, 0)
+    assert (stats["tag_checked"], stats["tag_replaced"]) == (2, 0)
     assert layers == before
 
 
@@ -368,7 +369,7 @@ def test_with_survey_heights_reports_stats_and_failures(monkeypatch):
     out = city_data.with_survey_heights(payload, *BBOX)
     assert _by_name(out["towers"])["T"]["height_source"] == "survey"
     assert out["survey_fill"]["filled"] == 1
-    assert out["survey_fill"]["layers"]["towers"] == {"defaults": 1, "filled": 1}
+    assert out["survey_fill"]["layers"]["towers"] == {"defaults": 1, "filled": 1, "tag_replaced": 0}
     assert "survey_fill" not in payload
 
     def boom(name, bbox, res):
@@ -438,3 +439,40 @@ def test_preflight_cached_layers_apply_the_survey_fill(monkeypatch):
     have, missing, stale = preflight._cached_layers(bbox, ["towers"], {})
     assert _by_name(have["towers"])["T"]["height_source"] == "survey"
     assert missing == [] and stale is False
+
+
+# ---------------------------------------------------------------------------
+# Survey wins when far off (user decision 2026-10-17)
+# ---------------------------------------------------------------------------
+
+def _tag_case(tag_h, source="osm_tag", survey_h=14.0, **props):
+    t, rasters = _rasters()
+    rasters["cnig_mdsn"][0][10:40, 10:40] = survey_h
+    fc = {"type": "FeatureCollection", "features": [
+        _feature(_cells(t, 10, 40, 10, 40), source=source, h=tag_h, name="x", **props)]}
+    out, stats = survey_fill.fill_layer_heights({"towers": fc}, BBOX,
+                                                fetch=_fetcher(rasters, []))
+    return fc, out, stats
+
+
+def test_tag_far_from_survey_is_replaced_and_kept_aside():
+    fc, out, stats = _tag_case(10.0, survey_h=20.0, height="10")   # explicit 10 m tag vs 20 m
+    p = _by_name(out["towers"])["x"]
+    assert (p["height_m"], p["height_source"], p["survey_source"]) == (20.0, "survey", "cnig_mdsn")
+    assert p["osm_tag_height_m"] == 10.0
+    assert (stats["tag_replaced"], stats["tag_checked"], stats["filled"], stats["defaults"])         == (1, 1, 0, 0)
+    assert stats["layers"]["towers"]["tag_replaced"] == 1
+    assert fc["features"][0]["properties"]["height_source"] == "osm_tag", "input untouched"
+
+
+@pytest.mark.parametrize("tag_h, survey_h", [(10.0, 12.0), (12.0, 14.0), (12.0, 9.0), (17.0, 14.0)])
+def test_tag_within_three_metres_is_kept(tag_h, survey_h):
+    fc, out, stats = _tag_case(tag_h, survey_h=survey_h, height="10")
+    assert out["towers"] is fc
+    assert stats["tag_replaced"] == 0 and stats["tag_checked"] == 1
+
+
+@pytest.mark.parametrize("source", ["osm_levels", "merged", "user_override"])
+def test_other_sources_are_never_replaced(source):
+    fc, out, stats = _tag_case(3.0, source=source, survey_h=20.0)
+    assert out["towers"] is fc and stats is None

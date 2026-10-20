@@ -212,6 +212,23 @@ WALL_PIECE_MM = 2.0   # grid cell a wall is cut into, so its top steps with the 
 # OSM waterway class -> typical channel width (m) when the feature has no width tag.
 _WATERWAY_WIDTH_M = {"river": 20.0, "canal": 12.0, "stream": 4.0, "drain": 2.0, "ditch": 1.5}
 
+# A downhill run mapped only as a centre line is buffered this wide (m), not by the 3 m of a
+# footpath: a run is an open slope about this wide, 2 mm on the print at 1:15,000 (F-PISTES).
+# Pistes mapped as areas keep their outline; nordic / skitour lines and paths stay 3 m.
+PISTE_LINE_WIDTH_M = 30.0
+
+
+def is_downhill_piste(props: dict) -> bool:
+    """A downhill ski run: ``piste:type=downhill``, or, with no ``piste:type``, a
+    ``route=piste|ski`` relation."""
+    def tag(key: str) -> str:
+        v = props.get(key)
+        return v.strip().lower() if isinstance(v, str) else ""
+    ptype = tag("piste:type")
+    if ptype:
+        return ptype == "downhill"
+    return tag("route") in ("piste", "ski")
+
 
 def resolve_layers(overrides: dict | None) -> dict[str, LayerStyle]:
     """DEFAULT_LAYERS updated with {layer: {field: value}} overrides from a request."""
@@ -393,6 +410,8 @@ def _line_width_m(layer: str, props: dict, style: LayerStyle) -> float:
             pass
     if layer == "waterways":
         return _WATERWAY_WIDTH_M.get(str(props.get("waterway") or ""), style.line_width_m)
+    if layer == "trails" and is_downhill_piste(props):
+        return PISTE_LINE_WIDTH_M
     return style.line_width_m
 
 
@@ -417,6 +436,42 @@ def widen_thin(geoms: np.ndarray, min_width_mm: float) -> tuple[np.ndarray, int]
     return geoms, int(thin.sum())
 
 
+def _pinched(poly: Polygon) -> bool:
+    """True if an interior ring touches the exterior or another interior ring."""
+    rings = [shapely.LinearRing(r) for r in poly.interiors]
+    shell = shapely.LinearRing(poly.exterior)
+    return any(r.intersects(shell) for r in rings) or any(
+        a.intersects(b) for i, a in enumerate(rings) for b in rings[i + 1:])
+
+
+def _depinch(parts: np.ndarray, owner: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Open pinched holes of snapped polygons by one snap step (shrink, then grow).
+
+    A hole touching its outline at one point is a valid polygon, but its prism
+    shares that vertex between two walls (not manifold). Only pinched polygons are
+    touched, and the buffer runs on the geometry without its precision grid and is
+    re-snapped: on the grid itself a one-step negative buffer empties some valid
+    holed polygons (Palacio de Carlos V, 403 mm2 -> 0). A result under 99% of the
+    original area (or empty) is discarded and the original kept.
+    """
+    holed = np.flatnonzero(shapely.get_num_interior_rings(parts) > 0)
+    changed = False
+    for i in holed:
+        if not _pinched(parts[i]):
+            continue
+        raw = shapely.set_precision(parts[i], 0)
+        fixed = shapely.buffer(shapely.buffer(raw, -SNAP_MM, join_style="mitre"),
+                               SNAP_MM, join_style="mitre")
+        fixed = shapely.set_precision(fixed, SNAP_MM)
+        if not shapely.is_empty(fixed) and shapely.area(fixed) >= 0.99 * shapely.area(parts[i]):
+            parts[i] = fixed
+            changed = True
+    if changed:
+        parts, sub = shapely.get_parts(parts, return_index=True)
+        owner = owner[sub]
+    return parts, owner
+
+
 def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                      terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
@@ -435,6 +490,8 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     Extruded footprints (buildings) are not, and none is dropped for its size: they
     print as drawn (user, 2026-10-02: widening grew 0.2 mm rowhouses 0.3 mm into the
     street, and lone sheds into blobs; the slicer prints what it can of a thin one).
+    Polygons whose hole touches the outline (pinched) have it opened by one snap step
+    (:func:`_depinch`); holed polygons that are not pinched are left alone.
     Returns (polygons, their properties, counts: ``dropped`` = features that
     produced nothing, ``widened``).
     """
@@ -479,15 +536,7 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     geoms = shapely.intersection(geoms, terrain.rect)
     geoms = shapely.set_precision(geoms, SNAP_MM)
     parts, owner = shapely.get_parts(geoms, return_index=True)
-    # A hole touching its outline at one point is a valid polygon, but its prism
-    # shares that vertex between two walls (not manifold). Opening the pinch by
-    # one snap step changes the outline far below print resolution.
-    holed = shapely.get_num_interior_rings(parts) > 0
-    if holed.any():
-        parts[holed] = shapely.buffer(shapely.buffer(parts[holed], -SNAP_MM, join_style="mitre"),
-                                      SNAP_MM, join_style="mitre")
-        parts, sub = shapely.get_parts(parts, return_index=True)
-        owner = owner[sub]
+    parts, owner = _depinch(parts, owner)
     # Extruded footprints print as drawn: only an empty one is dropped.
     min_area = 0.0 if style.mode == "extrude" else MIN_FOOTPRINT_MM2
     area = shapely.area(parts)
@@ -638,12 +687,7 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     closed = shapely.make_valid(closed)
     closed = shapely.set_precision(shapely.intersection(closed, rect), SNAP_MM)
     parts, owner = shapely.get_parts(closed, return_index=True)
-    holed = shapely.get_num_interior_rings(parts) > 0
-    if holed.any():   # open pinched holes, as feature_polygons does
-        parts[holed] = shapely.buffer(shapely.buffer(parts[holed], -SNAP_MM, join_style="mitre"),
-                                      SNAP_MM, join_style="mitre")
-        parts, sub = shapely.get_parts(parts, return_index=True)
-        owner = owner[sub]
+    parts, owner = _depinch(parts, owner)   # open pinched holes, as feature_polygons does
     # Any non-empty part prints, as feature_polygons keeps any footprint: a group of
     # sheds under MIN_FOOTPRINT_MM2 was dropped while its members counted as merged,
     # so they vanished from the print (2026-10-02).
