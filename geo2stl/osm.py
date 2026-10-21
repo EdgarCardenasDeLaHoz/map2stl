@@ -66,8 +66,10 @@ def healthy_overpass_endpoints() -> list[str]:
         headers = {}
 
     def probe(endpoint: str) -> bool:
+        _REACHED[endpoint] = False
         try:
             resp = requests.get(f"{endpoint}/status", headers=headers, timeout=PROBE_TIMEOUT_S)
+            _REACHED[endpoint] = True
             resp.raise_for_status()
             return True
         except Exception as e:
@@ -100,11 +102,30 @@ def healthy_overpass_endpoints() -> list[str]:
     return healthy + recently_failed
 
 
+def unconfirmed_overpass_endpoints() -> list[str]:
+    """Every mirror, for when :func:`healthy_overpass_endpoints` found none.
+
+    ``/status`` can fail while real queries still work (2026-10-17: maps.mail.ru answered it
+    with 504 and kumi with 500, yet mail.ru served all nine layers of a city fetch). A mirror
+    whose last probe got any HTTP answer comes before one that did not answer at all, and one
+    that recently failed a real query comes last. The caller's per-layer fail-over does the rest.
+    """
+    now = time.monotonic()
+
+    def rank(endpoint: str) -> tuple[bool, bool]:
+        recent = now - _FAILED_AT.get(endpoint, -1e9) < FAILURE_MEMORY_S
+        return recent, not _REACHED.get(endpoint, False)
+
+    return sorted(OVERPASS_ENDPOINTS, key=rank)
+
+
 #: How long a mirror that failed a real query is tried last.
 FAILURE_MEMORY_S = 600.0
 #: How long a /status probe result is reused.
 PROBE_MEMORY_S = 120.0
 _PROBED: dict[str, tuple[float, bool]] = {}
+#: Mirrors whose last /status probe got any HTTP response (the host is reachable).
+_REACHED: dict[str, bool] = {}
 _PROBE_LOCK = threading.Lock()
 _FAILED_AT: dict[str, float] = {}
 

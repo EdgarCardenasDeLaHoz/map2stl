@@ -30,6 +30,7 @@ from PIL import Image
 
 from city2stl.resources import free_gpu_cache, wait_for_ram
 from city2stl.skyline import commons_photos as cp
+from city2stl.skyline.local_dirs import local_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL = "facebook/dinov2-small"
@@ -48,7 +49,7 @@ def main() -> int:
     import torch
     from transformers import AutoImageProcessor, AutoModel
 
-    d = ROOT / "runs" / "commons_cache" / args.region
+    d = local_dir("commons_cache") / args.region
     meta = [m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8")) if "px" in m]
     img_dir = cp.img_dir(d)
     img_dir.mkdir(parents=True, exist_ok=True)

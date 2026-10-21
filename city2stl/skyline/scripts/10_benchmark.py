@@ -121,7 +121,7 @@ def _run_region(region: str, out_dir: Path, env: dict) -> Path | None:
 
 def _newest_report(region: str) -> Path | None:
     """Newest heights.json for ``region`` across benchmark runs and region_reports."""
-    found = list((bm.BENCHMARK_ROOT).glob(f"*/{region}_skyline_report/heights.json"))
+    found = list((bm.BENCHMARK_RUNS).glob(f"*/{region}_skyline_report/heights.json"))
     found += [p for p in REPORTS.glob("*_skyline_report/heights.json")
               if p.parent.name.lower().startswith(region)]
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
@@ -362,7 +362,7 @@ def main() -> int:
     env = _region_env(args.keep_env)
 
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
-    out_dir = bm.BENCHMARK_ROOT / stamp
+    out_dir = bm.BENCHMARK_RUNS / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.report:

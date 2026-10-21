@@ -115,8 +115,28 @@ class TestMirrorExhaustion:
                              (three_mirrors[1], ["buildings"])]
         assert result["buildings"]["features"] and result["roads"]["features"]
 
+    def test_failed_probe_still_tries_every_mirror(self, monkeypatch):
+        """/status failing on all mirrors is not proof the queries fail (2026-10-17)."""
+        mirrors = ["https://a.example/api", "https://b.example/api"]
+        monkeypatch.setattr(osm_fetch, "_healthy_overpass_endpoints", lambda: [])
+        monkeypatch.setattr(osm_fetch, "_unconfirmed", lambda: mirrors)
+        monkeypatch.setitem(__import__("sys").modules, "osmnx", _FakeOx())
+        requested = []
+
+        def fake(ox, bbox, layers, tol_deg, simplify_tolerance, min_area):
+            requested.append(ox.settings.overpass_url)
+            if len(requested) == 1:
+                return {"buildings": _failed_fc()}
+            return {"buildings": _full_fc()}
+
+        monkeypatch.setattr(osm_fetch, "_fetch_layers", fake)
+        result = osm_fetch.fetch_osm_data(37.11, 37.10, -3.59, -3.60, ["buildings"])
+
+        assert len(requested) == 2 and result["buildings"]["features"]
+
     def test_no_healthy_mirror_raises_before_querying(self, monkeypatch):
         monkeypatch.setattr(osm_fetch, "_healthy_overpass_endpoints", lambda: [])
+        monkeypatch.setattr(osm_fetch, "_unconfirmed", lambda: [])
         monkeypatch.setitem(__import__("sys").modules, "osmnx", _FakeOx())
 
         with pytest.raises(RuntimeError, match="/status probe"):

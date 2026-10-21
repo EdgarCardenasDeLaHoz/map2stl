@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 
 from city2stl.skyline import photo_groups as pg
+from city2stl.skyline.local_dirs import local_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +43,7 @@ def main() -> int:
     ap.add_argument("--region", required=True)
     ap.add_argument("--max-misfit", type=float, default=pg.SAME_SPOT_MISFIT)
     args = ap.parse_args()
-    d = ROOT / "runs" / "commons_cache" / args.region
+    d = local_dir("commons_cache") / args.region
     meta = {m["key"]: m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8"))
             if "px" in m}
     pairs = json.loads((d / "pairs.json").read_text(encoding="utf-8"))

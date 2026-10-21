@@ -38,6 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .local_dirs import local_dir
+
 logger = logging.getLogger(__name__)
 
 M_PER_DEG_LAT = 111_320.0
@@ -101,7 +103,9 @@ DISTANCE_BANDS = ((0.0, 500.0), (500.0, 1000.0), (1000.0, math.inf))
 TOL_REL = 0.25
 TOL_ABS_M = 2.0
 
-BENCHMARK_ROOT = Path(__file__).resolve().parent / "runs" / "benchmark"
+BENCHMARK_ROOT = Path(__file__).resolve().parent / "runs" / "benchmark"  # truth/ lives here
+#: Dated run folders (single-use, large): local when SKYLINE_LOCAL_DIR is set.
+BENCHMARK_RUNS = local_dir("benchmark")
 
 #: The benchmark set (user choice 2026-10-03): site name -> survey nDSM provider.
 #: US cities read USGS's newest EPT project: Planetary Computer's COPC copy has no tiles

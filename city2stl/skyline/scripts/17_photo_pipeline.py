@@ -72,6 +72,7 @@ from city2stl.skyline import commons_photos as cp  # noqa: E402
 from city2stl.skyline import photo_groups as pg  # noqa: E402
 from city2stl.skyline import photo_heights as ph  # noqa: E402
 from city2stl.skyline import skyline_match as sm  # noqa: E402
+from city2stl.skyline.local_dirs import local_dir  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("photo_pipeline")
@@ -91,7 +92,7 @@ def _init(region: str, untagged: bool = False, candidates: str = "all"):
     if untagged:
         _W["untagged"] = _untagged_table(region, osm, _W["towers"], candidates)
         _W["max_height_m"] = _load_site_max_plausible_height_m(region)
-    d = ROOT / "runs" / "commons_cache" / region
+    d = local_dir("commons_cache") / region
     _W["prof"] = dict(np.load(d / "profiles.npz"))
 
 
@@ -440,7 +441,7 @@ def _keep(r: dict, args) -> bool:
 
 def place(args, meta: dict, osm: dict) -> list[dict]:
     """Camera per photo by route, gates, and measured towers for every candidate."""
-    d = ROOT / "runs" / "commons_cache" / args.region
+    d = local_dir("commons_cache") / args.region
     by_title = {m["title"]: m for m in meta.values()}
     common = {"max_misfit": args.max_misfit, "min_margin": args.min_margin,
               "min_coverage": args.min_coverage, "max_dist_m": args.max_dist_m,
@@ -705,7 +706,7 @@ def _card_images(args, r: dict, m: dict, towers, osm: dict) -> dict:
     onto the card's tower rows. Nothing when the cached image or outline is missing."""
     from city2stl.skyline import photo_cards as pc
 
-    cache = ROOT / "runs" / "commons_cache" / args.region
+    cache = local_dir("commons_cache") / args.region
     img_path = cp.img_dir(cache) / f"{r['key']}.jpg"
     if "prof" not in _CARDS:
         _CARDS["prof"] = dict(np.load(cache / "profiles.npz"))
@@ -816,7 +817,7 @@ def main() -> int:
         from city2stl.resources import wait_for_ram
 
         wait_for_ram()
-    d = ROOT / "runs" / "commons_cache" / args.region
+    d = local_dir("commons_cache") / args.region
     meta = {m["key"]: m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8"))
             if "px" in m}
     from city2stl.skyline.region_data import _load_osm_for_region, _load_region_bbox
