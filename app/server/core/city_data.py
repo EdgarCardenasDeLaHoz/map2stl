@@ -225,7 +225,10 @@ def with_roof_shapes(payload: dict, north: float, south: float, east: float,
     (``city2stl.roof_cache``), so only footprints never seen before are classified (about
     11 ms each); the last results are also kept in memory per bbox and footprint set.
     ``progress(done, total)`` reports the classifier's progress over the uncached
-    buildings. The payload passed in is not mutated."""
+    buildings. After the classifier, ``city2stl.roof_imagery.apply`` may add ridge
+    direction, hips and courtyards read from the same tiles (only the switches that
+    measured out as winners; stats in ``payload["roof_shapes"]["imagery"]``).
+    The payload passed in is not mutated."""
     if roof_shapes_mode(mode) == "off" or not isinstance(payload, dict):
         return payload
     fc = payload.get("buildings")
@@ -233,10 +236,11 @@ def with_roof_shapes(payload: dict, north: float, south: float, east: float,
     if not features:
         return payload
     bbox = (north, south, east, west)
-    key = _roof_key(bbox, features)
+    key = _roof_key(bbox, features) + (_imagery_id(),)
     hit = _roof_memo.get(key)
     if hit is None:
         hit = _classify_buildings(fc, bbox, progress)
+        hit = _add_imagery(fc, hit, bbox)
         _roof_memo[key] = hit
         while len(_roof_memo) > _ROOF_MEMO_SIZE:
             _roof_memo.pop(next(iter(_roof_memo)))
@@ -245,6 +249,30 @@ def with_roof_shapes(payload: dict, north: float, south: float, east: float,
     if new_fc is not None:
         out["buildings"] = new_fc
     return out
+
+
+def _imagery_id() -> str:
+    """Version and settings of the imagery pass, part of the memo key; "" when it cannot load."""
+    try:
+        from city2stl import roof_imagery
+        return f"{roof_imagery.IMAGERY_VERSION}:{roof_imagery.settings_id()}"
+    except Exception:  # noqa: BLE001 - imagery detail is optional
+        return ""
+
+
+def _add_imagery(fc: dict, hit: tuple, bbox: tuple) -> tuple[dict | None, dict]:
+    """``hit`` (the classifier's ``(collection or None, stats)``) with the imagery pass
+    (``city2stl.roof_imagery.apply``) run on its result; stats under ``"imagery"``.
+    Never raises; with every imagery switch off the input comes back unchanged."""
+    new_fc, stats = hit
+    try:
+        from city2stl import roof_imagery
+        res, istats = roof_imagery.apply(new_fc or fc, bbox)
+    except Exception as exc:  # noqa: BLE001 - imagery detail is optional
+        return new_fc, {**stats, "imagery": {"reason": f"{type(exc).__name__}: {exc}"}}
+    if res is None:
+        return new_fc, {**stats, "imagery": istats} if istats.get("error") else stats
+    return res, {**stats, "imagery": istats}
 
 
 def _roof_untagged(feat) -> bool:

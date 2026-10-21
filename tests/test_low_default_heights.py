@@ -80,7 +80,7 @@ def test_fill_heights_low_default_and_tags_win():
     ])
     out = _fill_heights(gdf, default_m=10.0, lo=3.0, hi=300.0,
                         levels_col="building:levels", low_default=True)
-    assert out["height_m"].tolist() == [3.0, 3.0, 10.0, 12.0, 9.6, 3.0, 10.0, 3.0, 3.0, 8.0]
+    assert out["height_m"].tolist() == [3.0, 3.0, 10.0, 12.0, 6.4, 3.0, 10.0, 3.0, 3.0, 8.0]
     assert out["height_source"].tolist() == [
         "default", "default", "default", "osm_tag", "osm_levels", "default", "default",
         "default", "default", "osm_tag"]

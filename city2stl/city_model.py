@@ -69,6 +69,17 @@ SOURCE_VERTICAL_STEP_M = 1.0  # SRTM / Copernicus heights are stored in whole me
 SIMPLIFY_TOL_MM = 0.05        # outline simplification tolerance at model scale
 SNAP_MM = 0.01                # coordinate grid for outlines
 MIN_FOOTPRINT_MM2 = 0.3       # smaller footprints cannot print as a distinct feature
+#: A leftover of an outline trimmed by its parts (mean width 2 * area / perimeter) narrower
+#: than this is a sliver between walls, not a printable ledge: dropped by ``assemble_parts``.
+MIN_LEFTOVER_WIDTH_MM = 0.4
+#: An enclosure (``heights.is_low_default_footprint``) whose buildings / parts inside cover
+#: less than this share of it is an open plaza ringed by a wall, not a solid block.
+OPEN_ENCLOSURE_MAX_INNER_SHARE = 0.5
+#: ... and it needs at least this many buildings / parts inside.
+OPEN_ENCLOSURE_MIN_INNER = 2
+#: A footprint this close to an enclosure's own outline (symmetric difference, share of
+#: the outline's area) is a copy of it, not a building inside it.
+ENCLOSURE_TWIN_DIFF = 0.05
 PRINT_MIN_WIDTH_MM = 0.8      # two 0.4 mm extrusion lines: the narrowest reliable feature
 # Segments per quarter circle of a round line buffer (LayerStyle.round_lines). 2 keeps a
 # 0.5 mm river end within 0.04 mm of a true circle (under SIMPLIFY_TOL_MM) at a quarter
@@ -889,11 +900,43 @@ def is_part(props: dict) -> bool:
     return bool(v) and str(v).lower() not in ("no", "none", "nan")
 
 
+def is_open_enclosure(poly, props: dict, inner) -> bool:
+    """True for an enclosure that prints as a wall ring around a plaza, not a filled slab.
+
+    ``poly`` is an outline whose tags make it a low-default enclosure
+    (``heights.is_low_default_footprint``: a castle / fort / citywalls / courtyard
+    outline, or a ruin), and ``inner`` the other footprints (buildings or
+    ``building:part`` rows, same coordinate system). Those that count lie mostly (at
+    least half of their own area) inside the outline and are not its twin (a copy of the
+    outline itself, under :data:`ENCLOSURE_TWIN_DIFF` of its area apart, as the
+    ``fortifications`` layer holds). Open means at least :data:`OPEN_ENCLOSURE_MIN_INNER`
+    of them cover under :data:`OPEN_ENCLOSURE_MAX_INNER_SHARE` of the outline. An
+    enclosure with nothing or little inside stays solid (Palacio de las Columnas); one
+    more than half built over is a building. Granada Alcazaba: 9 towers on 23.5 % of
+    4098 m2 and the rest a 3 m slab over what is a plaza.
+    """
+    from city2stl.heights import is_low_default_footprint
+
+    if not is_low_default_footprint(props) or poly.area <= 0:
+        return False
+    inside = []
+    for g in inner:
+        part = g.intersection(poly)
+        if part.area < 0.5 * g.area or g.symmetric_difference(poly).area < ENCLOSURE_TWIN_DIFF * poly.area:
+            continue
+        inside.append(part)
+    if len(inside) < OPEN_ENCLOSURE_MIN_INNER:
+        return False
+    return shapely.union_all(inside).area < OPEN_ENCLOSURE_MAX_INNER_SHARE * poly.area
+
+
 def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list, int, int]:
     """Simple 3D Buildings: where ``building:part`` features exist, they are the
     building; the outline (which carries the overall, usually tallest, height)
     only fills the area no part covers. Without this a cathedral printed as one
-    block at the height of its bell tower.
+    block at the height of its bell tower. A leftover narrower than
+    :data:`MIN_LEFTOVER_WIDTH_MM` (mean width) is dropped as a sliver, and the leftover
+    of an open enclosure (:func:`is_open_enclosure`) is not printed at all.
 
     Returns (polygons, properties, number of parts, number of outlines trimmed).
     """
@@ -921,10 +964,19 @@ def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list,
     rest = shapely.set_precision(shapely.difference(arr[outl], shapely.union_all(grid, axis=1)),
                                  SNAP_MM)
     pieces, owner = shapely.get_parts(rest, return_index=True)
-    good = (shapely.get_type_id(pieces) == 3) & (shapely.area(pieces) >= MIN_FOOTPRINT_MM2)
+    area_p = shapely.area(pieces)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mean_width = 2.0 * area_p / shapely.length(pieces)
+    good = ((shapely.get_type_id(pieces) == 3) & (area_p >= MIN_FOOTPRINT_MM2)
+            & (mean_width >= MIN_LEFTOVER_WIDTH_MM))
+    from city2stl.heights import is_low_default_footprint
+
+    open_k = {k for k in outl.tolist() if is_low_default_footprint(props[k])
+              and is_open_enclosure(arr[k], props[k], part_arr[pj[oi == k]])}
     by_outline: dict[int, list] = {}
     for g, o in zip(pieces[good], outl[owner[good]].tolist(), strict=True):
-        by_outline.setdefault(o, []).append(g)
+        if o not in open_k:
+            by_outline.setdefault(o, []).append(g)
     trimmed_set = set(outl.tolist())
     out_p, out_pr = [], []
     for k, (poly, pr) in enumerate(zip(polys, props, strict=True)):
@@ -1526,10 +1578,14 @@ def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tu
     data. Extruded on their own they become one flat block at the outline's height
     that swallows the building's parts (Granada Cathedral: a 45 m slab over 41
     parts of 16.5 to 50 m). The buildings layer draws those footprints properly,
-    so these layers keep only what it lacks. Lines and points are kept. Same rule
+    so these layers keep only what it lacks. Lines and points are kept. An open
+    enclosure (:func:`is_open_enclosure`: Alcazaba, a plaza with towers on under half
+    of it) is kept too: its fortifications copy prints as the wall ring while
+    ``assemble_parts`` leaves the plaza unfilled. Same rule
     as ``city2stl.landmarks.LandmarkPlan.take``. ``cover`` comes from
     :func:`building_cover`. Returns the kept features and how many were dropped.
     """
+    from city2stl.heights import is_low_default_footprint
     from city2stl.landmarks import REPLACE_OVERLAP
 
     if cover is None or not feats:
@@ -1540,6 +1596,10 @@ def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tu
         hits = cover.query(g, predicate="intersects")
         if not len(hits):
             continue
+        props = (feats[i] or {}).get("properties") or {}
+        if (is_low_default_footprint(props)
+                and is_open_enclosure(g, props, cover.geometries[hits])):
+            continue   # kept: RING_LAYERS draws its wall ring; the buildings layer prints no slab
         try:
             inside = shapely.area(shapely.intersection(g, shapely.union_all(cover.geometries[hits])))
         except shapely.errors.GEOSException:

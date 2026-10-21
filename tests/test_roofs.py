@@ -57,10 +57,16 @@ def test_concave_footprint_splits_into_convex_pieces():
     assert sum(p.area for p in pieces) == pytest.approx(ELL.area)
 
 
-def test_courtyard_building_gets_a_flat_top():
+@pytest.mark.parametrize("shape", ["gabled", "hipped"])
+def test_courtyard_building_is_roofed_and_watertight(shape):
     ring = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)], [[(3, 3), (7, 3), (7, 7), (3, 7)]])
-    m = _solid(ring, "gabled")
-    assert m.bounds[1, 2] == pytest.approx(6.5)
+    u, rejected = union(building_solids(ring, 0.0, 5.0, 3.0, shape))
+    assert rejected == 0
+    v, f = from_manifold(u)
+    m = trimesh.Trimesh(v, f, process=False)
+    assert m.is_watertight and m.volume > 0
+    assert m.bounds[1, 2] > 6.5          # pitched above the eave, not the old flat top
+    assert m.volume < 10 * 10 * 8        # the patio is open, not filled
 
 
 def _check_random_footprints(n):

@@ -13,13 +13,16 @@ from shapely.geometry import Polygon, box
 
 from city2stl.city_model import (
     DEFAULT_LAYERS,
+    MIN_LEFTOVER_WIDTH_MM,
     SNAP_MM,
     LayerStyle,
+    assemble_parts,
     build_city_model,
     building_cover,
     choose_scale,
     drop_building_copies,
     feature_polygons,
+    is_open_enclosure,
     resolve_layers,
 )
 
@@ -640,3 +643,79 @@ class TestFeaturePolygonsHoles:
         for p in polys:
             shell = shapely.LinearRing(p.exterior)
             assert not any(shapely.LinearRing(h).intersects(shell) for h in p.interiors)
+
+
+class TestSliverLeftovers:
+    """An outline trimmed by its parts keeps only leftovers wide enough to print
+    (Granada: 9,200 of 10,356 leftovers were under 2 m wide, ledges at outline height)."""
+
+    def test_thin_leftover_dropped_wide_kept(self):
+        outline = box(0, 0, 20, 10)
+        part = box(0, 0, 18, 10)                                   # leaves a 2 mm strip: kept
+        thin = box(0, 0, 19.7, 10)                                 # leaves a 0.3 mm strip: dropped
+        for p, expect in ((part, 1), (thin, 0)):
+            polys, props, nparts, trimmed = assemble_parts(
+                [outline, p], [{"height_m": 40}, {"height_m": 20, "building:part": "yes"}])
+            assert nparts == 1 and trimmed == 1
+            assert sum(1 for q in props if not q.get("building:part")) == expect
+            assert len(polys) == expect + 1
+
+    def test_threshold_is_mean_width(self):
+        # 2 * area / perimeter of a 0.39 x 10 strip is just under the limit, 0.45 just over.
+        assert 2 * 0.39 * 10 / (2 * 10.39) < MIN_LEFTOVER_WIDTH_MM < 2 * 0.45 * 10 / (2 * 10.45)
+        outline = box(0, 0, 10.45, 10)
+        _, props, _, _ = assemble_parts(
+            [outline, box(0, 0, 10, 10)], [{"height_m": 40}, {"building:part": "yes"}])
+        assert len(props) == 2
+
+
+class TestOpenEnclosure:
+    """A castle / fort outline that is mostly a plaza between a few towers prints as a
+    wall ring, not a filled 3 m slab (Granada Alcazaba)."""
+
+    CASTLE = {"building": "yes", "historic": "castle", "height_m": 3.0, "height_source": "default"}
+
+    @staticmethod
+    def _towers(n, side=2.0):
+        return [box(1 + 4 * i, 1, 1 + 4 * i + side, 1 + side) for i in range(n)]
+
+    def test_predicate(self):
+        outline = box(0, 0, 40, 40)
+        assert is_open_enclosure(outline, self.CASTLE, self._towers(3))
+        assert not is_open_enclosure(outline, self.CASTLE, self._towers(1))     # one building
+        assert not is_open_enclosure(outline, self.CASTLE, [])                  # Palacio de las Columnas
+        assert not is_open_enclosure(outline, {"building": "yes"}, self._towers(3))   # not an enclosure
+        halls = [box(0, 0, 40, 12), box(0, 14, 40, 26)]                         # > 50 % built over
+        assert not is_open_enclosure(outline, self.CASTLE, halls)
+        # the outline's own twin (same footprint) never counts as an inner building
+        assert is_open_enclosure(outline, self.CASTLE, [box(0, 0, 40, 40), *self._towers(3)])
+
+    def test_assemble_parts_leaves_the_plaza_open(self):
+        outline = box(0, 0, 40, 40)
+        towers = self._towers(3)
+        polys, props, nparts, _ = assemble_parts(
+            [outline, *towers], [dict(self.CASTLE)] + [{"building:part": "yes", "height_m": 12}] * 3)
+        assert nparts == 3 and len(polys) == 3
+        assert all(p.get("building:part") for p in props)
+        solid, sprops, _, _ = assemble_parts(                       # same shape, plain building
+            [outline, *towers], [{"building": "yes", "height_m": 10}]
+            + [{"building:part": "yes", "height_m": 12}] * 3)
+        assert len(solid) == 4
+
+    def test_drop_building_copies_keeps_the_open_enclosure_copy(self):
+        outline = {"geometry": {"type": "Polygon", "coordinates": [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]]},
+                   "properties": self.CASTLE}
+        towers = [{"geometry": mapping_box(t), "properties": {"building:part": "yes"}}
+                  for t in self._towers(3)]
+        cover = building_cover([outline, *towers])
+        copy = {"geometry": outline["geometry"], "properties": dict(self.CASTLE)}
+        assert drop_building_copies([copy], cover) == ([copy], 0)
+        solid = {"geometry": outline["geometry"], "properties": {"building": "yes", "name": "Hall"}}
+        assert drop_building_copies([solid], cover) == ([], 1)
+        lone = building_cover([outline])                            # nothing inside: still dropped
+        assert drop_building_copies([copy], lone) == ([], 1)
+
+
+def mapping_box(b):
+    from shapely.geometry import mapping
+    return mapping(b)

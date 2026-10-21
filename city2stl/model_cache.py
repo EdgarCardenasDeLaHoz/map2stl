@@ -41,7 +41,7 @@ from geo2stl.cache import read_array_cache, read_json_cache, write_array_cache, 
 logger = logging.getLogger(__name__)
 
 #: Part of every key. Bump when geometry code changes (see the module docstring).
-MODEL_CACHE_VERSION = 6   # 6: holed footprints no longer vanish in depinch, 2026-10-18
+MODEL_CACHE_VERSION = 7   # 7: open enclosures leave no slab, slivers under 0.4 mm dropped, 2026-10-20
 # 5: buildings as drawn (no widening, no gap closing), 2026-10-02
 # 4: buildings widened after the flat-roof merge, 2026-10-02
 # 3: tiled terrain TIN (numpy2stl heightfield_tin), 2026-09-29

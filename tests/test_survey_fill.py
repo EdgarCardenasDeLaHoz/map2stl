@@ -117,7 +117,7 @@ def _city(t):
         _feature(_cells(t, 10, 40, 60, 90), name="C"),
         _feature(_cells(t, 60, 80, 60, 90), name="D"),
         _feature(_cells(t, 90, 100, 90, 100), name="E"),          # nothing stands
-        _feature(_cells(t, 10, 40, 10, 40), source="osm_levels", h=12.8, name="tagged"),
+        _feature(_cells(t, 100, 108, 10, 20), source="osm_levels", h=12.8, name="tagged"),
         {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-3.6, 37.18]},
          "properties": {"height_m": 10.0, "height_source": "default", "name": "point"}},
     ]}
@@ -187,7 +187,7 @@ def test_nothing_on_default_fetches_nothing():
     t, rasters = _rasters()
     calls = []
     fc = {"type": "FeatureCollection",
-          "features": [_feature(_cells(t, 10, 40, 10, 40), source="osm_levels", h=12.0)]}
+          "features": [_feature(_cells(t, 10, 40, 10, 40), source="merged", h=12.0)]}
     out, stats = survey_fill.fill_default_heights(fc, BBOX, fetch=_fetcher(rasters, calls))
     assert (out, stats, calls) == (fc, None, [])
 
@@ -472,7 +472,144 @@ def test_tag_within_three_metres_is_kept(tag_h, survey_h):
     assert stats["tag_replaced"] == 0 and stats["tag_checked"] == 1
 
 
-@pytest.mark.parametrize("source", ["osm_levels", "merged", "user_override"])
+@pytest.mark.parametrize("source", ["merged", "user_override"])
 def test_other_sources_are_never_replaced(source):
     fc, out, stats = _tag_case(3.0, source=source, survey_h=20.0)
     assert out["towers"] is fc and stats is None
+
+
+# ---------------------------------------------------------------------------
+# Landmarks are only raised; floor counts are checked; per-layer burns (2026-10-20)
+# ---------------------------------------------------------------------------
+
+def _one(layer, tag_h, survey_h, source="osm_tag", cells=(10, 40, 10, 40), **props):
+    t, rasters = _rasters()
+    r0, r1, c0, c1 = cells
+    rasters["cnig_mdsn"][0][r0:r1, c0:c1] = survey_h
+    fc = {"type": "FeatureCollection", "features": [
+        _feature(_cells(t, *cells), source=source, h=tag_h, name="x", **props)]}
+    out, _ = survey_fill.fill_layer_heights({layer: fc}, BBOX, fetch=_fetcher(rasters, []))
+    return _by_name(out[layer])["x"]
+
+
+def test_plain_building_is_lowered_but_a_tower_layer_row_is_not():
+    p = _one("buildings", 25.0, 14.0, height="25")
+    assert (p["height_m"], p["height_source"]) == (14.0, "survey")
+    p = _one("towers", 45.0, 16.5, height="45")
+    assert (p["height_m"], p["height_source"]) == (45.0, "osm_tag")
+    p = _one("towers", 25.0, 40.0, height="25")                 # raised: allowed
+    assert (p["height_m"], p["height_source"]) == (40.0, "survey")
+
+
+@pytest.mark.parametrize("props, layer, has_parts, expect", [
+    ({"building:part": "yes"}, "buildings", False, True),
+    ({"building": "yes"}, "buildings", True, True),
+    ({"building": "tower"}, "buildings", False, True),
+    ({"man_made": "tower"}, "buildings", False, True),
+    ({"building": "yes"}, "towers", False, True),
+    ({"building": "yes"}, "churches", False, True),
+    ({"amenity": "place_of_worship"}, "buildings", False, True),
+    ({"building": "cathedral"}, "buildings", False, True),
+    ({"historic": "castle"}, "buildings", False, True),
+    ({"building": "castle"}, "buildings", False, True),
+    ({"name": "Palacio", "historic": "yes"}, "buildings", False, True),
+    ({"name": "Mirador", "tourism": "attraction"}, "buildings", False, True),
+    ({"historic": "yes"}, "buildings", False, False),           # unnamed
+    ({"name": "Bar Pepe", "building": "yes"}, "buildings", False, False),
+    ({"building": "apartments", "building:part": "no"}, "buildings", False, False),
+    ({}, "buildings", False, False),
+])
+def test_is_landmark(props, layer, has_parts, expect):
+    assert survey_fill.is_landmark(props, layer, has_parts) is expect
+
+
+def test_cathedral_outline_parts_and_spire_are_not_lowered():
+    t, rasters = _rasters()
+    cnig = rasters["cnig_mdsn"][0]
+    cnig[10:60, 10:60] = 16.0                                   # the lead roof
+    outline = _cells(t, 10, 60, 10, 60)
+    part_a, part_b = _cells(t, 10, 60, 10, 35), _cells(t, 10, 60, 35, 60)
+    far = _cells(t, 70, 90, 70, 90)                             # an ordinary 45 m tag
+    cnig[70:90, 70:90] = 16.0
+    spire = _cells(t, 20, 24, 20, 24)
+    part = {"building:part": "yes"}
+    fc = {"type": "FeatureCollection", "features": [
+        _feature(outline, "osm_tag", 45.0, name="outline"),
+        _feature(part_a, "osm_tag", 40.0, name="a", **part),
+        _feature(part_b, "osm_levels", 48.0, name="b", **part),
+        _feature(spire, "osm_tag", 50.0, name="spire", **part),
+        _feature(far, "osm_tag", 45.0, name="far")]}
+    out, stats = survey_fill.fill_layer_heights({"buildings": fc}, BBOX,
+                                                fetch=_fetcher(rasters, []))
+    p = _by_name(out["buildings"])
+    for name, h in (("outline", 45.0), ("a", 40.0), ("b", 48.0), ("spire", 50.0)):
+        assert p[name]["height_m"] == h and p[name]["height_source"] != "survey", name
+    assert (p["far"]["height_m"], p["far"]["height_source"]) == (16.0, "survey")
+    assert stats["tag_replaced"] == 1
+
+
+def test_floor_counts_are_checked_with_the_three_metre_rule():
+    p = _one("buildings", 12.8, 20.0, source="osm_levels")
+    assert (p["height_m"], p["height_source"], p["osm_tag_height_m"]) == (20.0, "survey", 12.8)
+    p = _one("buildings", 12.8, 15.0, source="osm_levels")
+    assert (p["height_m"], p["height_source"]) == (12.8, "osm_levels")
+    p = _one("buildings", 19.2, 10.0, source="osm_levels")      # lowered: not a landmark
+    assert (p["height_m"], p["height_source"]) == (10.0, "survey")
+    p = _one("buildings", 19.2, 10.0, source="osm_levels", **{"building:part": "yes"})
+    assert (p["height_m"], p["height_source"]) == (19.2, "osm_levels")   # landmark part
+
+
+def test_small_floor_count_footprint_uses_the_median():
+    t, rasters = _rasters()
+    cnig = rasters["cnig_mdsn"][0]
+    cnig[10:14, 10:14] = 9.0                                    # 4 x 4 m, under 30 m2
+    cnig[10, 10:13] = 25.0                                      # three tall cells: p90 reads 25
+    cnig[40:80, 40:80] = 9.0
+    cnig[40:50, 40:80] = 25.0                                   # a quarter tall: p90 reads 25
+    fc = {"type": "FeatureCollection", "features": [
+        _feature(_cells(t, 10, 14, 10, 14), "osm_levels", 9.6, name="small"),
+        _feature(_cells(t, 40, 80, 40, 80), "osm_levels", 9.6, name="big")]}
+    out, _ = survey_fill.fill_layer_heights({"buildings": fc}, BBOX, fetch=_fetcher(rasters, []))
+    p = _by_name(out["buildings"])
+    assert (p["small"]["height_m"], p["small"]["height_source"]) == (9.6, "osm_levels")
+    assert p["big"]["height_source"] == "survey" and p["big"]["height_m"] == 25.0
+
+
+def test_footprint_stats_takes_a_per_key_percentile():
+    h, w, t = _grid()
+    arr = np.zeros((h, w), np.float32)
+    arr[10:14, 10:14] = np.arange(16, dtype=np.float32).reshape(4, 4)
+    g = _cells(t, 10, 14, 10, 14)
+    assert survey_fill.footprint_stats(arr, t, {"a": g}, {"a": 50.0})["a"][0] == pytest.approx(7.5)
+    assert survey_fill.footprint_stats(arr, t, {"b": g}, {"a": 50.0})["b"][0] > 13
+
+
+def test_copy_in_another_layer_does_not_steal_the_buildings_cells():
+    t, rasters = _rasters()
+    cnig = rasters["cnig_mdsn"][0]
+    cnig[10:40, 10:40] = 0.0
+    cnig[11:39, 11:39] = 14.0                                   # roof inside a 1 m wall ring
+    building = _feature(_cells(t, 10, 40, 10, 40), name="B")
+    copy = _feature(_cells(t, 11, 39, 11, 39), name="copy")     # towers-layer twin, a bit smaller
+    out, _ = survey_fill.fill_layer_heights(
+        {"buildings": {"type": "FeatureCollection", "features": [building]},
+         "towers": {"type": "FeatureCollection", "features": [copy]}}, BBOX,
+        fetch=_fetcher(rasters, []))
+    assert _by_name(out["buildings"])["B"]["height_m"] == 14.0
+    assert _by_name(out["towers"])["copy"]["height_m"] == 14.0
+
+
+def test_outline_is_measured_over_its_full_footprint():
+    t, rasters = _rasters()
+    cnig = rasters["cnig_mdsn"][0]
+    cnig[10:50, 10:50] = 6.0
+    cnig[11:49, 11:49] = 20.0                                   # parts cover 95 % of it
+    outline = _feature(_cells(t, 10, 50, 10, 50), name="outline")
+    part = _feature(_cells(t, 11, 49, 11, 49), "osm_tag", 22.0, name="part",
+                    **{"building:part": "yes"})
+    out, _ = survey_fill.fill_layer_heights(
+        {"buildings": {"type": "FeatureCollection", "features": [outline, part]}}, BBOX,
+        fetch=_fetcher(rasters, []))
+    p = _by_name(out["buildings"])
+    assert p["outline"]["height_m"] == 20.0                     # not the 6 m ring the part leaves
+    assert p["part"]["height_source"] == "osm_tag"

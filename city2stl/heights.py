@@ -77,6 +77,17 @@ def _parse_count(value) -> float | None:
     return float(m.group(0).replace(",", ".")) if m else None
 
 
+def has_pitched_roof_shape(props) -> bool:
+    """True when ``roof:shape`` is tagged and is anything but ``flat``.
+
+    Only a pitched roof stands a floor-equivalent above the last storey; a flat
+    roof (or no roof tag, which on a block is nearly always flat) adds nothing,
+    so a levels-only block is ``levels`` x :data:`METRES_PER_LEVEL`.
+    """
+    shape = _tag(props, "roof:shape")
+    return shape not in ("", "flat")
+
+
 def height_from_tags(props) -> tuple[float | None, str]:
     """Building height in metres from OSM tags, and where it came from.
 
@@ -86,7 +97,9 @@ def height_from_tags(props) -> tuple[float | None, str]:
        ``"40 ft"``) → source ``"osm_tag"``.
     2. ``building:levels`` (or ``levels``) × :data:`METRES_PER_LEVEL`, plus
        ``roof:levels`` × :data:`METRES_PER_LEVEL` when tagged, else one
-       level-equivalent for the roof → source ``"osm_levels"``.
+       level-equivalent for the roof only when ``roof:shape`` is pitched
+       (:func:`has_pitched_roof_shape`; a flat or untagged roof adds none)
+       → source ``"osm_levels"``.
     3. Otherwise ``(None, "default")``; callers apply their own default
        height (usually 10 m) and clamps.
 
@@ -105,7 +118,7 @@ def height_from_tags(props) -> tuple[float | None, str]:
     if levels is not None:
         roof_levels = _parse_count(props.get("roof:levels"))
         if roof_levels is None:
-            roof_levels = 1.0
+            roof_levels = 1.0 if has_pitched_roof_shape(props) else 0.0
         # A building:part's levels start at its building:min_level.
         below = _parse_count(props.get("building:min_level")) or 0.0
         return (below + levels + roof_levels) * METRES_PER_LEVEL, "osm_levels"
@@ -398,6 +411,8 @@ def _fill_heights(
         level_cols["building:levels"] = levels_col
         if "roof:levels" in gdf.columns:
             level_cols["roof:levels"] = "roof:levels"
+        if "roof:shape" in gdf.columns:
+            level_cols["roof:shape"] = "roof:shape"
 
     heights: list[float] = []
     sources: list[str] = []

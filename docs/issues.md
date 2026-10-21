@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-18_
+_Last updated: 2026-10-21_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,28 @@ _Last updated: 2026-10-18_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
+
+- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); 3,173 of 13,132 records outside the cached rasters still carry REDIAM values (`survey_provider`) until a re-run with network. Original text below.
+
+- `city2stl/skyline/benchmark.py::REGIONS` sends Granada's truth to `rediam_mdhn`. That raster
+  suppresses lidar-classified building cells (see `city2stl/height/providers/rediam_mdhn.py`),
+  so on ordinary buildings it reads low. On the same eroded footprint, CNIG p95 minus REDIAM p95
+  is +5.4 m median on survey-filled rows and +3.3 m on floor-count rows; cell by cell, REDIAM
+  is 5.7 m below CNIG where CNIG reads over 3 m, and 16 % of those cells are void.
+- Effect: `tools/eval/score_export_heights.py` shows every Granada source about +5 m high, before
+  and after the 2026-10-20 height fixes. Ruled out: ground reference (streets agree to 0.4 m),
+  misalignment, the scorer's `height_m` read, ring and stat choice, osm_id matching.
+- Fix: rebuild Granada truth CNIG-first (REDIAM only where CNIG has no building, as
+  `survey_fill` does) with `skyline/scripts/19_refresh_survey_truth.py`, then re-score. A
+  CNIG-based truth is not independent of a CNIG fill: hold the survey rows out when ranking
+  providers. Not done yet: `city2stl/skyline/` is the panoramic session's area.
+
+## Fixed 2026-10-20: Alcazaba plaza slab, lowered landmarks, +1 roof floor, sliver leftovers
+
+- **Fix:** `city_model.py::is_open_enclosure`, `survey_fill.py::is_landmark` / `_burn_stats`, `heights.py::has_pitched_roof_shape`, `MIN_LEFTOVER_WIDTH_MM`; `MODEL_CACHE_VERSION` 7. Entries: [building-heights](decisions/building-heights.md), [roofs-landmarks](decisions/roofs-landmarks.md).
+- **Open:** cached payload floor-count heights keep the old +1 roof floor until a fresh fetch (or survey re-measure); landmark parts only rise, so 19% of floor-count parts stay over 3 m off.
 
 ## Fixed 2026-10-18: Alhambra reference swap filled courtyards and dropped OSM buildings
 

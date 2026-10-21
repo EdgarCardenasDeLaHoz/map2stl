@@ -97,8 +97,8 @@ class TestFillHeights:
         )
         result = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
         assert result["height_source"].iloc[0] == "osm_levels"
-        # Five levels plus one level-equivalent for the (untagged) roof.
-        assert result["height_m"].iloc[0] == round(6 * METRES_PER_LEVEL, 1)
+        # Five levels, no roof level: an untagged roof is flat.
+        assert result["height_m"].iloc[0] == round(5 * METRES_PER_LEVEL, 1)
 
     def test_missing_levels_falls_back_to_default_not_an_invented_count(self):
         """No height and no levels -> default_m, even when levels_col is set.
@@ -163,10 +163,30 @@ class TestHeightFromTags:
     def test_height_tag_beats_levels(self):
         assert height_from_tags({"height": "30", "building:levels": "5"}) == (30.0, "osm_tag")
 
-    def test_levels_add_one_roof_level_when_roof_levels_absent(self):
-        h, src = height_from_tags({"building:levels": "5"})
-        assert src == "osm_levels"
-        assert h == 6 * METRES_PER_LEVEL
+    def test_flat_or_untagged_roof_adds_no_roof_level(self):
+        for props in ({"building:levels": "5"},
+                      {"building:levels": "5", "roof:shape": "flat"},
+                      {"building:levels": "5", "roof:shape": float("nan")}):
+            h, src = height_from_tags(props)
+            assert src == "osm_levels"
+            assert h == 5 * METRES_PER_LEVEL
+
+    def test_pitched_roof_adds_one_roof_level(self):
+        for shape in ("gabled", "hipped", "pyramidal"):
+            h, _ = height_from_tags({"building:levels": "5", "roof:shape": shape})
+            assert h == 6 * METRES_PER_LEVEL
+        h, _ = height_from_tags({"building:levels": "5", "roof:shape": "gabled",
+                                 "roof:levels": "0"})
+        assert h == 5 * METRES_PER_LEVEL
+
+    def test_fill_heights_reads_roof_shape_column(self):
+        import geopandas as gpd
+        from shapely.geometry import box
+        gdf = gpd.GeoDataFrame(
+            {"geometry": [box(0, 0, 1, 1), box(1, 0, 2, 1)], "building:levels": [5, 5],
+             "roof:shape": ["flat", "gabled"]}, crs="EPSG:4326")
+        out = _fill_heights(gdf, default_m=10.0, levels_col="building:levels")
+        assert out["height_m"].tolist() == [16.0, 19.2]
 
     def test_roof_levels_used_when_present(self):
         h, _ = height_from_tags({"building:levels": 4, "roof:levels": "2"})

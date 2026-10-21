@@ -296,6 +296,78 @@ def roof_stats(region: str, workers: int) -> dict:
 # --------------------------------------------------------------------------- new survey-only truth
 
 
+def overpass_cache_rings(osm_ids: set[str]) -> dict[str, list]:
+    """``way/<id>`` -> lon/lat ring (6 decimals) from the raw Overpass responses in ``cache/``
+    (osmnx's HTTP cache: ``elements`` with nodes). No network; relations are not assembled, and the
+    ring is the mapper's, not the pipeline's 0.5 m-simplified one."""
+    out: dict[str, list] = {}
+    for f in (RUNS.parents[2] / "cache").glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        els = d.get("elements") if isinstance(d, dict) else None
+        if not els:
+            continue
+        nd = {e["id"]: (e["lon"], e["lat"]) for e in els if e.get("type") == "node"}
+        for e in els:
+            oid = f"way/{e.get('id')}"
+            if (e.get("type") == "way" and oid in osm_ids and oid not in out
+                    and e.get("nodes") and all(i in nd for i in e["nodes"])):
+                out[oid] = [[round(nd[i][0], 6), round(nd[i][1], 6)] for i in e["nodes"]]
+    return out
+
+
+def rebuild_with_fallback(region: str, workers: int, dry: bool = False,
+                          offline_rings: bool = False) -> dict:
+    """Re-measure every truth record of ``region`` provider-first (``benchmark.REGIONS``), then
+    ``benchmark.FALLBACKS`` where the first shows no building; each record gains
+    ``survey_provider``; a record neither provider measures keeps its old values. The old cache is copied to ``<region>.<old provider>.json`` first
+    (once). Other fields (osm_id, temporal, ...) are kept; ``status`` / ``truth_m`` are re-derived."""
+    from city2stl.skyline import survey_heights as sh
+
+    provider, fallback = bm.REGIONS[region], bm.FALLBACKS.get(region)
+    old = bm.load_truth_cache(region)
+    if offline_rings:   # rings by osm_id from the cached Overpass responses, truth keys kept
+        by_id = overpass_cache_rings({r["osm_id"] for r in old.values() if r.get("osm_id")})
+        rings = {k: by_id[r["osm_id"]] for k, r in old.items() if r.get("osm_id") in by_id}
+    else:
+        rings = all_rings(region, set(old))
+    got = sh.survey_footprint_heights(region, rings, provider, workers=workers, roof_stats=True,
+                                      fallback=fallback)
+    new, by, failed = {}, Counter(), []
+    for k, r in old.items():
+        s = got.get(k)
+        if s is None or s.get("error") or s.get("survey_m") is None:
+            # read failed, or neither provider covers it: the old truth stays, tagged with its provider
+            new[k] = {**r, "survey_provider": r.get("survey_provider") or old_provider(old)}
+            failed.append(k)
+            continue
+        rec = {**r, **{f: s.get(f) for f in ("survey_m", "survey_cells", "roof_m", "ground_p5_m",
+                                              "roof_stats")}}
+        rec["status"], tm = bm.classify(rec["survey_m"], rec.get("tiles_m"))
+        rec["truth_m"] = None if tm is None else round(tm, 2)
+        rec.update(stat=bm.STAT_VERSION, survey_provider=s.get("provider"),
+                   survey_years=s.get("years"),
+                   note=f"{SINGLE_SOURCE_NOTE}, {provider} first then {fallback}, "
+                        f"{time.strftime('%Y-%m-%d')}")
+        new[k] = rec
+        by[(rec["survey_provider"], rec["status"])] += 1
+    backup = bm._truth_cache_path(region).with_suffix(f".{old_provider(old)}.json")
+    if not dry:
+        if not backup.exists():
+            backup.write_text(json.dumps(old, indent=1, sort_keys=True), encoding="utf-8")
+        bm.save_truth_cache(region, new)
+    return {"records": len(new), "failed": len(failed), "no_ring": len(set(old) - set(rings)),
+            "by_provider_status": {f"{a}/{b}": n for (a, b), n in sorted(by.items(), key=str)},
+            "backup": str(backup), "dry": dry}
+
+
+def old_provider(cache: dict) -> str:
+    return next((r.get("survey_provider") for r in cache.values() if r.get("survey_provider")),
+                None) or "rediam_mdhn"
+
+
 def _in_box(lat: float, lon: float, box) -> bool:
     s, n, w, e = box
     return s <= lat <= n and w <= lon <= e
@@ -328,7 +400,7 @@ def truth_record(s: dict, project: str | None, osm_id: str | None, start_dates: 
     rec = {"survey_m": s["survey_m"], "survey_cells": s["survey_cells"], "tiles_m": None,
            "tiles_cells": 0, "status": status, "truth_m": None if tm is None else round(tm, 2),
            "stat": bm.STAT_VERSION, "tiles_read": False, "survey_project": project,
-           "survey_years": s.get("years"), "roof_m": s.get("roof_m"),
+           "survey_provider": s.get("provider"), "survey_years": s.get("years"), "roof_m": s.get("roof_m"),
            "ground_p5_m": s.get("ground_p5_m"), "roof_stats": s.get("roof_stats"),
            "key_ring": "report", "osm_id": osm_id,
            "note": f"{SINGLE_SOURCE_NOTE}, {time.strftime('%Y-%m-%d')}"}
@@ -424,7 +496,7 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
         batch = sel[i:i + max(1, workers)]
         rings = {k: meta[k]["ring6"] for t in batch for k in t.keys}
         got = sh.survey_footprint_heights(region, rings, provider, workers=workers,
-                                          roof_stats=True)
+                                          roof_stats=True, fallback=bm.FALLBACKS.get(region))
         # merged into the cache as it is on disk now, under its lock: another reader of the
         # same region (another --shard) keeps its records
         with bm.file_lock(bm._truth_cache_path(region)):
@@ -521,6 +593,10 @@ def main() -> int:
                       help="re-read survey-cache records without the stored roof statistics")
     mode.add_argument("--new-truth", action="store_true",
                       help="survey-only truth for the region's TRUTH_AREAS footprints")
+    mode.add_argument("--rebuild-fallback", action="store_true",
+                      help="re-measure every truth record primary-first, then benchmark.FALLBACKS")
+    ap.add_argument("--offline-rings", action="store_true",
+                    help="--rebuild-fallback: rings from cached Overpass responses (way ids only)")
     mode.add_argument("--temporal", action="store_true",
                       help="OSM start_date -> temporal flag on every truth record")
     ap.add_argument("--areas", nargs="*", default=None,
@@ -548,6 +624,9 @@ def main() -> int:
             summary = new_truth(region, args.areas, args.max_tiles, args.fetch_workers, args.plan,
                                 args.from_report, tuple(int(x) for x in args.shard.split("/")),
                                 args.reverse)
+        elif args.rebuild_fallback:
+            summary = rebuild_with_fallback(region, args.fetch_workers, args.plan,
+                                             args.offline_rings)
         elif args.temporal:
             summary = temporal(region)
         else:

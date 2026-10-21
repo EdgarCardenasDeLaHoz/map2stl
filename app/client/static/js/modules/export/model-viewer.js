@@ -974,7 +974,11 @@ function _cancelFullModel() {
 function _fullModelRequest() {
     if (!_isCityBox() || typeof window.cityExportBody !== 'function') return null;
     const body = window.cityExportBody();
-    return { key: JSON.stringify(body), layers: body.layers || {} };
+    // The key spans the whole body, so it already carries reference_landmarks / roof_shapes;
+    // named here so a change to any of them can never be served the cached model.
+    const key = JSON.stringify({ ...body, reference_landmarks: !!body.reference_landmarks,
+        roof_shapes: body.roof_shapes ?? 'auto', trees: body.layers?.trees?.enabled === true });
+    return { key, layers: body.layers || {} };
 }
 
 /**
@@ -1739,6 +1743,13 @@ window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
 window.setViewerWireframe   = setViewerWireframe;
 window.refreshCityLayers    = refreshCityLayers;
+// The F-DETAIL switches are part of the finished model's request (cityExportBody) too.
+if (typeof document !== 'undefined') {
+    const detailControl = /^city(Alhambra|RoofShapes|Trees)$/;
+    ['input', 'change'].forEach((type) => document.addEventListener(type, (e) => {
+        if (detailControl.test(e.target?.id || '')) refreshCityLayers();
+    }));
+}
 window.updateBedOutline     = updateBedOutline;
 window.puzzleEdgesFor       = puzzleEdgesFor;
 window.resetPuzzleEdges     = resetPuzzleEdges;
