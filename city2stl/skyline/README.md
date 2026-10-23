@@ -382,6 +382,9 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - A7: instruments done 2026-10-23 (pano summary `snap` and `overlap` columns, mismatch cause
     on the label); next re-run tel_aviv, melbourne, honolulu and one more to confirm each cause
     before any F-DET4a–c fix.
+    - Cartagena v20 check (cache-only, 0 misses): the columns render. Elevated seeds snap 0 m. The auto
+      street seeds snap 135–209 m with overlap 0.27–0.38, so they sit right at the 100 m / 0.35 cause
+      thresholds. Tune the thresholds on the re-run cities, not on Cartagena.
   - A2: correlate the good/medium/weak label with per-building height MAE on curated regions.
   - A4 done 2026-10-23: the F-DET2 FOV gate also counts satellite footprints (`ms_buildings`,
     `_propose_standoff_locations(extra_centroids=)`); saved proposals are reused, so a region
