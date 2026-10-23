@@ -318,25 +318,5 @@ def sample_coastline_points(
     out: list[tuple[float, float]] = []
     for feat in features:
         for line in _iter_linestring_coords(feat):
-            if not line or len(line) < 2:
-                continue
-            # Walk the polyline accumulating distance until we hit the
-            # next spacing step, then emit the interpolated point.
-            carry = 0.0
-            prev_lon, prev_lat = float(line[0][0]), float(line[0][1])
-            out.append((prev_lon, prev_lat))
-            for vert in line[1:]:
-                lon, lat = float(vert[0]), float(vert[1])
-                seg_m = _haversine_m(prev_lon, prev_lat, lon, lat)
-                if seg_m <= 0.0:
-                    prev_lon, prev_lat = lon, lat
-                    continue
-                t = (spacing_m - carry) / seg_m
-                while t <= 1.0:
-                    out.append(
-                        (prev_lon + t * (lon - prev_lon), prev_lat + t * (lat - prev_lat))
-                    )
-                    t += spacing_m / seg_m
-                carry = (carry + seg_m) % spacing_m
-                prev_lon, prev_lat = lon, lat
+            out.extend(_resample_line(line, spacing_m))
     return out

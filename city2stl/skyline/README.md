@@ -391,9 +391,6 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery
     accuracy in STATUS (was F-CLEAN13).
-- **Tests**
-  - Unit test for `coastline_registration.py::sweep_pano_heading_offset` on synthetic keypoints.
-  - Edge-case tests for F-SKY13 OSM coastline extraction (`osm_water.py`).
 - **Housekeeping**
   - Decide on the research probes `scripts/demos/13`–`16`: fold conclusions into STATUS and archive (AUDIT-2026-06-07).
 
