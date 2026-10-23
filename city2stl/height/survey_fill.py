@@ -13,6 +13,18 @@ feature of the :data:`FILL_LAYERS` (``buildings``, and the landmark layers ``tow
   estimate, not a measurement; the payload keeps no raw tag, so a bare 10.0 is read as
   that estimate. A feature the survey cannot measure keeps its tagged height.
 
+**Survey wins when far off** (user decision 2026-10-17, extended 2026-10-20): every *other*
+``osm_tag`` and ``osm_levels`` (floor-count) feature is also measured, and replaced only
+when the survey height differs from it by more than :data:`TAG_OVERRIDE_MIN_DIFF_M`
+(``height_source = "survey"``, the old height kept in ``osm_tag_height_m``). Within that it
+keeps its height. A floor-count footprint under :data:`SMALL_FOOTPRINT_M2` is measured at
+the median (:data:`SMALL_STAT_PERCENTILE`), not the 90th percentile, which on a few cells
+reads the neighbour's wall or a chimney. **Landmarks are only raised** (:func:`is_landmark`):
+the survey reads a cathedral's lead roof at 16 m and its spire at 20 m, and lowered 41 parts
+and the outline to that; a tagged landmark height is never lowered, whatever the survey
+says. ``merged`` and ``user_override`` features are never touched. Bulk-10 m tags above are
+always filled.
+
 Lines (city walls) are measured on a strip :data:`LINE_HALF_WIDTH_M` either side.
 The measurement:
 
@@ -59,7 +71,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -81,6 +93,11 @@ _MIN_ERODE_CELLS = 20
 FILL_LAYERS: tuple[str, ...] = ("buildings", "towers", "churches", "fortifications", "walls")
 #: A tagged height of exactly this is the mappers' round-number estimate (see the docstring).
 BULK_TAG_HEIGHT_M = 10.0
+#: An ``osm_tag`` height is replaced by the survey's only when they differ by more than this.
+TAG_OVERRIDE_MIN_DIFF_M = 3.0
+#: Floor-count (``osm_levels``) footprints under this area (m2) are measured at the median.
+SMALL_FOOTPRINT_M2 = 30.0
+SMALL_STAT_PERCENTILE = 50.0
 #: A line (city wall) is measured on this strip either side of it.
 LINE_HALF_WIDTH_M = 1.5
 _M_PER_DEG = 111_320.0
@@ -125,13 +142,18 @@ def fill_resolution(bbox) -> float | None:
 
 
 def footprint_stats(arr: np.ndarray, transform, geoms: dict[int, object],
-                    q: float = STAT_PERCENTILE) -> dict[int, tuple[float, float]]:
+                    q: float | Mapping[int, float] = STAT_PERCENTILE,
+                    ) -> dict[int, tuple[float, float]]:
     """``{key: (q-th percentile of valid cells, valid coverage)}`` per footprint.
 
-    ``arr`` is an nDSM (row 0 = north, NaN = no data) with lon/lat ``transform``;
-    ``geoms`` maps a key to a shapely (Multi)Polygon or GeoJSON geometry. Footprints
-    are burnt largest first, so a small footprint inside a large one (a part on its
-    outline) keeps its own cells. Each uses its cells after a one-cell inward buffer
+    ``q`` is one percentile, or ``{key: percentile}`` (keys missing from it read
+    :data:`STAT_PERCENTILE`). ``arr`` is an nDSM (row 0 = north, NaN = no data) with
+    lon/lat ``transform``; ``geoms`` maps a key to a shapely (Multi)Polygon or GeoJSON
+    geometry. Footprints are burnt into ONE label raster largest first, so a small
+    footprint inside a large one keeps its own cells and the large one loses them:
+    footprints that overlap by design (a ``building:part`` on its outline, a tower in
+    the ``towers`` layer on the same building) belong in separate calls
+    (:func:`fill_layer_heights` makes one per layer and one for the parts). Each uses its cells after a one-cell inward buffer
     when it has at least ``_MIN_ERODE_CELLS`` and the buffer keeps 30 % of them.
     A footprint covering no cell is absent; one with no valid cell reads ``(nan, 0.0)``.
     """
@@ -174,7 +196,8 @@ def footprint_stats(arr: np.ndarray, transform, geoms: dict[int, object],
         if k == 0:
             out[keys[i - 1]] = (float("nan"), 0.0)
             continue
-        pos = q / 100.0 * (k - 1)
+        qi = q.get(keys[i - 1], STAT_PERCENTILE) if isinstance(q, Mapping) else q
+        pos = qi / 100.0 * (k - 1)
         lo = int(math.floor(pos))
         hi = min(lo + 1, k - 1)
         a, b = values[starts[i] + lo], values[starts[i] + hi]
@@ -209,14 +232,65 @@ def fillable(props: dict | None) -> bool:
     return False
 
 
+def _is_tag(props: dict | None) -> bool:
+    """A tagged height checked against the survey: ``osm_tag`` or floor-count ``osm_levels``."""
+    return (props or {}).get("height_source") in ("osm_tag", "osm_levels")
+
+
+_CHURCH_BUILDINGS = frozenset({"church", "cathedral", "chapel", "basilica", "mosque",
+                               "synagogue", "temple", "monastery", "shrine", "minaret"})
+
+
+def _t(props: dict, key: str) -> str:
+    v = props.get(key)
+    return "" if v is None or (isinstance(v, float) and v != v) else str(v).strip().lower()
+
+
+def is_landmark(props: dict | None, layer: str = "buildings", has_parts: bool = False) -> bool:
+    """Whether the survey may only RAISE this feature's tagged height, never lower it.
+
+    The survey (CNIG MDSn, 2.5 m cells) reads a landmark's roofs, not its towers and
+    spires: it put Granada Cathedral's outline at 16.5 m (tagged 45), its 41 parts at
+    15-28 m (tagged 40-50) and the spire at 19.6 m (tagged 50). A landmark is:
+
+    - a ``building:part`` row, or an outline that has parts (``has_parts``, computed by
+      the caller from the geometry);
+    - a tower: ``building`` / ``man_made`` = ``tower``, a ``tower:type``, or the
+      ``towers`` layer;
+    - a church or place of worship: ``amenity=place_of_worship``, a ``building`` of
+      church / cathedral / chapel / basilica / mosque ..., or the ``churches`` layer;
+    - a castle or fortification: ``historic`` castle / fort / fortification / citywalls,
+      ``building=castle``, a ``castle_type``, or the ``fortifications`` layer;
+    - any named building with a ``historic`` tag or ``tourism=attraction``.
+    """
+    from city2stl.heights import _ENCLOSURE_HISTORIC
+
+    props = props or {}
+    if has_parts or layer in ("towers", "churches", "fortifications"):
+        return True
+    part = _t(props, "building:part")
+    if part and part not in ("no", "none"):
+        return True
+    building, historic = _t(props, "building"), _t(props, "historic")
+    if "tower" in (building, _t(props, "man_made")) or _t(props, "tower:type"):
+        return True
+    if _t(props, "amenity") == "place_of_worship" or building in _CHURCH_BUILDINGS:
+        return True
+    if historic in _ENCLOSURE_HISTORIC or building == "castle" or _t(props, "castle_type"):
+        return True
+    return bool(_t(props, "name")) and (bool(historic) or _t(props, "tourism") == "attraction")
+
+
 def _default_polygons(features: list[dict]) -> dict[int, object]:
-    """``{index: shapely geometry}`` of the :func:`fillable` features. Polygons as they are,
-    lines buffered by :data:`LINE_HALF_WIDTH_M`."""
+    """``{index: shapely geometry}`` of the :func:`fillable` features and of every other
+    ``osm_tag`` feature (checked against the survey). Polygons as they are, lines buffered
+    by :data:`LINE_HALF_WIDTH_M`."""
     from shapely.geometry import shape
 
     out = {}
     for i, feat in enumerate(features):
-        if not fillable(feat.get("properties")):
+        props = feat.get("properties")
+        if not (fillable(props) or _is_tag(props)):
             continue
         geom = feat.get("geometry") or {}
         kind = geom.get("type")
@@ -230,6 +304,61 @@ def _default_polygons(features: list[dict]) -> dict[int, object]:
             continue
         if not g.is_empty:
             out[i] = g
+    return out
+
+
+def _has_parts(features: list[dict], rows: dict[int, object]) -> set[int]:
+    """Indices (from ``rows``, ``{index: geometry}``) of the non-part features that overlap
+    a ``building:part`` of ``features``: an outline whose parts are the building."""
+    from shapely import STRtree
+    from shapely.geometry import shape
+
+    parts = []
+    for f in features:
+        if _t(f.get("properties") or {}, "building:part") not in ("", "no", "none"):
+            try:
+                g = shape(f.get("geometry") or {})
+            except Exception:
+                continue
+            if not g.is_empty and g.geom_type in ("Polygon", "MultiPolygon"):
+                parts.append(g)
+    if not parts:
+        return set()
+    tree = STRtree(parts)
+    out = set()
+    for i, g in rows.items():
+        if _t(features[i].get("properties") or {}, "building:part") not in ("", "no", "none"):
+            continue
+        for j in tree.query(g, predicate="intersects"):
+            try:
+                if g.intersection(parts[j]).area > 0:
+                    out.add(i)
+                    break
+            except Exception:
+                continue
+    return out
+
+
+def _area_m2(g) -> float:
+    """Approximate area (m2) of a lon/lat geometry."""
+    lat = g.centroid.y
+    return g.area * _M_PER_DEG * _M_PER_DEG * math.cos(math.radians(lat))
+
+
+def _burn_stats(arr, transform, polys: dict, parts: set, q: Mapping | None = None) -> dict:
+    """:func:`footprint_stats` of ``{(layer, index): geometry}``, one burn per layer, with
+    the keys in ``parts`` (``building:part`` rows) in a burn of their own, so that a part
+    does not take cells from its outline and a ``towers`` / ``churches`` copy does not take
+    a building's. ``q`` is the per-key percentile (default :data:`STAT_PERCENTILE`)."""
+    groups: dict[tuple, list] = {}
+    for k in polys:
+        groups.setdefault((k[0], k in parts), []).append(k)
+    q = q or {}
+    out: dict = {}
+    for keys in groups.values():
+        got = footprint_stats(arr, transform, dict(enumerate(polys[k] for k in keys)),
+                              {n: q.get(k, STAT_PERCENTILE) for n, k in enumerate(keys)})
+        out.update({keys[n]: v for n, v in got.items()})
     return out
 
 
@@ -259,8 +388,10 @@ def fill_layer_heights(layers: dict, bbox, *,
     each source is read once for all layers. ``stats`` is None when no fill was tried:
     nothing fillable, or no validated survey covers ``bbox``. Otherwise it is a dict
     with ``source``, ``fallback``, ``resolution_m``, ``defaults``, ``filled``,
-    ``by_source``, ``unmeasured`` and ``layers`` (``{name: {"defaults", "filled"}}``),
-    plus ``skipped`` or ``error`` when the fill could not run. A failing fallback leaves
+    ``by_source``, ``unmeasured``, ``tag_checked``, ``tag_replaced`` and ``layers``
+    (``{name: {"defaults", "filled", "tag_replaced"}}``; ``defaults`` / ``filled`` /
+    ``unmeasured`` count only the :func:`fillable` features, the other ``osm_tag``
+    features are ``tag_checked`` and, when the survey is far off, ``tag_replaced``), plus ``skipped`` or ``error`` when the fill could not run. A failing fallback leaves
     the primary's heights in place. The input is never mutated; a new dict (with new
     collections for the layers that changed) is returned when anything changed.
     """
@@ -275,16 +406,21 @@ def fill_layer_heights(layers: dict, bbox, *,
         polys.update({(name, i): g for i, g in _default_polygons(features).items()})
     if not polys:
         return layers, None
+    fill_keys = {k for k in polys if fillable(feats[k[0]][k[1]].get("properties"))}
+    if not fill_keys and not any(_is_tag(feats[k[0]][k[1]].get("properties")) for k in polys):
+        return layers, None
     src = source_for(bbox)
     if src is None:
         return layers, None
     fetch = fetch or _fetch_default
-    per_layer = {n: {"defaults": sum(1 for k in polys if k[0] == n), "filled": 0}
-                 for n in feats}
+    per_layer = {n: {"defaults": sum(1 for k in polys if k[0] == n and k in fill_keys),
+                     "filled": 0, "tag_replaced": 0} for n in feats}
+    n_tag = len(polys) - len(fill_keys)
     stats: dict = {"source": src.primary, "fallback": src.fallback, "resolution_m": None,
-                   "defaults": len(polys), "filled": 0, "by_source": {},
-                   "unmeasured": len(polys),
-                   "layers": {n: v for n, v in per_layer.items() if v["defaults"]}}
+                   "defaults": len(fill_keys), "filled": 0, "by_source": {},
+                   "unmeasured": len(fill_keys), "tag_checked": n_tag, "tag_replaced": 0,
+                   "layers": {n: v for n, v in per_layer.items()
+                              if any(k[0] == n for k in polys)}}
     res = fill_resolution(bbox)
     if res is None:
         stats["skipped"] = f"bbox needs cells coarser than {MAX_FILL_RESOLUTION_M} m"
@@ -300,7 +436,19 @@ def fill_layer_heights(layers: dict, bbox, *,
     if got is None:
         stats["skipped"] = f"{src.primary} has no data over the bbox"
         return layers, stats
-    primary = footprint_stats(got[0], got[1], polys)
+    part_keys = {k for k in polys
+                 if _t(feats[k[0]][k[1]].get("properties") or {}, "building:part")
+                 not in ("", "no", "none")}
+    with_parts: set[tuple[str, int]] = set()
+    if "buildings" in feats:
+        rows = {k[1]: g for k, g in polys.items() if k[0] == "buildings" and k not in part_keys}
+        with_parts = {("buildings", i) for i in _has_parts(feats["buildings"], rows)}
+    landmark = {k for k in polys
+                if is_landmark(feats[k[0]][k[1]].get("properties"), k[0], k in with_parts)}
+    q = {k: SMALL_STAT_PERCENTILE for k, g in polys.items()
+         if (feats[k[0]][k[1]].get("properties") or {}).get("height_source") == "osm_levels"
+         and _area_m2(g) < SMALL_FOOTPRINT_M2}
+    primary = _burn_stats(got[0], got[1], polys, part_keys, q)
     heights: dict[tuple[str, int], tuple[float, str]] = {}
     for k in polys:
         v = _measured(primary.get(k))
@@ -317,26 +465,39 @@ def fill_layer_heights(layers: dict, bbox, *,
             stats["error"] = f"{src.fallback}: {exc}"
             got_fb = None
         if got_fb is not None:
-            for k, stat in footprint_stats(got_fb[0], got_fb[1], rest).items():
+            for k, stat in _burn_stats(got_fb[0], got_fb[1], rest, part_keys, q).items():
                 v = _measured(stat)
                 if v is not None:
                     heights[k] = (v, src.fallback)
 
+    # A tagged (non-fillable) row: the survey replaces the tag only when far off.
+    for k in [k for k in heights if k not in fill_keys]:
+        tag_h = feats[k[0]][k[1]]["properties"].get("height_m")
+        shown = round(max(MIN_HEIGHT_M, min(MAX_HEIGHT_M, heights[k][0])), 1)
+        if isinstance(tag_h, (int, float)) and abs(shown - tag_h) <= TAG_OVERRIDE_MIN_DIFF_M:
+            del heights[k]
+        elif isinstance(tag_h, (int, float)) and k in landmark and shown < tag_h:
+            del heights[k]   # a landmark is only ever raised
     if not heights:
         return layers, stats
     new_features = {n: list(f) for n, f in feats.items()}
     for (name, i), (v, source) in heights.items():
         feat = feats[name][i]
-        props = {**(feat.get("properties") or {}),
+        old = feat.get("properties") or {}
+        props = {**old,
                  "height_m": round(max(MIN_HEIGHT_M, min(MAX_HEIGHT_M, v)), 1),
                  "height_source": SOURCE, "survey_source": source}
+        if _is_tag(old):
+            props["osm_tag_height_m"] = old.get("height_m")
         new_features[name][i] = {**feat, "properties": props}
         stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
-        per_layer[name]["filled"] += 1
-    stats["filled"] = len(heights)
-    stats["unmeasured"] = len(polys) - len(heights)
-    logger.info("Survey height fill: %d of %d fallback heights measured (%s; %s)",
-                stats["filled"], len(polys), stats["by_source"],
+        per_layer[name]["tag_replaced" if (name, i) not in fill_keys else "filled"] += 1
+    stats["tag_replaced"] = sum(1 for k in heights if k not in fill_keys)
+    stats["filled"] = len(heights) - stats["tag_replaced"]
+    stats["unmeasured"] = len(fill_keys) - stats["filled"]
+    logger.info("Survey height fill: %d of %d fallback heights measured, %d of %d tagged "
+                "heights replaced (%s; %s)",
+                stats["filled"], len(fill_keys), stats["tag_replaced"], n_tag, stats["by_source"],
                 {n: v["filled"] for n, v in per_layer.items()})
     out = dict(layers)
     for name in {k[0] for k in heights}:

@@ -271,7 +271,9 @@ class TestTrails:
 
         fetched = []
         monkeypatch.setattr(task_mod, "get_city_layers", lambda *a, **k: {"buildings": _fc(_b(0))})
-        monkeypatch.setattr(task_mod, "_trails", lambda *a, **k: fetched.append(1) or _fc())
+        # A cache read (cached_only=True, a miss here) is allowed; only a network fetch counts.
+        monkeypatch.setattr(task_mod, "_trails", lambda *a, cached_only=False, **k:
+                            None if cached_only else (fetched.append(1) or _fc()))
         r = client.get("/api/terrain/dem", params={**BBOX, "dim": 60, "projection": "none"})
         body = {"format": "city", "dem_id": r.json()["dem_id"], "name": "t"}
         from app.server.core.export_tasks import ExportTask

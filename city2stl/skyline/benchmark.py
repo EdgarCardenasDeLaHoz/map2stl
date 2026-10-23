@@ -125,9 +125,15 @@ REGIONS = {
     "san_juan": "usgs_3dep_ept",
     "fort_lauderdale": "usgs_3dep_ept",
     "honolulu": "usgs_3dep_ept",
-    # Andalucia: REDIAM 1 m LiDAR height (2020-21), a COG read by window (2026-10-13).
-    "granada": "rediam_mdhn",
+    # Andalucia: CNIG MDSn building class first (2026-10-21; REDIAM MDHN suppresses building cells
+    # and read ~5 m low), REDIAM 1 m LiDAR height (2020-21) only where CNIG has no building
+    # (``FALLBACKS``), as ``height/survey_fill.py`` does.
+    "granada": "cnig_mdsn",
 }
+
+#: Region -> second survey provider, read only for footprints the primary shows no building on
+#: (``survey_heights.survey_footprint_heights(fallback=...)``). Other regions have none.
+FALLBACKS = {"granada": "rediam_mdhn"}
 
 
 def region_key(name: str) -> str:

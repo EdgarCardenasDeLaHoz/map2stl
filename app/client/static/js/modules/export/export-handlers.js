@@ -608,6 +608,8 @@ window.exportCityModel = exportCityModel;
 // The City Model export request, as exportCityModel sends it: the viewer builds the same
 // one in the background (model-viewer.js::_scheduleFullModel), so a download hits the cache.
 window.cityExportBody = () => ({ format: 'city', ..._exportParams(), ..._cityExtra() });
+/** Resolves once the selected box's survey coverage is known (model-viewer.js rebuilds then). */
+window.citySurveyCoverageReady = () => surveyCoverageReady(window.appState?.selectedRegion, fetchSurveySources);
 window.exportPuzzle = exportPuzzle;
 window.runPreflight = runPreflight;
 window.cancelExport = cancelExport;

@@ -7,14 +7,22 @@ import zipfile
 
 import numpy as np
 import pytest
+import shapely
 import trimesh
+from shapely.geometry import Polygon, box
 
 from city2stl.city_model import (
     DEFAULT_LAYERS,
+    MIN_LEFTOVER_WIDTH_MM,
+    SNAP_MM,
+    LayerStyle,
+    assemble_parts,
     build_city_model,
     building_cover,
     choose_scale,
     drop_building_copies,
+    feature_polygons,
+    is_open_enclosure,
     resolve_layers,
 )
 
@@ -141,6 +149,66 @@ class TestCityExportTask:
         assert mesh.is_watertight
         report = json.loads(z.read("report.json"))
         assert report["scale"]["z_mode"] == "true"
+
+
+def _line(props, lon0=-3.60, lon1=-3.58, lat=37.18):
+    return {"geometry": {"type": "LineString", "coordinates": [[lon0, lat], [lon1, lat]]},
+            "properties": props}
+
+
+class TestSkiRuns:
+    """F-PISTES: downhill run lines print 30 m wide, and the layer turns on where they exist."""
+
+    @staticmethod
+    def _width_mm(props):
+        m = build_city_model(_hill(), BBOX, {"trails": _fc(_line(props))},
+                             layer_overrides={"trails": {"enabled": True}})
+        ys = m.parts["trails"].vertices[:, 1]
+        return float(ys.max() - ys.min())
+
+    def test_downhill_line_is_wider_than_a_footpath(self):
+        run = self._width_mm({"piste:type": "downhill"})
+        path = self._width_mm({"highway": "path"})
+        assert run > 2 * path   # 30 m against 3 m (the path is widened to the 0.8 mm print minimum)
+
+    def test_piste_kind(self):
+        from city2stl.city_model import PISTE_LINE_WIDTH_M, _line_width_m, is_downhill_piste
+        style = DEFAULT_LAYERS["trails"]
+        assert PISTE_LINE_WIDTH_M == 30.0
+        assert _line_width_m("trails", {"piste:type": "downhill"}, style) == 30.0
+        assert _line_width_m("trails", {"route": "piste"}, style) == 30.0
+        assert _line_width_m("trails", {"piste:type": "nordic", "route": "piste"}, style) == 3.0
+        assert _line_width_m("trails", {"highway": "path"}, style) == 3.0
+        assert _line_width_m("trails", {"piste:type": "downhill", "width": "12"}, style) == 12.0
+        assert not is_downhill_piste({"piste:type": float("nan")})
+
+    def test_default_on_only_where_pistes_exist(self, monkeypatch):
+        import app.server.core.city_model_task as tm
+        run, path = _fc(_line({"piste:type": "downhill"})), _fc(_line({"highway": "path"}))
+        mountain, flat = [0.0, 900.0] * 8, [100.0, 120.0] * 8
+        calls = []
+
+        def fake(bbox, cached_only=False):
+            calls.append(cached_only)
+            return None if cached_only else fake.fc
+        monkeypatch.setattr(tm, "_trails", fake)
+        fake.fc = run
+        assert tm.wants_ski_trails({}, BBOX, mountain)
+        assert calls == [True, False]            # cache miss, then one fetch
+        calls.clear()
+        assert not tm.wants_ski_trails({}, BBOX, flat)
+        assert calls == [True]                   # flat box: no Overpass call
+        fake.fc = path
+        assert not tm.wants_ski_trails({}, BBOX, mountain)   # paths alone do not count
+
+    def test_explicit_choice_wins(self, monkeypatch):
+        import app.server.core.city_model_task as tm
+        monkeypatch.setattr(tm, "_trails", lambda bbox, cached_only=False: _fc(
+            _line({"piste:type": "downhill"})))
+        mountain = [0.0, 900.0] * 8
+        assert tm.wants_ski_trails({"layers": {}}, BBOX, mountain)
+        assert not tm.wants_ski_trails({"layers": {"trails": {"enabled": False}}}, BBOX, mountain)
+        assert not tm.wants_ski_trails({"layers": {"trails": {"enabled": True}}}, BBOX, mountain)
 
 
 class TestCityOsmParams:
@@ -524,3 +592,130 @@ class TestPrintability:
             {"geometry": ell, "properties": {"height_m": 15, "roof:shape": "hipped"}})})
         assert m.report["layers"]["buildings"]["rejected"] == 0
         assert "buildings" in m.parts
+
+
+class _MmTerrain:
+    """Stand-in terrain: features are already in model mm, so projection is the identity."""
+
+    rect = box(-50, -50, 500, 500)
+
+    def project(self, geoms):
+        return geoms
+
+    def m_to_mm(self, metres):
+        return np.asarray(metres, dtype=float)
+
+
+def _holed_feature(ext, holes):
+    rings = [ext, *holes]
+    return {"geometry": {"type": "Polygon", "coordinates": [[list(p) for p in r] for r in rings]},
+            "properties": {}}
+
+
+class TestFeaturePolygonsHoles:
+    # Palacio de Carlos V (OSM relation/2640220) after projection and snapping, in mm,
+    # shifted to the origin. On the SNAP_MM grid a one-step negative buffer emptied it.
+    CARLOS_EXT = [[26.3, 21.8], [22.07, 0.0], [0.0, 4.3], [4.23, 26.1], [26.3, 21.8]]
+    CARLOS_INT = [[10.9, 18.41], [9.45, 17.43], [8.38, 16.05], [7.83, 14.56], [7.73, 12.66],
+                  [8.22, 10.98], [9.2, 9.53], [10.58, 8.46], [12.29, 7.86], [13.97, 7.81],
+                  [15.64, 8.3], [17.09, 9.28], [18.16, 10.66], [18.78, 12.41], [18.8, 14.05],
+                  [18.32, 15.73], [17.34, 17.18], [15.96, 18.25], [14.32, 18.84], [12.57, 18.9],
+                  [10.9, 18.41]]
+
+    def test_courtyard_building_on_snap_grid_survives(self):
+        feat = _holed_feature(self.CARLOS_EXT, [self.CARLOS_INT])
+        src = shapely.set_precision(Polygon(self.CARLOS_EXT, [self.CARLOS_INT]), SNAP_MM)
+        polys, _, counts = feature_polygons("buildings", [feat], LayerStyle("extrude"), _MmTerrain())
+        assert counts["dropped"] == 0
+        assert len(polys) == 1
+        assert polys[0].area == pytest.approx(src.area, rel=0.01)
+        assert len(polys[0].interiors) == 1
+
+    def test_pinched_hole_is_still_opened(self):
+        ext = [(0, 0), (20, 0), (20, 20), (0, 20), (0, 0)]
+        hole = [(10, 0), (18, 0.5), (2, 0.5), (10, 0)]      # shallow wedge touching the outline at (10, 0)
+        assert Polygon(ext, [hole]).is_valid
+        feat = _holed_feature(ext, [hole])
+        polys, _, counts = feature_polygons("buildings", [feat], LayerStyle("extrude"), _MmTerrain())
+        assert counts["dropped"] == 0
+        total = sum(p.area for p in polys)
+        assert total == pytest.approx(400 - 4, rel=0.01)
+        for p in polys:
+            shell = shapely.LinearRing(p.exterior)
+            assert not any(shapely.LinearRing(h).intersects(shell) for h in p.interiors)
+
+
+class TestSliverLeftovers:
+    """An outline trimmed by its parts keeps only leftovers wide enough to print
+    (Granada: 9,200 of 10,356 leftovers were under 2 m wide, ledges at outline height)."""
+
+    def test_thin_leftover_dropped_wide_kept(self):
+        outline = box(0, 0, 20, 10)
+        part = box(0, 0, 18, 10)                                   # leaves a 2 mm strip: kept
+        thin = box(0, 0, 19.7, 10)                                 # leaves a 0.3 mm strip: dropped
+        for p, expect in ((part, 1), (thin, 0)):
+            polys, props, nparts, trimmed = assemble_parts(
+                [outline, p], [{"height_m": 40}, {"height_m": 20, "building:part": "yes"}])
+            assert nparts == 1 and trimmed == 1
+            assert sum(1 for q in props if not q.get("building:part")) == expect
+            assert len(polys) == expect + 1
+
+    def test_threshold_is_mean_width(self):
+        # 2 * area / perimeter of a 0.39 x 10 strip is just under the limit, 0.45 just over.
+        assert 2 * 0.39 * 10 / (2 * 10.39) < MIN_LEFTOVER_WIDTH_MM < 2 * 0.45 * 10 / (2 * 10.45)
+        outline = box(0, 0, 10.45, 10)
+        _, props, _, _ = assemble_parts(
+            [outline, box(0, 0, 10, 10)], [{"height_m": 40}, {"building:part": "yes"}])
+        assert len(props) == 2
+
+
+class TestOpenEnclosure:
+    """A castle / fort outline that is mostly a plaza between a few towers prints as a
+    wall ring, not a filled 3 m slab (Granada Alcazaba)."""
+
+    CASTLE = {"building": "yes", "historic": "castle", "height_m": 3.0, "height_source": "default"}
+
+    @staticmethod
+    def _towers(n, side=2.0):
+        return [box(1 + 4 * i, 1, 1 + 4 * i + side, 1 + side) for i in range(n)]
+
+    def test_predicate(self):
+        outline = box(0, 0, 40, 40)
+        assert is_open_enclosure(outline, self.CASTLE, self._towers(3))
+        assert not is_open_enclosure(outline, self.CASTLE, self._towers(1))     # one building
+        assert not is_open_enclosure(outline, self.CASTLE, [])                  # Palacio de las Columnas
+        assert not is_open_enclosure(outline, {"building": "yes"}, self._towers(3))   # not an enclosure
+        halls = [box(0, 0, 40, 12), box(0, 14, 40, 26)]                         # > 50 % built over
+        assert not is_open_enclosure(outline, self.CASTLE, halls)
+        # the outline's own twin (same footprint) never counts as an inner building
+        assert is_open_enclosure(outline, self.CASTLE, [box(0, 0, 40, 40), *self._towers(3)])
+
+    def test_assemble_parts_leaves_the_plaza_open(self):
+        outline = box(0, 0, 40, 40)
+        towers = self._towers(3)
+        polys, props, nparts, _ = assemble_parts(
+            [outline, *towers], [dict(self.CASTLE)] + [{"building:part": "yes", "height_m": 12}] * 3)
+        assert nparts == 3 and len(polys) == 3
+        assert all(p.get("building:part") for p in props)
+        solid, sprops, _, _ = assemble_parts(                       # same shape, plain building
+            [outline, *towers], [{"building": "yes", "height_m": 10}]
+            + [{"building:part": "yes", "height_m": 12}] * 3)
+        assert len(solid) == 4
+
+    def test_drop_building_copies_keeps_the_open_enclosure_copy(self):
+        outline = {"geometry": {"type": "Polygon", "coordinates": [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]]},
+                   "properties": self.CASTLE}
+        towers = [{"geometry": mapping_box(t), "properties": {"building:part": "yes"}}
+                  for t in self._towers(3)]
+        cover = building_cover([outline, *towers])
+        copy = {"geometry": outline["geometry"], "properties": dict(self.CASTLE)}
+        assert drop_building_copies([copy], cover) == ([copy], 0)
+        solid = {"geometry": outline["geometry"], "properties": {"building": "yes", "name": "Hall"}}
+        assert drop_building_copies([solid], cover) == ([], 1)
+        lone = building_cover([outline])                            # nothing inside: still dropped
+        assert drop_building_copies([copy], lone) == ([], 1)
+
+
+def mapping_box(b):
+    from shapely.geometry import mapping
+    return mapping(b)

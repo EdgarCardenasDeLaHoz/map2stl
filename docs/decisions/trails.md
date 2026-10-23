@@ -4,6 +4,21 @@ The ski and hiking trails layer: sources, grids, display, and how trails reach t
 [osm-water-hydrology.md](osm-water-hydrology.md) (fetch failure vs empty), [frontend.md](frontend.md),
 [composite.md](composite.md).
 
+### 2026-10-18 — Downhill runs print 30 m wide and turn the trails layer on by themselves
+- **Decision:** a downhill piste mapped as a line is buffered by `PISTE_LINE_WIDTH_M = 30`
+  (`city2stl/city_model.py::_line_width_m`, `is_downhill_piste`); paths, nordic and skitour lines
+  stay 3 m, areas keep their outline, an OSM `width` tag still wins. `run_city_model` turns the
+  trails layer on when the box holds a downhill run (`city_model_task.py::wants_ski_trails`); an
+  explicit `layers.trails.enabled` (true or false) always wins.
+- **Why:** at 1:14,843 a 3 m line is 0.2 mm (widened to the 0.8 mm minimum) while a real run is
+  about 30 m, 2 mm on the print. User: "On + wider line runs". The check reads the trails cache
+  first and fetches only when the DEM relief is >= 300 m (`MOUNTAIN_RELIEF_M`), so flat cities
+  (Granada, Cartagena) never query Overpass for trails and build as before.
+- **Rejected:** a client-side default (`cityDetailFields`) - the server owns the cache and sees
+  the box's pistes; no JS change needed. Fetching on every build - 40 s of Overpass on flat towns.
+- **Supersedes / superseded by:** refines "Trails are opt-in" below (still off without pistes) / -
+- **Source:** [F-PISTES](../plans/active/F-PISTES-ski-runs-on-the-print.md)
+
 ### 2026-09-27 — Trails are opt-in and filtered
 - **Decision:** trails are a city-model layer built into the mesh by `build_on_terrain`, **off by
   default** and fetched only when enabled. The fetch keeps paths, tracks, bridleways, hiking routes

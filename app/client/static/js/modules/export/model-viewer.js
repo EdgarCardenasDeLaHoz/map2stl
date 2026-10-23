@@ -25,8 +25,13 @@
  *
  * Puzzle cut lines (updatePuzzlePreview) are drawn at appState.puzzleEdges when
  * they belong to the current grid, else evenly, with the jigsaw knobs the
- * export sends (modules/export/puzzle-cuts.js jigsawCuts); a plain left drag
- * near a line moves that cut and fires 'puzzle-edges-changed'.
+ * export sends (modules/export/puzzle-cuts.js jigsawCuts), draped on the terrain.
+ * appState.cutView picks hidden (the default), shown, or 'edit', where a plain
+ * left drag near a line moves that cut and fires 'puzzle-edges-changed'.
+ *
+ * Zoom: the wheel scales the camera distance by exp(deltaY * 0.0017) (~18 % per notch), toward
+ * the terrain point under the cursor when zooming in; the minimum distance is 2 % of the fitted
+ * distance. While dragging or zooming (and 150 ms after) the drawing buffer is at pixel ratio 1.
  *
  * The HUD (#viewerHud, top left) holds the mesh stats and the printer bed's
  * size and fit warning, so nothing is written over the model itself.
@@ -197,7 +202,7 @@ function initModelViewer() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Orbit / pan / zoom controls
-// Left-drag = orbit,  Shift+drag = pan,  wheel = zoom toward target
+// Left-drag = orbit,  Shift+drag = pan,  wheel = zoom toward the cursor (exponential in deltaY)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function _setupOrbitControls() {
@@ -208,6 +213,7 @@ function _setupOrbitControls() {
         _isDragging = true;
         _isPanning  = e.shiftKey || e.button === 1;
         _prevMouse  = { x: e.clientX, y: e.clientY };
+        _interacting();
         e.preventDefault();
     });
 
@@ -217,6 +223,7 @@ function _setupOrbitControls() {
         const dx = e.clientX - _prevMouse.x;
         const dy = e.clientY - _prevMouse.y;
         _prevMouse = { x: e.clientX, y: e.clientY };
+        _interacting();
         if (_isPanning) _orbitPan(dx, dy); else _orbitRotate(dx, dy);
     });
 
@@ -225,12 +232,7 @@ function _setupOrbitControls() {
 
     el.addEventListener('wheel', e => {
         e.preventDefault();
-        const dir     = e.deltaY > 0 ? 1 : -1;
-        const dist    = modelCamera.position.distanceTo(orbitTarget);
-        const newDist = Math.max(10, Math.min(800, dist * (1 + dir * 0.1)));
-        _rotOffset.copy(modelCamera.position).sub(orbitTarget).normalize().multiplyScalar(newDist);
-        modelCamera.position.copy(orbitTarget).add(_rotOffset);
-        needsRender = true;
+        _wheelZoom(e);
     }, { passive: false });
 
     // Touch: single-finger orbit, two-finger pinch-zoom
@@ -259,19 +261,103 @@ function _setupOrbitControls() {
             const dx = ts[0].clientX - _prevMouse.x;
             const dy = ts[0].clientY - _prevMouse.y;
             _prevMouse = { x: ts[0].clientX, y: ts[0].clientY };
+            _interacting();
             _orbitRotate(dx, dy);
         } else if (ts.length === 2) {
             const dist    = Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
             const camDist = modelCamera.position.distanceTo(orbitTarget);
-            const newDist = Math.max(10, Math.min(800, camDist * (pinchDist0 / Math.max(dist, 1))));
+            const newDist = Math.max(_zoomMinDist, Math.min(ZOOM_MAX_DIST, camDist * (pinchDist0 / Math.max(dist, 1))));
             _rotOffset.copy(modelCamera.position).sub(orbitTarget).normalize().multiplyScalar(newDist);
             modelCamera.position.copy(orbitTarget).add(_rotOffset);
             pinchDist0 = dist;
+            _interacting();
             needsRender = true;
         }
     }, { passive: false });
 
     el.addEventListener('touchend', () => { _isDragging = false; });
+}
+
+// ── Zoom ────────────────────────────────────────────────────────────────────
+// A wheel notch (deltaY 100 px) changes the distance by ~18 %, a trackpad's small
+// deltas by proportionally less. Zooming in dollies toward the point under the cursor.
+const WHEEL_ZOOM_K     = 0.0017;   // ln(1.18) / 100 px
+const WHEEL_MAX_PX     = 300;      // per event, so a fast flick cannot jump the whole range
+const ZOOM_MAX_DIST    = 800;
+const ZOOM_MIN_DEFAULT = 10;
+const ZOOM_MIN_FRAC    = 0.02;     // of the fitted distance (~3 for a 150 fit)
+const INTERACT_IDLE_MS = 150;      // full resolution returns this long after the last input
+let _zoomMinDist = ZOOM_MIN_DEFAULT;
+let _zoomHit = null;               // { x, y, point } cursor hit cached for the current wheel burst
+let _zoomHitAt = 0;
+let _interactTimer = null;
+let _lowRes = false;
+
+/** Drawing-buffer pixel ratio only; the canvas CSS size is left alone. */
+function _setPixelRatio(ratio) {
+    if (!modelRenderer || modelRenderer.getPixelRatio() === ratio) return;
+    const sz = modelRenderer.getSize(new THREE.Vector2());
+    modelRenderer.setPixelRatio(ratio);
+    modelRenderer.setSize(sz.x, sz.y, false);
+    needsRender = true;
+}
+
+/** Drag or zoom in progress: draw at pixel ratio 1, restore the full ratio after a short idle. */
+function _interacting() {
+    if (!modelRenderer) return;
+    if (!_lowRes) { _lowRes = true; _setPixelRatio(1); }
+    clearTimeout(_interactTimer);
+    _interactTimer = setTimeout(() => {
+        _lowRes = false;
+        _interactTimer = null;
+        _zoomHit = null;
+        _setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }, INTERACT_IDLE_MS);
+}
+
+/** Point on the terrain under the client position (cached within a wheel burst), or null. */
+function _cursorHit(e) {
+    const now = performance.now();
+    if (_zoomHit && now - _zoomHitAt < 400
+        && Math.abs(_zoomHit.x - e.clientX) < 3 && Math.abs(_zoomHit.y - e.clientY) < 3) {
+        return _zoomHit.point;
+    }
+    // The terrain mesh stands in for the city parts: they hold ~2 M triangles and
+    // a raycast through them per wheel event would cost more than the zoom saves.
+    let point = null;
+    if (terrainMesh && modelCamera) {
+        const rect = modelRenderer.domElement.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
+            -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        _raycaster = _raycaster || new THREE.Raycaster();
+        _raycaster.setFromCamera(ndc, modelCamera);
+        point = _raycaster.intersectObject(terrainMesh, false)[0]?.point.clone() || null;
+    }
+    _zoomHit = { x: e.clientX, y: e.clientY, point };
+    _zoomHitAt = now;
+    return point;
+}
+
+/** Wheel zoom: exponential in deltaY; zooming in keeps the point under the cursor in place. */
+function _wheelZoom(e) {
+    const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    const delta = Math.max(-WHEEL_MAX_PX, Math.min(WHEEL_MAX_PX, px));
+    if (!delta) return;
+    const dist    = modelCamera.position.distanceTo(orbitTarget);
+    const newDist = Math.max(_zoomMinDist, Math.min(ZOOM_MAX_DIST, dist * Math.exp(delta * WHEEL_ZOOM_K)));
+    const f = newDist / dist;
+    if (f === 1) return;
+    const hit = f < 1 ? _cursorHit(e) : null;
+    if (hit) {
+        // Scale both camera and target about the hit point: it stays under the cursor.
+        modelCamera.position.sub(hit).multiplyScalar(f).add(hit);
+        orbitTarget.sub(hit).multiplyScalar(f).add(hit);
+    } else {
+        _rotOffset.copy(modelCamera.position).sub(orbitTarget).multiplyScalar(f);
+        modelCamera.position.copy(orbitTarget).add(_rotOffset);
+    }
+    _interacting();
+    needsRender = true;
 }
 
 function _orbitRotate(dx, dy) {
@@ -325,6 +411,7 @@ function _fitCamera(box) {
     const maxDim  = Math.max(size.x, size.y, size.z);
     const fov     = modelCamera.fov * Math.PI / 180;
     const fitDist = (maxDim / 2) / Math.tan(fov / 2) * 1.4;
+    _zoomMinDist = Math.max(1, fitDist * ZOOM_MIN_FRAC);
     orbitTarget.copy(center);
     modelCamera.position.set(
         center.x,
@@ -679,6 +766,12 @@ async function previewModelIn3D() {
         };
         if (statusEl) statusEl.textContent = statusFor(quick);
         _scheduleFullModel(_lastPreview.data, statusFor(quick));
+        // The request reads survey coverage synchronously; asked for the first time it is
+        // still 'unknown' and the trees are left out. Rebuild once the answer is in.
+        const preview = _lastPreview;
+        window.citySurveyCoverageReady?.().then(() => {
+            if (_lastPreview === preview && _fullModelRequest()?.key !== _full.key) refreshCityLayers();
+        });
         resetViewerCamera();
         if (data.composite_error) {
             window.showToast('Server composite failed - preview shows the raw DEM: '
@@ -755,6 +848,9 @@ function _buildMeshFromPreview(data, cmap) {
 
     if (cmap !== 'none') _paintWater(colors, data.water_idx, data.water_pct);
 
+    // Top surface height (mm) per DEM pixel, so the cut lines can lie on the terrain.
+    const topZ = _topSurfaceGrid(rawVerts, rawFaces, data.cols, data.rows);
+
     // Stash physical dims (mm) and the display-scale factor for overlay code.
     geometry_scale_for_overlays = {
         scale: SCALE,
@@ -763,6 +859,7 @@ function _buildMeshFromPreview(data, cmap) {
         modelWidthMm: Math.max(data.cols - 1, 1) * mmPerPx,
         modelDepthMm: Math.max(data.rows - 1, 1) * mmPerPx,
         xOffset, zOffset,
+        topZ, cols: data.cols, rows: data.rows, mmPerPx,
     };
 
     const indices = new Uint32Array(rawFaces.length * 3);
@@ -784,6 +881,33 @@ function _buildMeshFromPreview(data, cmap) {
     // Kept so a colormap change (_rebuildColors) paints the water again.
     mesh.userData.water = { idx: data.water_idx, pct: data.water_pct };
     return mesh;
+}
+
+/**
+ * Highest mesh surface (mm) over each DEM pixel. The mesh is adaptive, so most pixels
+ * have no vertex: every face is rasterised over the pixels it covers (side walls have
+ * no area in plan and drop out), keeping the highest z, as the cut lines need it.
+ */
+function _topSurfaceGrid(verts, faces, cols, rows) {
+    const top = new Float32Array(cols * rows).fill(-Infinity);
+    for (const [a, b, c] of faces) {
+        const [x0, y0, z0] = verts[a], [x1, y1, z1] = verts[b], [x2, y2, z2] = verts[c];
+        const det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+        if (Math.abs(det) < 1e-9) continue;
+        const cMin = Math.max(0, Math.ceil(Math.min(x0, x1, x2))), cMax = Math.min(cols - 1, Math.floor(Math.max(x0, x1, x2)));
+        const rMin = Math.max(0, Math.ceil(Math.min(y0, y1, y2))), rMax = Math.min(rows - 1, Math.floor(Math.max(y0, y1, y2)));
+        for (let r = rMin; r <= rMax; r++) {
+            for (let col = cMin; col <= cMax; col++) {
+                const l0 = ((y1 - y2) * (col - x2) + (x2 - x1) * (r - y2)) / det;
+                const l1 = ((y2 - y0) * (col - x2) + (x0 - x2) * (r - y2)) / det;
+                const l2 = 1 - l0 - l1;
+                if (l0 < -1e-6 || l1 < -1e-6 || l2 < -1e-6) continue;
+                const z = l0 * z0 + l1 * z1 + l2 * z2, k = r * cols + col;
+                if (z > top[k]) top[k] = z;
+            }
+        }
+    }
+    return top;
 }
 
 /**
@@ -850,7 +974,11 @@ function _cancelFullModel() {
 function _fullModelRequest() {
     if (!_isCityBox() || typeof window.cityExportBody !== 'function') return null;
     const body = window.cityExportBody();
-    return { key: JSON.stringify(body), layers: body.layers || {} };
+    // The key spans the whole body, so it already carries reference_landmarks / roof_shapes;
+    // named here so a change to any of them can never be served the cached model.
+    const key = JSON.stringify({ ...body, reference_landmarks: !!body.reference_landmarks,
+        roof_shapes: body.roof_shapes ?? 'auto', trees: body.layers?.trees?.enabled === true });
+    return { key, layers: body.layers || {} };
 }
 
 /**
@@ -1429,7 +1557,8 @@ function updatePuzzlePreview() {
         modelScene.remove(old);
     }
     const grid = _puzzleGrid();
-    if (!grid) { needsRender = true; return; }
+    // Hidden unless the viewer asks for them (ModelContainer.vue's "Cut lines" control).
+    if (!grid || (window.appState?.cutView ?? 'hidden') === 'hidden') { needsRender = true; return; }
 
     // Model mm (x from west, y from south) -> display units, as the mesh is mapped.
     const g = geometry_scale_for_overlays;
@@ -1440,32 +1569,41 @@ function updatePuzzlePreview() {
     // The real cut, knobs and all, so the preview shows the pieces that come
     // out of the printer; straight lines when the knob does not fit.
     const { polylines, knobs } = jigsawCuts(grid.colEdges, grid.rowEdges, grid.knob);
+    // Draped on the terrain: each segment is split at the DEM pixel spacing and every
+    // point is lifted to the surface (plus a hair, so the line is not lost in it).
+    const step = Math.max(g.mmPerPx || 1, 0.25);
+    const lift = 0.5;
     const verts = [];
+    const at = (x, y) => [dx(x), (_surfaceMm(x, y) + lift) * S, dz(y)];
     for (const line of polylines) {
         for (let i = 1; i < line.length; i++) {
-            verts.push(dx(line[i - 1][0]), 0, dz(line[i - 1][1]), dx(line[i][0]), 0, dz(line[i][1]));
+            const [x0, y0] = line[i - 1], [x1, y1] = line[i];
+            const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step));
+            let prev = at(x0, y0);
+            for (let j = 1; j <= n; j++) {
+                const next = at(x0 + (x1 - x0) * j / n, y0 + (y1 - y0) * j / n);
+                verts.push(...prev, ...next);
+                prev = next;
+            }
         }
     }
     const group = new THREE.Group();
     group.name = 'puzzleCuts';
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xff2222, depthTest: false }));
-    // Drawn after the model: without depth testing, an opaque mesh drawn later paints over
-    // the lines, and three.js orders equal renderOrders by material id, so the finished
-    // City Model's parts (built after the cuts) hid them until the next redraw.
-    lines.renderOrder = 1;
+    // Depth-tested, so hills and buildings in front of a cut hide it like a real seam.
+    const editing = window.appState?.cutView === 'edit';
+    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: editing ? 0xff2222 : 0xcc4444 }));
     group.add(lines);
     if (grid.cols * grid.rows > 1) {
         const custom = isCustom(grid.colEdges) || isCustom(grid.rowEdges);
         const label = _makeTextSprite(`${grid.cols}×${grid.rows}${custom ? ' custom' : ''}`
-            + `${knobs ? '' : ' · knob too big for these pieces'} · drag cuts`,
+            + `${knobs ? '' : ' · knob too big for these pieces'}${editing ? ' · drag a cut to move it' : ''}`,
             { fontSize: 15, color: '#ff9999' });
         label.scale.multiplyScalar(0.6);
-        label.position.set(0, 0, zS + 6);
+        label.position.set(0, (g.totalHeightMm || 0) * S + 0.5, zS + 6);
         group.add(label);
     }
-    group.position.y = (g.totalHeightMm || 0) * S + 0.5;
     modelScene.add(group);
     needsRender = true;
 }
@@ -1474,7 +1612,21 @@ function updatePuzzlePreview() {
 let _cutDrag = null;    // { axis: 'cols' | 'rows', index, grid } while a cut is dragged
 let _raycaster = null;
 
-/** Model mm {x from west, y from south} under the mouse, in the cut lines' plane. */
+/** Terrain top (mm) at model mm (x from west, y from south), bilinear between DEM pixels. */
+function _surfaceMm(xMm, yMm) {
+    const g = geometry_scale_for_overlays;
+    if (!g.topZ) return g.totalHeightMm || 0;
+    const fc = Math.min(Math.max(xMm / g.mmPerPx, 0), g.cols - 1);
+    const fr = Math.min(Math.max((g.modelDepthMm - yMm) / g.mmPerPx, 0), g.rows - 1);
+    const c0 = Math.floor(fc), r0 = Math.floor(fr);
+    const c1 = Math.min(c0 + 1, g.cols - 1), r1 = Math.min(r0 + 1, g.rows - 1);
+    const z = (c, r) => { const v = g.topZ[r * g.cols + c]; return Number.isFinite(v) ? v : 0; };
+    const tc = fc - c0, tr = fr - r0;
+    return (z(c0, r0) * (1 - tc) + z(c1, r0) * tc) * (1 - tr)
+        + (z(c0, r1) * (1 - tc) + z(c1, r1) * tc) * tr;
+}
+
+/** Model mm {x from west, y from south} under the mouse: on the terrain, else on its top plane. */
 function _mouseToModelMm(e) {
     const lines = modelScene?.getObjectByName('puzzleCuts');
     if (!lines || !modelCamera) return null;
@@ -1483,17 +1635,21 @@ function _mouseToModelMm(e) {
         -((e.clientY - rect.top) / rect.height) * 2 + 1);
     _raycaster = _raycaster || new THREE.Raycaster();
     _raycaster.setFromCamera(ndc, modelCamera);
-    const hit = new THREE.Vector3();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -lines.position.y);
-    if (!_raycaster.ray.intersectPlane(plane, hit)) return null;
     const g = geometry_scale_for_overlays;
     const S = g.scale || 1;
+    let hit = terrainMesh && _raycaster.intersectObject(terrainMesh, false)[0]?.point;
+    if (!hit) {
+        hit = new THREE.Vector3();
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(g.totalHeightMm || 0) * S);
+        if (!_raycaster.ray.intersectPlane(plane, hit)) return null;
+    }
     return { x: (hit.x + g.xOffset) / S, y: g.modelDepthMm - (hit.z + g.zOffset) / S };
 }
 
 /** The interior cut line under the mouse: { axis, index, grid, cursor } or null. */
 function _cutUnderMouse(e) {
-    if (!modelScene?.getObjectByName('puzzleCuts')) return null;
+    // Only the "Move" setting picks cuts up, so orbiting never nudges one.
+    if (window.appState?.cutView !== 'edit' || !modelScene?.getObjectByName('puzzleCuts')) return null;
     const grid = _puzzleGrid();
     const p = grid && _mouseToModelMm(e);
     if (!p) return null;
@@ -1587,6 +1743,13 @@ window.rebuildViewerColors  = _rebuildColors;
 window.setViewerNormals     = setViewerNormals;
 window.setViewerWireframe   = setViewerWireframe;
 window.refreshCityLayers    = refreshCityLayers;
+// The F-DETAIL switches are part of the finished model's request (cityExportBody) too.
+if (typeof document !== 'undefined') {
+    const detailControl = /^city(Alhambra|RoofShapes|Trees)$/;
+    ['input', 'change'].forEach((type) => document.addEventListener(type, (e) => {
+        if (detailControl.test(e.target?.id || '')) refreshCityLayers();
+    }));
+}
 window.updateBedOutline     = updateBedOutline;
 window.puzzleEdgesFor       = puzzleEdgesFor;
 window.resetPuzzleEdges     = resetPuzzleEdges;

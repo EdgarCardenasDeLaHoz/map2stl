@@ -64,7 +64,11 @@ def _planes(p: Polygon, slope: float, ridge_axis: np.ndarray | None,
         keep &= cos > math.cos(math.radians(30))
     if outline is not None:
         mid = (p0 + p1) / 2
-        keep &= shapely.distance(outline.exterior, shapely.points(mid)) < 1e-6
+        keep &= shapely.distance(outline.boundary, shapely.points(mid)) < 1e-6
+        if outline.interiors:
+            # Clipping a piece's overlap hair back to a courtyard corner leaves ~1e-4 mm
+            # slivers on the neighbour's courtyard edge; as eaves they would flatten it.
+            keep &= length > 1e-3
     p0, d, length = p0[keep], d[keep], length[keep]
     n = np.column_stack([-d[:, 1], d[:, 0]]) / length[:, None]     # inward for a CCW ring
     return np.column_stack([slope * n, -slope * (n * p0).sum(1)])
@@ -206,19 +210,21 @@ def building_solids(poly: Polygon, z_floor: float, z_eave: float, rise_mm: float
     """Solids for one building: walls from ``z_floor`` to ``z_eave`` and a roof rising
     ``rise_mm`` above the eave. Several solids may overlap (the caller unions them).
 
-    Unknown or flat shapes, tiny rises, or footprints with courtyards get a flat top at
-    ``z_eave + rise_mm / 2`` (the mean height of a pitched roof).
+    Unknown or flat shapes and tiny rises get a flat top at ``z_eave + rise_mm / 2`` (the
+    mean height of a pitched roof). A footprint with courtyards is roofed like any other:
+    the courtyard edges are eaves (``_planes`` reads ``outline.boundary``); if that does not
+    give closed solids it falls back to the same flat top.
     """
     props = props or {}
     shape = (shape or "flat").lower().strip()
     flat_top = z_eave + (rise_mm / 2 if shape != "flat" else rise_mm)
-    if shape == "flat" or rise_mm <= 1e-6 or poly.interiors:
+    if shape == "flat" or rise_mm <= 1e-6:
         m = prism(poly, z_floor, flat_top)
         return [m] if m is not None else []
 
     if shape in REVOLVED:
         label = polylabel(poly, tolerance=0.01)
-        radius = poly.exterior.distance(label)
+        radius = poly.boundary.distance(label)
         body = prism(poly, z_floor, z_eave + 1e-3)
         out = [body] if body is not None else []
         if radius > 0.05:
@@ -231,7 +237,7 @@ def building_solids(poly: Polygon, z_floor: float, z_eave: float, rise_mm: float
     # The roof reaches its full rise over the widest part of the footprint: the
     # radius of the largest inscribed circle is half the width of a rectangle and
     # of each arm of an L, where the bounding rectangle would overstate an L.
-    half_width = poly.exterior.distance(polylabel(poly, tolerance=0.01))
+    half_width = poly.boundary.distance(polylabel(poly, tolerance=0.01))
     if shape not in HIPPED and poly.area >= 0.85 * poly.minimum_rotated_rectangle.area:
         # A gable spans the footprint across its ridge (half of it on each side),
         # whichever way the ridge runs.
@@ -268,10 +274,23 @@ def building_solids(poly: Polygon, z_floor: float, z_eave: float, rise_mm: float
             m = prism(piece, z_floor, flat_top)
         if m is not None:
             out.append(m)
+    if poly.interiors and not all(_closed(m) for m in out):
+        out = []
     if not out:
         m = prism(poly, z_floor, flat_top)
         out = [m] if m is not None else []
     return out
+
+
+def _closed(mesh: Mesh) -> bool:
+    """True when every edge of ``mesh`` is shared by exactly two faces, once in each direction."""
+    f = np.asarray(mesh[1])
+    if not len(f):
+        return False
+    e = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    fwd = e[:, 0].astype(np.int64) * (int(e.max()) + 1) + e[:, 1]
+    bwd = e[:, 1].astype(np.int64) * (int(e.max()) + 1) + e[:, 0]
+    return len(np.unique(fwd)) == len(fwd) and np.array_equal(np.sort(fwd), np.sort(bwd))
 
 
 def _skillion_plane(p: Polygon, rise_mm: float, direction, axis: np.ndarray) -> np.ndarray:

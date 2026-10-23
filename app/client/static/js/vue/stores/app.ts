@@ -101,6 +101,9 @@ export const useAppStore = defineStore('app', {
         // model-viewer.js), in mm from the model's west / south edge; `key`
         // is the grid + size they belong to. null = even split.
         puzzleEdges: null as { cols: number[]; rows: number[]; key: string } | null,
+        // Puzzle cut lines in the Extrude preview: hidden, shown, or shown and
+        // draggable ('edit'). ModelContainer.vue sets it; model-viewer.js reads it.
+        cutView: 'hidden' as 'hidden' | 'show' | 'edit',
 
         // ── 3D viewer ─────────────────────────────────────────────────────────
         // Extrude preview lifecycle, set by model-viewer.js:previewModelIn3D;

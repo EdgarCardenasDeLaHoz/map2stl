@@ -194,7 +194,7 @@ refresh them). A red outline marks the control each step talks about.
    0.50 mm, each labelled underneath, cut with the chosen knob shape. Print it with the
    puzzle's settings and use the smallest clearance whose joint slides together by hand. *Columns × Rows* belong to the *Terrain puzzle*: while
    that box is ticked the preview draws its grid and the city build ignores dragged
-   cuts, so leave it off for a city. Drag the red cuts in the preview to move one (a cut
+   cuts, so leave it off for a city. Set Cut lines (under Split into pieces) to Move, then drag the red cuts in the preview to move one; Show only displays them, Hide (the default) removes them (a cut
    stops where a piece would get too small for its knobs); **Reset cuts** goes back to
    equal pieces.
 

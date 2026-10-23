@@ -66,10 +66,10 @@ US_EXTENTS: dict[str, tuple[float, float, float, float]] = {
 }
 
 
-def _is_in_us(bbox: BBox) -> bool:
-    north, south, east, west = bbox
-    return any(south < en and north > es and west < ee and east > ew
-               for en, es, ee, ew in US_EXTENTS.values())
+def _is_in_us(bbox: BBox | dict) -> bool:
+    """True when ``bbox`` (an ``(n, s, e, w)`` tuple or a ``{north, ...}`` dict) overlaps the US."""
+    from ._survey import intersects
+    return intersects(bbox, list(US_EXTENTS.values()))
 
 
 def _get_api_key() -> str | None:

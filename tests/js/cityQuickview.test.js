@@ -3,7 +3,7 @@
  * (app/client/static/js/modules/export/city-quickview.js).
  */
 import { describe, it, expect } from 'vitest';
-import { buildingPrisms, demGroundMm, roofHeightM, roofKind, MIN_HEIGHT_MM } from '../../app/client/static/js/modules/export/city-quickview.js';
+import { buildingPrisms, groundRange, WALL_SINK_MM, demGroundMm, roofHeightM, roofKind, MIN_HEIGHT_MM } from '../../app/client/static/js/modules/export/city-quickview.js';
 
 // A square 2 x 2 px footprint; lon → x, lat → y directly.
 const square = (h) => ({
@@ -22,7 +22,7 @@ describe('buildingPrisms', () => {
         const g = buildingPrisms([square(30)], opts((x) => x));   // ground rises with x: 1..3 mm
         expect(g.count).toBe(1);
         expect(Math.max(...ys(g))).toBeCloseTo(3 + 30 * 0.1);     // top = highest ground + 3 mm
-        expect(Math.min(...ys(g))).toBeCloseTo(1 - 0.1);          // walls reach the lowest ground
+        expect(Math.min(...ys(g))).toBeCloseTo(1 - WALL_SINK_MM);   // walls reach the lowest ground, less the sink
         const xs = [...g.positions].filter((_, i) => i % 3 === 0);
         expect(Math.max(...xs)).toBe(6);                          // px × mm per px
     });
@@ -107,5 +107,32 @@ describe('pitched roofs', () => {
         const g = buildingPrisms([house({ 'roof:shape': 'gabled', 'roof:height': '1' })], flat());   // 0.1 mm
         const base = buildingPrisms([house({})], flat());
         expect(g.positions.length).toBe(base.positions.length);
+    });
+});
+
+describe('wall foot on a slope', () => {
+    // Corners at x=1 and x=3 are high (5 mm); a dip between them is 0 mm.
+    const dip = (x) => (Math.abs(x - 2) < 0.4 ? 0 : 5);
+
+    it('reaches a dip between the corners (edge midpoint and interior)', () => {
+        const g = buildingPrisms([square(30)], opts(dip));
+        expect(Math.min(...ys(g))).toBeCloseTo(0 - WALL_SINK_MM);
+        expect(Math.max(...ys(g))).toBeCloseTo(5 + 3);             // highest ground + height
+    });
+
+    it('groundRange samples edges and interior, not only corners', () => {
+        const ring = [[0, 0], [10, 0], [10, 10], [0, 10]];
+        const pit = (x, y) => (Math.abs(x - 5) < 0.6 && Math.abs(y - 5) < 0.6 ? -7 : 1);
+        expect(groundRange(ring, pit)).toEqual({ low: -7, high: 1 });
+        const edgePit = (x, y) => (y === 0 && Math.abs(x - 5) < 0.6 ? -3 : 1);
+        expect(groundRange(ring, edgePit).low).toBe(-3);
+    });
+
+    it('stays cheap for a large batch', () => {
+        const feats = Array.from({ length: 24000 }, (_, i) => ({ properties: { height_m: 10 },
+            geometry: { type: 'Polygon', coordinates: [[[i % 500, 0], [i % 500 + 4, 0], [i % 500 + 4, 4], [i % 500, 4], [i % 500, 0]]] } }));
+        const t = performance.now();
+        buildingPrisms(feats, opts(() => 1));
+        expect(performance.now() - t).toBeLessThan(5000);
     });
 });

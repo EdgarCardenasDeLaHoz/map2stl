@@ -69,6 +69,17 @@ SOURCE_VERTICAL_STEP_M = 1.0  # SRTM / Copernicus heights are stored in whole me
 SIMPLIFY_TOL_MM = 0.05        # outline simplification tolerance at model scale
 SNAP_MM = 0.01                # coordinate grid for outlines
 MIN_FOOTPRINT_MM2 = 0.3       # smaller footprints cannot print as a distinct feature
+#: A leftover of an outline trimmed by its parts (mean width 2 * area / perimeter) narrower
+#: than this is a sliver between walls, not a printable ledge: dropped by ``assemble_parts``.
+MIN_LEFTOVER_WIDTH_MM = 0.4
+#: An enclosure (``heights.is_low_default_footprint``) whose buildings / parts inside cover
+#: less than this share of it is an open plaza ringed by a wall, not a solid block.
+OPEN_ENCLOSURE_MAX_INNER_SHARE = 0.5
+#: ... and it needs at least this many buildings / parts inside.
+OPEN_ENCLOSURE_MIN_INNER = 2
+#: A footprint this close to an enclosure's own outline (symmetric difference, share of
+#: the outline's area) is a copy of it, not a building inside it.
+ENCLOSURE_TWIN_DIFF = 0.05
 PRINT_MIN_WIDTH_MM = 0.8      # two 0.4 mm extrusion lines: the narrowest reliable feature
 # Segments per quarter circle of a round line buffer (LayerStyle.round_lines). 2 keeps a
 # 0.5 mm river end within 0.04 mm of a true circle (under SIMPLIFY_TOL_MM) at a quarter
@@ -211,6 +222,23 @@ WALL_PIECE_MM = 2.0   # grid cell a wall is cut into, so its top steps with the 
 
 # OSM waterway class -> typical channel width (m) when the feature has no width tag.
 _WATERWAY_WIDTH_M = {"river": 20.0, "canal": 12.0, "stream": 4.0, "drain": 2.0, "ditch": 1.5}
+
+# A downhill run mapped only as a centre line is buffered this wide (m), not by the 3 m of a
+# footpath: a run is an open slope about this wide, 2 mm on the print at 1:15,000 (F-PISTES).
+# Pistes mapped as areas keep their outline; nordic / skitour lines and paths stay 3 m.
+PISTE_LINE_WIDTH_M = 30.0
+
+
+def is_downhill_piste(props: dict) -> bool:
+    """A downhill ski run: ``piste:type=downhill``, or, with no ``piste:type``, a
+    ``route=piste|ski`` relation."""
+    def tag(key: str) -> str:
+        v = props.get(key)
+        return v.strip().lower() if isinstance(v, str) else ""
+    ptype = tag("piste:type")
+    if ptype:
+        return ptype == "downhill"
+    return tag("route") in ("piste", "ski")
 
 
 def resolve_layers(overrides: dict | None) -> dict[str, LayerStyle]:
@@ -393,6 +421,8 @@ def _line_width_m(layer: str, props: dict, style: LayerStyle) -> float:
             pass
     if layer == "waterways":
         return _WATERWAY_WIDTH_M.get(str(props.get("waterway") or ""), style.line_width_m)
+    if layer == "trails" and is_downhill_piste(props):
+        return PISTE_LINE_WIDTH_M
     return style.line_width_m
 
 
@@ -417,28 +447,40 @@ def widen_thin(geoms: np.ndarray, min_width_mm: float) -> tuple[np.ndarray, int]
     return geoms, int(thin.sum())
 
 
-def _open_pinches(parts: np.ndarray) -> np.ndarray:
-    """Holed polygons opened by one snap step (negative then positive mitre buffer).
+def _pinched(poly: Polygon) -> bool:
+    """True if an interior ring touches the exterior or another interior ring."""
+    rings = [shapely.LinearRing(r) for r in poly.interiors]
+    shell = shapely.LinearRing(poly.exterior)
+    return any(r.intersects(shell) for r in rings) or any(
+        a.intersects(b) for i, a in enumerate(rings) for b in rings[i + 1:])
 
-    GEOS sometimes returns an empty polygon for the negative buffer of a valid, snapped polygon
-    (the Palacio de Carlos V, ``relation/2640220``: 509 mm2 to 0 at -0.01 mm, fine at -0.005 or
-    -0.05), which dropped the whole building. A result that lost more than 10 % of the area is
-    retried at other distances; a polygon no distance opens is kept as it was.
+
+def _depinch(parts: np.ndarray, owner: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Open pinched holes of snapped polygons by one snap step (shrink, then grow).
+
+    A hole touching its outline at one point is a valid polygon, but its prism
+    shares that vertex between two walls (not manifold). Only pinched polygons are
+    touched, and the buffer runs on the geometry without its precision grid and is
+    re-snapped: on the grid itself a one-step negative buffer empties some valid
+    holed polygons (Palacio de Carlos V, 403 mm2 -> 0). A result under 99% of the
+    original area (or empty) is discarded and the original kept.
     """
-    out = shapely.buffer(shapely.buffer(parts, -SNAP_MM, join_style="mitre"), SNAP_MM,
-                         join_style="mitre")
-    area = shapely.area(parts)
-    bad = np.flatnonzero(shapely.area(out) < 0.9 * area)
-    for i in bad:
-        out[i] = parts[i]
-        for k in (0.5, 2.0, 5.0):
-            d = k * SNAP_MM
-            got = shapely.buffer(shapely.buffer(parts[i], -d, join_style="mitre"), d,
-                                 join_style="mitre")
-            if shapely.area(got) >= 0.9 * area[i]:
-                out[i] = got
-                break
-    return out
+    holed = np.flatnonzero(shapely.get_num_interior_rings(parts) > 0)
+    changed = False
+    for i in holed:
+        if not _pinched(parts[i]):
+            continue
+        raw = shapely.set_precision(parts[i], 0)
+        fixed = shapely.buffer(shapely.buffer(raw, -SNAP_MM, join_style="mitre"),
+                               SNAP_MM, join_style="mitre")
+        fixed = shapely.set_precision(fixed, SNAP_MM)
+        if not shapely.is_empty(fixed) and shapely.area(fixed) >= 0.99 * shapely.area(parts[i]):
+            parts[i] = fixed
+            changed = True
+    if changed:
+        parts, sub = shapely.get_parts(parts, return_index=True)
+        owner = owner[sub]
+    return parts, owner
 
 
 def feature_polygons(name: str, features: list[dict], style: LayerStyle,
@@ -459,6 +501,8 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     Extruded footprints (buildings) are not, and none is dropped for its size: they
     print as drawn (user, 2026-10-02: widening grew 0.2 mm rowhouses 0.3 mm into the
     street, and lone sheds into blobs; the slicer prints what it can of a thin one).
+    Polygons whose hole touches the outline (pinched) have it opened by one snap step
+    (:func:`_depinch`); holed polygons that are not pinched are left alone.
     Returns (polygons, their properties, counts: ``dropped`` = features that
     produced nothing, ``widened``).
     """
@@ -503,14 +547,7 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     geoms = shapely.intersection(geoms, terrain.rect)
     geoms = shapely.set_precision(geoms, SNAP_MM)
     parts, owner = shapely.get_parts(geoms, return_index=True)
-    # A hole touching its outline at one point is a valid polygon, but its prism
-    # shares that vertex between two walls (not manifold). Opening the pinch by
-    # one snap step changes the outline far below print resolution.
-    holed = shapely.get_num_interior_rings(parts) > 0
-    if holed.any():
-        parts[holed] = _open_pinches(parts[holed])
-        parts, sub = shapely.get_parts(parts, return_index=True)
-        owner = owner[sub]
+    parts, owner = _depinch(parts, owner)
     # Extruded footprints print as drawn: only an empty one is dropped.
     min_area = 0.0 if style.mode == "extrude" else MIN_FOOTPRINT_MM2
     area = shapely.area(parts)
@@ -661,12 +698,7 @@ def merge_flat_roofs(polys: list[Polygon], props: list[dict], lo: np.ndarray, hi
     closed = shapely.make_valid(closed)
     closed = shapely.set_precision(shapely.intersection(closed, rect), SNAP_MM)
     parts, owner = shapely.get_parts(closed, return_index=True)
-    holed = shapely.get_num_interior_rings(parts) > 0
-    if holed.any():   # open pinched holes, as feature_polygons does
-        parts[holed] = shapely.buffer(shapely.buffer(parts[holed], -SNAP_MM, join_style="mitre"),
-                                      SNAP_MM, join_style="mitre")
-        parts, sub = shapely.get_parts(parts, return_index=True)
-        owner = owner[sub]
+    parts, owner = _depinch(parts, owner)   # open pinched holes, as feature_polygons does
     # Any non-empty part prints, as feature_polygons keeps any footprint: a group of
     # sheds under MIN_FOOTPRINT_MM2 was dropped while its members counted as merged,
     # so they vanished from the print (2026-10-02).
@@ -868,11 +900,43 @@ def is_part(props: dict) -> bool:
     return bool(v) and str(v).lower() not in ("no", "none", "nan")
 
 
+def is_open_enclosure(poly, props: dict, inner) -> bool:
+    """True for an enclosure that prints as a wall ring around a plaza, not a filled slab.
+
+    ``poly`` is an outline whose tags make it a low-default enclosure
+    (``heights.is_low_default_footprint``: a castle / fort / citywalls / courtyard
+    outline, or a ruin), and ``inner`` the other footprints (buildings or
+    ``building:part`` rows, same coordinate system). Those that count lie mostly (at
+    least half of their own area) inside the outline and are not its twin (a copy of the
+    outline itself, under :data:`ENCLOSURE_TWIN_DIFF` of its area apart, as the
+    ``fortifications`` layer holds). Open means at least :data:`OPEN_ENCLOSURE_MIN_INNER`
+    of them cover under :data:`OPEN_ENCLOSURE_MAX_INNER_SHARE` of the outline. An
+    enclosure with nothing or little inside stays solid (Palacio de las Columnas); one
+    more than half built over is a building. Granada Alcazaba: 9 towers on 23.5 % of
+    4098 m2 and the rest a 3 m slab over what is a plaza.
+    """
+    from city2stl.heights import is_low_default_footprint
+
+    if not is_low_default_footprint(props) or poly.area <= 0:
+        return False
+    inside = []
+    for g in inner:
+        part = g.intersection(poly)
+        if part.area < 0.5 * g.area or g.symmetric_difference(poly).area < ENCLOSURE_TWIN_DIFF * poly.area:
+            continue
+        inside.append(part)
+    if len(inside) < OPEN_ENCLOSURE_MIN_INNER:
+        return False
+    return shapely.union_all(inside).area < OPEN_ENCLOSURE_MAX_INNER_SHARE * poly.area
+
+
 def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list, int, int]:
     """Simple 3D Buildings: where ``building:part`` features exist, they are the
     building; the outline (which carries the overall, usually tallest, height)
     only fills the area no part covers. Without this a cathedral printed as one
-    block at the height of its bell tower.
+    block at the height of its bell tower. A leftover narrower than
+    :data:`MIN_LEFTOVER_WIDTH_MM` (mean width) is dropped as a sliver, and the leftover
+    of an open enclosure (:func:`is_open_enclosure`) is not printed at all.
 
     Returns (polygons, properties, number of parts, number of outlines trimmed).
     """
@@ -900,10 +964,19 @@ def assemble_parts(polys: list[Polygon], props: list[dict]) -> tuple[list, list,
     rest = shapely.set_precision(shapely.difference(arr[outl], shapely.union_all(grid, axis=1)),
                                  SNAP_MM)
     pieces, owner = shapely.get_parts(rest, return_index=True)
-    good = (shapely.get_type_id(pieces) == 3) & (shapely.area(pieces) >= MIN_FOOTPRINT_MM2)
+    area_p = shapely.area(pieces)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mean_width = 2.0 * area_p / shapely.length(pieces)
+    good = ((shapely.get_type_id(pieces) == 3) & (area_p >= MIN_FOOTPRINT_MM2)
+            & (mean_width >= MIN_LEFTOVER_WIDTH_MM))
+    from city2stl.heights import is_low_default_footprint
+
+    open_k = {k for k in outl.tolist() if is_low_default_footprint(props[k])
+              and is_open_enclosure(arr[k], props[k], part_arr[pj[oi == k]])}
     by_outline: dict[int, list] = {}
     for g, o in zip(pieces[good], outl[owner[good]].tolist(), strict=True):
-        by_outline.setdefault(o, []).append(g)
+        if o not in open_k:
+            by_outline.setdefault(o, []).append(g)
     trimmed_set = set(outl.tolist())
     out_p, out_pr = [], []
     for k, (poly, pr) in enumerate(zip(polys, props, strict=True)):
@@ -1011,8 +1084,7 @@ def _polygon_constants() -> dict:
     # wall_piece_mm is read by build_layer, not feature_polygons: it is here so
     # that the solid key (built on this one) changes with it.
     return {"simplify": SIMPLIFY_TOL_MM, "snap": SNAP_MM, "min_footprint": MIN_FOOTPRINT_MM2,
-            "ring_layers": list(RING_LAYERS), "wall_piece_mm": WALL_PIECE_MM,
-            "open_pinches": 2}   # bump when _open_pinches changes what a polygon becomes
+            "ring_layers": list(RING_LAYERS), "wall_piece_mm": WALL_PIECE_MM}
 
 
 def _polygons_key(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,
@@ -1506,10 +1578,14 @@ def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tu
     data. Extruded on their own they become one flat block at the outline's height
     that swallows the building's parts (Granada Cathedral: a 45 m slab over 41
     parts of 16.5 to 50 m). The buildings layer draws those footprints properly,
-    so these layers keep only what it lacks. Lines and points are kept. Same rule
+    so these layers keep only what it lacks. Lines and points are kept. An open
+    enclosure (:func:`is_open_enclosure`: Alcazaba, a plaza with towers on under half
+    of it) is kept too: its fortifications copy prints as the wall ring while
+    ``assemble_parts`` leaves the plaza unfilled. Same rule
     as ``city2stl.landmarks.LandmarkPlan.take``. ``cover`` comes from
     :func:`building_cover`. Returns the kept features and how many were dropped.
     """
+    from city2stl.heights import is_low_default_footprint
     from city2stl.landmarks import REPLACE_OVERLAP
 
     if cover is None or not feats:
@@ -1520,6 +1596,10 @@ def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tu
         hits = cover.query(g, predicate="intersects")
         if not len(hits):
             continue
+        props = (feats[i] or {}).get("properties") or {}
+        if (is_low_default_footprint(props)
+                and is_open_enclosure(g, props, cover.geometries[hits])):
+            continue   # kept: RING_LAYERS draws its wall ring; the buildings layer prints no slab
         try:
             inside = shapely.area(shapely.intersection(g, shapely.union_all(cover.geometries[hits])))
         except shapely.errors.GEOSException:

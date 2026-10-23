@@ -7,6 +7,34 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-21 — Granada truth is CNIG-first, REDIAM only where CNIG shows no building; survey rows are held out of the ranking
+- **Decision:** `benchmark.REGIONS["granada"]` is `cnig_mdsn`; `benchmark.FALLBACKS["granada"] = "rediam_mdhn"` is read only where CNIG has no value or under `NO_BUILDING_M` (`survey_heights.survey_footprint_heights(fallback=)`, the order `survey_fill.py` uses). Every truth record carries `survey_provider`. `19_refresh_survey_truth.py --rebuild-fallback [--offline-rings]` rebuilt `truth/granada.json`; the old file is `granada.rediam_mdhn.json` beside it. `tools/eval/score_export_heights.py` adds `--exclude-source` (default `survey`): `*_excluding` blocks hold survey-filled rows out, since a CNIG truth is not independent of a CNIG fill.
+- **Why:** REDIAM MDHN suppresses building cells. On the same footprints CNIG p95 is a median +3.5 m above REDIAM (9,794 records); on the old truth every Granada source read +5 m high (all rows +5.4 intended, mesh +2.3).
+- **Rejected:** keeping REDIAM as primary (biased low); per-city calibration of the old truth.
+- **Supersedes / superseded by:** the 2026-10-13 REDIAM-first choice in [survey-lidar.md](survey-lidar.md); —.
+- **Source:** export bbox only. The WCS was unreachable and the CNIG/REDIAM rasters are cached for the export bbox alone, so 9,794 records are CNIG, 165 fell back to REDIAM, and 3,173 (outside the bbox or relation outlines with no cached ring) keep their old REDIAM value (`survey_provider: rediam_mdhn`); rings came from the cached Overpass ways by osm_id, unsimplified. Re-run with network to finish them. Scores (`runs/panoview/granada/score_{before,after}.json`), intended all-rows bias +5.4 -> +2.0 m (before model) and +6.2 -> +2.8 m (after model) against old -> new truth; the CNIG-based truth now shows `osm_levels` +3.2 m high.
+
+### 2026-10-20 — Survey only raises landmarks, also checks floor counts, and the roof level needs a pitched roof
+- **Decision:** (B1) `survey_fill.py::is_landmark` (building:part rows, outlines with parts, towers, churches and places of worship, castles, any named building with `historic=*` or `tourism=attraction`, and the towers/churches layers) marks rows the survey may only RAISE, never lower. (B2) `_burn_stats` measures once per layer, and an outline over its full footprint. (B3) `osm_levels` rows get the same 3 m check as `osm_tag`; footprints under `SMALL_FOOTPRINT_M2` (30) read the median (`SMALL_STAT_PERCENTILE` 50) instead of p90. `user_override` and `merged` stay untouched. (C) `heights.py::height_from_tags` adds the implicit roof floor only when `roof:shape` is tagged and not `flat` (`has_pitched_roof_shape`); 3.2 m per floor kept. `MODEL_CACHE_VERSION` 7.
+- **Why:** the old fill lowered the cathedral (way/124069145) from 45 to 19.8 m and its parts to a 4.3 m minimum; the +1 roof floor put floor-count rows a median 3.2 m above the survey on flat-roofed outlines (56% over 3 m off).
+- **Rejected:** keeping landmarks fully survey-driven (lead roofs read low under the spire); a per-city calibration.
+- **Supersedes:** the "`osm_levels` rows are never touched" part of the 2026-10-17 survey entry.
+- **Source:** cached Granada. Floor-count outlines: median bias +3.19 -> +0.04 m, over-3 m share 56% -> 16%; parts 56% -> 19% (landmark parts only rise). Cathedral outline 45, spire 50, parts 16.5-45 kept. Cached payload heights stay stale for C until a fresh fetch or the survey re-measures them.
+
+### 2026-10-17 — Survey wins when far off: an osm_tag height is replaced by the survey's beyond 3 m [restored 2026-10-18 after a OneDrive conflict dropped it]
+- **Decision (user, 2026-10-17):** in the survey fill (`city2stl/height/survey_fill.py::fill_layer_heights`) an `osm_tag` feature
+  (any value) that a validated survey covers is replaced when the measured height differs from the tag by more than
+  `TAG_OVERRIDE_MIN_DIFF_M` (3.0 m): `height_source "survey"`, `survey_source` as usual, the tag kept in `osm_tag_height_m`.
+  Within 3 m the tag stays. `osm_levels`, `merged` and `user_override` rows are never touched. Bare 10.0 m tags (`BULK_TAG_HEIGHT_M`)
+  keep their earlier behaviour: always filled. Stats: `tag_checked`, `tag_replaced` (also per layer); `filled` / `defaults` count only
+  fillable rows.
+- **Why:** the tag can be a mapper's guess (Torre de la Vela, del Homenaje and de Comares carry an explicit `height=10` in OSM); lidar
+  is a measurement, but within 3 m the two agree about as well as the survey can be trusted, so the tag is not overwritten.
+- **Rejected:** replacing every tag — survey noise would overwrite good tags; never replacing tags — leaves 10 m towers at 10 m.
+- **Supersedes / superseded by:** refines the fill's "bare 10.0 m `osm_tag` only" rule; — .
+- **Source:** conflict copy `city2stl/height/survey_fill-DESKTOP-TMJM22C.py`. Granada cached payload then: 113 tags checked, 77
+  replaced (Vela 10 -> 28.8 m, Comares 10 -> 36.5 m, Homenaje 10 -> 23.0 m).
+
 ### 2026-10-17 — The city export can take corroborated + single panorama heights, opt-in; tag and prior rows stay out
 - **Decision (user, 2026-10-17):** a city export request may carry `panorama_heights` (a region report
   name, folder or `heights.json`). `city2stl/panorama_heights.py` replaces the height of a footprint

@@ -59,6 +59,13 @@ def test_covers_is_us_only():
     assert not L.covers((10.4295, 10.3845, -75.5221, -75.5679))
 
 
+def test_covers_takes_a_bbox_dict():
+    # canopy.py passes the request's {north, south, east, west}; unpacking it gave the keys.
+    n, s, e, w = BRECK
+    assert L.covers({"north": n, "south": s, "east": e, "west": w})
+    assert not L.covers({"north": 10.4295, "south": 10.3845, "east": -75.5221, "west": -75.5679})
+
+
 @pytest.mark.integration
 def test_live_breckenridge_houses():
     """A few blocks of Breckenridge measured from the live point cloud."""

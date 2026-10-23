@@ -121,6 +121,60 @@ function _outerRings(geom) {
     return [];
 }
 
+/** Wall floor sink below the lowest ground: city2stl/city_model.py build_layer (floor = lowest ground - 0.2 mm). */
+export const WALL_SINK_MM = 0.2;
+const MAX_SAMPLES_PER_AXIS = 48;
+
+/**
+ * Lowest and highest terrain (mm) under a footprint ring: sampled at the corners, along every
+ * edge (about one per preview pixel) and on a grid of pixels inside, so terrain between the
+ * corners cannot sit below the wall foot (the finished model reads every cell under it,
+ * Terrain::ranges_under).
+ * @param {Array<[number, number]>} ring  outer ring in preview pixels
+ * @param {Function} groundMm             (x, y) → mm
+ * @returns {{low: number, high: number}}
+ */
+export function groundRange(ring, groundMm) {
+    let low = Infinity, high = -Infinity;
+    const take = (x, y) => {
+        const g = groundMm(x, y);
+        if (g < low) low = g;
+        if (g > high) high = g;
+    };
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+        const [ax, ay] = ring[i], [bx, by] = ring[(i + 1) % n];
+        take(ax, ay);
+        const steps = Math.min(MAX_SAMPLES_PER_AXIS * 4, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay))));
+        for (let s = 1; s < steps; s++) take(ax + (bx - ax) * s / steps, ay + (by - ay) * s / steps);
+        if (ax < x0) x0 = ax;
+        if (ax > x1) x1 = ax;
+        if (ay < y0) y0 = ay;
+        if (ay > y1) y1 = ay;
+    }
+    if (x1 - x0 >= 1 && y1 - y0 >= 1) {
+        const nx = Math.min(MAX_SAMPLES_PER_AXIS, Math.ceil(x1 - x0)), ny = Math.min(MAX_SAMPLES_PER_AXIS, Math.ceil(y1 - y0));
+        for (let j = 0; j < ny; j++) {
+            const y = y0 + (j + 0.5) * (y1 - y0) / ny;
+            for (let i = 0; i < nx; i++) {
+                const x = x0 + (i + 0.5) * (x1 - x0) / nx;
+                if (_inside(ring, x, y)) take(x, y);
+            }
+        }
+    }
+    return { low, high };
+}
+
+function _inside(ring, x, y) {
+    let c = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+}
+
 /**
  * Prism geometry for building footprints in model millimetres.
  *
@@ -158,16 +212,11 @@ export function buildingPrisms(features, o) {
                 pts.push(out);
             }
             if (!pts.length) continue;
-            let ground = -Infinity, low = Infinity;
-            for (const [x, y] of pts[0]) {
-                const g = o.groundMm(x, y);
-                if (g > ground) ground = g;
-                if (g < low) low = g;
-            }
+            const { high: ground, low } = groundRange(pts[0], o.groundMm);
             const tris = o.triangulate(pts[0], pts.slice(1));
             if (!tris.length) continue;
             const top = ground + heightMm;
-            const bottom = low - 0.1;          // walls reach the lowest ground under the footprint
+            const bottom = low - WALL_SINK_MM;  // walls reach the lowest ground under the footprint, less the finished model's sink
             let wallTop = top, pitched = false;
             if (kind && pts.length === 1) {
                 const roofMm = roofHeightM(f.properties, hM) * o.zMmPerM * mult;

@@ -36,6 +36,11 @@ _Last updated: 2026-10-14._ The one place for "what's next".
 | [F-VIEW-AO](active/F-VIEW-AO-ambient-occlusion.md) | planned (proposal pending) | PNG mockup of the switch, then the horizon-AO bake in a worker |
 | [F-CITYTREES](active/F-CITYTREES-trees-in-the-city-model.md) | planned (proposal pending) | fetch `natural=tree` / `tree_row`, then crowns, then woods; measure faces |
 | [F-BRIDGES](active/F-BRIDGES-bridges-and-tunnels.md) | planned (proposal pending) | keep the tags and drop tunnels (can ship alone), then decks and piers |
+| [F-WATERLAYER](active/F-WATERLAYER-one-water-layer.md) | approved 2026-10-18 | PNG mockup of the merged Rivers & lakes group, then the single-cut rule on the server |
+| [F-PISTES](active/F-PISTES-ski-runs-on-the-print.md) | approved 2026-10-18 | piste line width, then trails on by default where pistes exist |
+| [F-ROOFLIDAR](active/F-ROOFLIDAR-roof-shape-from-survey.md) | approved 2026-10-18 | probe a buildings-bearing 1 m Granada nDSM (REDIAM MDS − MDT), then score the plane-fit reader on Granada's tagged roofs against the GBM's 0.783 balanced accuracy before wiring |
+| [F-ROOFIMG](active/F-ROOFIMG-roof-detail-from-imagery.md) | built 2026-10-20 | ridge direction shipped (imagery 0.75 vs long axis 0.58 on the confident subset); hip and courtyards measured, gated off; retry courtyards with finer lidar |
+| [F-PANOVIEW](active/F-PANOVIEW-pano-vs-model-views.md) | in progress 2026-10-20 | export height score vs Granada lidar truth; 6 Street View panos and model renders from the same camera |
 | [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | approved 2026-10-14; PNG mockups still need approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
 | [F-DATADIR](active/F-DATADIR-portable-data-dir.md) | approved 2026-10-14 | `DATA_DIR` in `app/paths.py`, then route the writers through it; runs before F-KEYS on the same PC |
 | [F-DESKTOP](active/F-DESKTOP-standalone-app.md) | approved 2026-10-14 | `[project.scripts]` plus `app/cli.py`, then a `numpy2stl` wheel; needs F-DATADIR first |

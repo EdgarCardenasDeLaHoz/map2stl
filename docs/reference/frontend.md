@@ -323,6 +323,7 @@ Module-local (not on appState):
 | `generatedModelData` | S | object | Last preview parameters, used by downloads; `zMaxMm` (printed height) feeds the Build sub-tab size line |
 | `modelPreviewState` | S | `'idle'\|'building'\|'ready'\|'error'` | Set by `previewModelIn3D`; `ModelContainer.vue` words its empty state from it |
 | `puzzleEdges` | S | `{cols, rows, key} \| null` | Dragged puzzle cuts in mm; sent as `col_edges_mm` / `row_edges_mm` |
+| `cutView` | S | `'hidden' \| 'show' \| 'edit'` | Puzzle cut lines in the Extrude preview (Cut lines control under Split into pieces); only `edit` lets a drag move a cut. Default hidden |
 
 ### Callbacks (markRaw)
 

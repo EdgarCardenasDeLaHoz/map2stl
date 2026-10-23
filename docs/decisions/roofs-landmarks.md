@@ -7,6 +7,46 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
 [../research/roof-shape-research.md](../research/roof-shape-research.md); classifier reference:
 [../reference/roof-shape-model.md](../reference/roof-shape-model.md).
 
+### 2026-10-20 — Imagery sets roof ridge direction only; hip and courtyard emission stay off
+- **Decision:** `city2stl/roof_imagery.py::apply` writes `roof:orientation=across` (with `roof_orientation_source=imagery`) on untagged classifier gabled roofs when texture and brightness votes agree and `T_RIDGE` (0.10) is met. `EMIT_HIP` and `EMIT_COURTYARDS` are False; the measurement code, cache rows and tests stay. Holed footprints are now roofed (`roofs.py::building_solids`, `_planes` on `outline.boundary`, flat fallback if not manifold). `roof_shapes: "off"` is unchanged.
+- **Why:** measured on Granada (10,612 footprints of 60 m2 or more, 50 without tiles). Ridge against the CNIG two-plane fit (125 unambiguous footprints): long axis agrees 0.51; on the confident subset (n=52) imagery 0.75 vs long axis 0.58; emitted across fixed 14, broke 5, never worse overall (+7.2 points). Hip: AUC 0.18 on 20 hipped / 3 gabled tagged roofs, grouped 5-fold 0.52 vs 0.87 always-hipped baseline, no signal. Courtyards: imagery-only precision 0.045 against the 0.85 gate, recall 0.09 of OSM holes of 12 m2 or more; shaded patios, pools and light walls are not separable by dark / odd-colour tests. Registration: median shift about 0.67 m (1.4 px), none at the search edge, quality median 1.22; a higher gate did not improve ridge agreement, so `REG_GATE` is 1.1. Warm apply on Granada 1.2 to 1.5 s, cold 16 s.
+- **Caveat:** the CNIG 2.5 m nDSM reads true OSM patios as roofed (0.64 to 1.0 share), so the lidar veto and any nDSM-based precision are unreliable on this product; revisit courtyards with a finer lidar source.
+- **Rejected:** shipping courtyards behind the lidar veto (the veto cannot see small patios here); raising `T_RIDGE` to 0.30 (n=14 only, 0.93 vs 0.50, too few to move the total); tagging hips from the hip score.
+- **Supersedes / superseded by:** —
+- **Source:** [plans/active/F-ROOFIMG-roof-detail-from-imagery.md](../plans/active/F-ROOFIMG-roof-detail-from-imagery.md); `city2stl/roof_imagery.py::apply`, `tools/eval/eval_roof_imagery.py`
+
+### 2026-10-20 — An open enclosure with inner buildings prints a wall ring, not a solid plaza; leftover slivers under 0.4 mm are dropped
+- **Decision:** `city_model.py::is_open_enclosure` (low-default footprint, at least `OPEN_ENCLOSURE_MIN_INNER` 2 inner buildings/parts that are mostly inside and not its twin, covering under `OPEN_ENCLOSURE_MAX_INNER_SHARE` 50% of it). `drop_building_copies` keeps its fortifications copy, so `RING_LAYERS` draws the 4 m wall ring; `assemble_parts` prints no remainder slab for it. Enclosures with no inner buildings stay solid. `MIN_LEFTOVER_WIDTH_MM` (0.4 mm, mean width 2*area/perimeter) drops sliver pieces left when parts trim an outline.
+- **Why:** the Alcazaba plaza (way/26935518, 4098 m2, 9 towers covering 23.5%) printed as a filled slab.
+- **Rejected:** only one site (the copy kept without removing the remainder gives ring plus slab).
+- **Source:** cached Granada: the rule touches only way/26935518 (43 other low-default enclosures with parts stay solid); leftover pieces 2260 -> 997.
+
+### 2026-10-18 — Alhambra reference swap cuts courtyards and keeps taller OSM buildings
+- **Decision:** `city2stl/landmarks.py::ndsm_solid` cuts reference cells under
+  `REFERENCE_OPEN_M` (2.0 m raw) out of a `reference` solid (`_open_cells`, 3x3 opening drops
+  one-cell specks); `_depinch` sets those cells to 0 instead of flooring them at `REFERENCE_MIN_M`.
+  `LandmarkPlan._kept_osm` keeps an OSM building inside a reference outline when its `height_m`
+  beats the reference median over its footprint (`reference_support`) by more than
+  `KEEP_OSM_ABOVE_M` (1.5 m), or when under `KEEP_OSM_MIN_COVER` (50%) of it has reference
+  cells above the threshold; kept footprints are subtracted from the solid (`exclude`).
+  `building:part` features and the outline itself are never kept. `REFERENCE_SOLID_VERSION`
+  (in each override's `spec`, so in `model_cache.overrides_digest`) rebuilds stale solids.
+- **Why:** the Alcazaba outline has no hole and the 1 m floor refilled its Plaza de Armas
+  (reference median inside 5.3 m, only 7% of cells under 1 m); the `REPLACE_OVERLAP` rule also
+  removed 10 / 6 / 4 OSM features under three outlines for blurry ~1 m-cell geometry. User,
+  2026-10-18: "Cut courtyards, keep OSM".
+- **Per-unit cutoff (same day):** a rule unit may carry `open_m` (set to 5.0 on the Alcazaba,
+  `way/26935518`); `reference_landmarks` puts it in the override's `spec` and depinches the raw
+  raster again for that unit, and `_open_cells` / `reference_support` read it via `_open_m`.
+  `REFERENCE_SOLID_VERSION` is 3. Why: Thingiverse raised the Alcazaba's plaza floor to about
+  3 m (median 2.9 m) against 0.22 m lidar, so the 2 m cutoff opened only 29% of it; 5 m opens
+  85%. Rejected: raising the global `REFERENCE_OPEN_M` (opens low roofs in the Nasrid units);
+  subtracting the Thingiverse-minus-lidar bias (it lowers the ramparts too).
+- **Rejected:** subtracting OSM `place=square` / pedestrian areas — not in the plan's inputs, and
+  the reference's own low cells already mark the open ground; keeping `building:part`
+  features — they belong to the swapped building (existing tests swap them on purpose).
+- **Supersedes / superseded by:** refines the 2026-10-17 reference entry below; —.
+
 ### 2026-10-17 — Classified roofs are cached on disk per footprint, keyed by checkpoint hash + geometry + tags
 - **Decision:** `city_data.py::_classify_buildings` looks each untagged building up in
   `<CACHE_ROOT>/roof_shapes.sqlite` (`city2stl/roof_cache.py`) and classifies only the misses; the

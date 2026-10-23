@@ -13,7 +13,8 @@ the footprint geometry and the tags the model reads (:data:`TAG_KEYS`,
 ``roof_features._tag_features``). A retrained checkpoint therefore misses every row
 and reclassifies; old rows are never read again. Only classified buildings are
 stored: a skip (no tile, too large) may succeed next time. Every failure is logged and
-treated as a miss; the cache never raises.
+treated as a miss; the cache never raises. Table ``roof_imagery`` (raw ridge / hip / courtyard
+measurements per footprint, ``city2stl.roof_imagery``) sits beside ``roofs`` in the same file.
 """
 from __future__ import annotations
 
@@ -98,3 +99,42 @@ def store(rows) -> None:
             con.executemany("INSERT OR REPLACE INTO roofs VALUES (?, ?, ?, ?)", rows)
     except (OSError, sqlite3.Error) as exc:
         logger.warning("Roof cache write failed: %s", exc)
+
+
+def lookup_imagery(keys: list[str]) -> dict[str, dict]:
+    """``{key: raw imagery measurements}`` for the *keys* in table ``roof_imagery``
+    (``city2stl.roof_imagery.feature_key``; the thresholds act after this lookup)."""
+    path = db_path()
+    if not keys or not path.exists():
+        return {}
+    out: dict[str, dict] = {}
+    try:
+        with closing(sqlite3.connect(path, timeout=10)) as con:
+            for i in range(0, len(keys), _SQL_CHUNK):
+                chunk = keys[i:i + _SQL_CHUNK]
+                q = ("SELECT key, data FROM roof_imagery WHERE key IN ("
+                     + ",".join("?" * len(chunk)) + ")")
+                for key, data in con.execute(q, chunk):
+                    out[key] = json.loads(data)
+    except (sqlite3.Error, ValueError) as exc:
+        if "no such table" in str(exc):                  # first run: nothing stored yet
+            return {}
+        logger.warning("Roof imagery cache read failed (%s); measuring again", exc)
+        return {}
+    return out
+
+
+def store_imagery(rows) -> None:
+    """Write ``(key, json text)`` rows to table ``roof_imagery`` (replacing old ones)."""
+    rows = list(rows)
+    if not rows:
+        return
+    path = db_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(path, timeout=10)) as con, con:
+            con.execute("CREATE TABLE IF NOT EXISTS roof_imagery (key TEXT PRIMARY KEY, "
+                        "data TEXT NOT NULL)")
+            con.executemany("INSERT OR REPLACE INTO roof_imagery VALUES (?, ?)", rows)
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Roof imagery cache write failed: %s", exc)

@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-17_
+_Last updated: 2026-10-21_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,58 @@ _Last updated: 2026-10-17_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
+
+- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); 3,173 of 13,132 records outside the cached rasters still carry REDIAM values (`survey_provider`) until a re-run with network. Original text below.
+
+- `city2stl/skyline/benchmark.py::REGIONS` sends Granada's truth to `rediam_mdhn`. That raster
+  suppresses lidar-classified building cells (see `city2stl/height/providers/rediam_mdhn.py`),
+  so on ordinary buildings it reads low. On the same eroded footprint, CNIG p95 minus REDIAM p95
+  is +5.4 m median on survey-filled rows and +3.3 m on floor-count rows; cell by cell, REDIAM
+  is 5.7 m below CNIG where CNIG reads over 3 m, and 16 % of those cells are void.
+- Effect: `tools/eval/score_export_heights.py` shows every Granada source about +5 m high, before
+  and after the 2026-10-20 height fixes. Ruled out: ground reference (streets agree to 0.4 m),
+  misalignment, the scorer's `height_m` read, ring and stat choice, osm_id matching.
+- Fix: rebuild Granada truth CNIG-first (REDIAM only where CNIG has no building, as
+  `survey_fill` does) with `skyline/scripts/19_refresh_survey_truth.py`, then re-score. A
+  CNIG-based truth is not independent of a CNIG fill: hold the survey rows out when ranking
+  providers. Not done yet: `city2stl/skyline/` is the panoramic session's area.
+
+## Fixed 2026-10-20: Alcazaba plaza slab, lowered landmarks, +1 roof floor, sliver leftovers
+
+- **Fix:** `city_model.py::is_open_enclosure`, `survey_fill.py::is_landmark` / `_burn_stats`, `heights.py::has_pitched_roof_shape`, `MIN_LEFTOVER_WIDTH_MM`; `MODEL_CACHE_VERSION` 7. Entries: [building-heights](decisions/building-heights.md), [roofs-landmarks](decisions/roofs-landmarks.md).
+- **Open:** cached payload floor-count heights keep the old +1 roof floor until a fresh fetch (or survey re-measure); landmark parts only rise, so 19% of floor-count parts stay over 3 m off.
+
+## Fixed 2026-10-18: Alhambra reference swap filled courtyards and dropped OSM buildings
+
+- **Symptom:** with `reference_landmarks` on, the Alcazaba's Plaza de Armas printed solid and
+  10 / 6 / 4 OSM features under way/26935518, way/1476959785 and way/117369769 were replaced by
+  blurry reference geometry.
+- **Cause:** the outlines have no holes, `_depinch` floored every cell at 1 m, and
+  `LandmarkPlan.take` removed every feature at least 50% inside an outline.
+- **Fix:** `landmarks.py::ndsm_solid` cuts cells under `REFERENCE_OPEN_M`; `LandmarkPlan._kept_osm`
+  keeps taller OSM buildings. Tests: `tests/test_landmarks_reference.py::TestCourtyardsAndKeptOsm`.
+  Not yet measured on the real Granada data. Open: `building:part` features are still replaced.
+  Follow-up: the plaza floor in the raster is about 3 m, so the Alcazaba unit carries `open_m: 5.0`
+  in `alhambra_reference_rule.json` (per-unit cutoff, `REFERENCE_SOLID_VERSION` 3); not yet
+  re-measured on the real data.
+
+## Fixed 2026-10-18: Alhambra: Palacio de Carlos V and other courtyard buildings missing
+
+- **Symptom:** valid buildings with a courtyard (one inner ring) vanished from the print and were
+  counted as `dropped`. Palacio de Carlos V (OSM relation/2640220) went from 402.98 mm2 to 0; 10 of
+  90 holed polygons in the Alhambra area were lost.
+- **Cause:** `city2stl/city_model.py::feature_polygons` shrank and regrew every holed polygon by
+  one `SNAP_MM` step (to open pinched holes) *after* snapping. On the 0.01 mm grid that negative
+  buffer returned an empty polygon for some valid holed polygons (without the grid: 401.7 mm2).
+- **Fix:** `_depinch` touches only polygons whose hole touches the outline or another hole, runs
+  the buffer on the geometry without its precision grid, re-snaps, and keeps the original if the
+  result is empty or under 99% of its area. `MODEL_CACHE_VERSION` 5 -> 6 rebuilds cached solids.
+  Tests: `tests/test_city_model.py::TestFeaturePolygonsHoles`.
+- **Same fault in the flat-roof merge:** `merge_flat_roofs` opened the holes of merged groups the
+  same way, so a merged block around a patio could print as nothing while its members counted as
+  merged. It now calls `_depinch` too.
 
 ## Use case: four 600 mm city prints, driven through the API (2026-10-17)
 
@@ -258,10 +310,10 @@ the rest below.
   that id. `city_model.py::feature_polygons` opens holes by one snap step
   (`buffer(-0.01)` then `buffer(+0.01)`), and GEOS returned an empty polygon for the negative
   buffer of this exact snapped polygon (509 mm2 to 0; fine at -0.005 or -0.05), so the whole
-  building vanished from the model and the override found no feature. `_open_pinches` now retries
-  other distances when a result loses over 10 % of its area, and keeps the polygon as it was if
-  none works (`tests/test_open_pinches.py`). `_polygon_constants` carries `open_pinches: 2`, so
-  stale `city_polygons` entries are rebuilt. Any other holed building could have vanished the same
+  building vanished from the model and the override found no feature. `_depinch` (another session's
+  parallel fix, kept over a first `_open_pinches` retry version) now opens only pinched holes, on
+  the geometry without its precision grid, and keeps the original if the result is empty or loses
+  1 % of the area. Any other holed building could have vanished the same
   way; none is known.
   - `replaced_features: 0` on the `ref:` units is expected: they exist because the buildings
     layer has no footprint there (only the towers / churches layers do), and
@@ -297,6 +349,17 @@ the rest below.
   - Now `settings/resetRows.ts::resetActions` resets a getter row that owns a checkbox (Trees back to
     on); and `event-listeners-export.js` reloads the buildings when Roof shapes changes and buildings
     are loaded (`city-detail.js::reloadBuildingsForRoofShapes`). Tests: `tests/js/cityDetail.test.js`.
+- **Extrude viewer left out the trees — fixed 2026-10-18 (TM):** `model-viewer.js` builds its
+  finished-model request synchronously, and on a region's first load the survey coverage was
+  still 'unknown', so `cityDetailFields` dropped `layers.trees`. The viewer now rebuilds once
+  `window.citySurveyCoverageReady` resolves (Granada: 9 parts, trees 793,816 faces).
+  - Still open: the first, tree-less build keeps running on the server to its end (wasted work).
+- **US trees failed on a dict bbox — fixed 2026-10-18 (TM):** `canopy.py::_default_ndsm` passes
+  `{north, …}` to `covers()`, and `lidar_3dep.py::_is_in_us` unpacked it into its key strings
+  ("'<' not supported between 'str' and 'float'"); every US build with trees failed. It now
+  uses `_survey.intersects`.
+- **Cartagena's sea renders as flat green land:** no water part and no sea colour on the 5 km
+  box. Not investigated.
 
 ## Vector rivers — known faults (2026-10-17)
 

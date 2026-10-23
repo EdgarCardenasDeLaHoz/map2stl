@@ -74,7 +74,8 @@
      "median_abs_thing_m": 3.18
     }
    ],
-   "flag_lower": true
+   "flag_lower": true,
+   "open_m": 5.0
   },
   {
    "key": "ref:35",

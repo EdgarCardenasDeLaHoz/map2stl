@@ -145,7 +145,8 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
                              provider: str | None = None, *,
                              resolution_m: float = bm.RESOLUTION_M,
                              refresh: bool = False, workers: int = 1,
-                             roof_stats: bool = False) -> dict[str, dict]:
+                             roof_stats: bool = False,
+                             fallback: str | None = None) -> dict[str, dict]:
     """Survey height record per footprint key (``benchmark.footprint_key``).
 
     ``footprints``: key -> lon/lat ring. ``provider``: a ``providers/survey.py`` name; by
@@ -157,7 +158,32 @@ def survey_footprint_heights(region: str, footprints: dict[str, list],
 
     ``roof_stats``: also re-measure cached records without the current roof statistics
     (``roof_stats`` != ``benchmark.ROOF_STATS_VERSION``). Every new read stores them anyway.
+
+    ``fallback``: a second provider read only for footprints where ``provider`` shows no building
+    (no value, or under ``NO_BUILDING_M``); its record replaces the primary's when it measures one
+    (``provider`` on the record says which). Same order as ``height/survey_fill.py``.
     """
+    out = _primary_heights(region, footprints, provider, resolution_m=resolution_m,
+                           refresh=refresh, workers=workers, roof_stats=roof_stats)
+    if fallback is None or not out:
+        return out
+    from city2stl.height.survey_fill import NO_BUILDING_M
+
+    rest = {k: footprints[k] for k, r in out.items()
+            if not r.get("error") and (r.get("survey_m") is None or r["survey_m"] < NO_BUILDING_M)}
+    if rest:
+        fb = _primary_heights(region, rest, fallback, resolution_m=resolution_m,
+                              refresh=refresh, workers=workers, roof_stats=roof_stats)
+        for k, r in fb.items():
+            if not r.get("error") and r.get("survey_m") is not None and r["survey_m"] >= NO_BUILDING_M:
+                out[k] = r
+    return out
+
+
+def _primary_heights(region: str, footprints: dict[str, list], provider: str | None, *,
+                     resolution_m: float, refresh: bool, workers: int,
+                     roof_stats: bool) -> dict[str, dict]:
+    """``survey_footprint_heights`` for one provider."""
     if not footprints:
         return {}
     provider = provider or pick_provider(_bbox_of(footprints), region)

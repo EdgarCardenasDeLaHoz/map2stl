@@ -78,6 +78,27 @@ def test_same_p95_as_the_benchmark_truth_and_cached(monkeypatch):
     assert calls == ["cnig_mdsn", "cnig_mdsn"]  # (the truth call above read once too)
 
 
+def test_fallback_provider_reads_only_where_the_first_shows_no_building(monkeypatch):
+    calls = []
+
+    def fake(provider, bbox, res=1.0):
+        calls.append(provider)
+        arr, t = _synthetic_ndsm(bbox, res)
+        if provider == "cnig_mdsn":   # no building class over the 'low' block
+            ring = np.array(FOOTPRINTS["low"])
+            h, wd = arr.shape
+            rows, cols = np.mgrid[0:h, 0:wd]
+            lon, lat = t * (cols + 0.5, rows + 0.5)
+            arr[(lon <= ring[:, 0].max()) & (lat <= ring[:, 1].max())] = 0.0
+        return arr, t
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    got = sh.survey_footprint_heights("benidorm", FOOTPRINTS, "cnig_mdsn", fallback="rediam_mdhn")
+    assert got["tall"]["provider"] == "cnig_mdsn" and 60.0 < got["tall"]["survey_m"] < 66.0
+    assert got["low"]["provider"] == "rediam_mdhn" and 12.0 < got["low"]["survey_m"] < 15.0
+    assert calls == ["cnig_mdsn", "rediam_mdhn"]
+
+
 def test_survey_error_is_returned_but_not_cached(monkeypatch):
     def down(*_a, **_k):
         raise SurveyError("IDEE WCS 503")
