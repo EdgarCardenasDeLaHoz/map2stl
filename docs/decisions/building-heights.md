@@ -971,11 +971,15 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
     the rule; looser values were scored for information only.
   - The claim "corroborated >= 0.85 within tol" (F-SKY26 criterion) holds only from 40 m up;
     under 40 m too few readings agree to tell (8 agreeing pairs in 112).
-- **Open:** the other "25 %" call sites still use their own formulas (fusion `fuse_heights`,
-  satellite `readings._agree`, elevated `CREDIT_TOL` and `FLOORS_SAME_SEED_AGREE`); each is
-  tighter on one side under `tiers.agree` (ratio 1.33 -> 1.25) and needs its owner's check with
-  `seed_experiment.py` (fusion, elevated) and `test_satellite_heights.py` plus the 7-city tables
-  (readings). The PDF / HTML-table display lines for `tag_disagrees` are also not wired.
+- **Done 2026-10-23:** the other "25 %" call sites (fusion `fuse_heights` bound and keep,
+  satellite `readings._agree` / `group`, elevated `CREDIT_TOL` in `tower_behind` and
+  `drop_contradicted_floors`) now call `tiers.agree` (ratio 1.33 -> 1.25; a 0 reading never
+  agrees). `READINGS_VERSION` 2. Measured: only the satellite readings could be replayed (no
+  elevated review states exist): Cartagena 56 of 755 footprints change grouping, `ls` rows 5 -> 3
+  (b0539, b0265 at ratios 1.27, 1.28), one tagged row changes; 13 footprints sit in the 1.25-1.33
+  window for the other sites, 12 already withheld (b1436 is not). Tests unchanged (141 pass).
+  Fusion / elevated effect is to be read on the next cache-only region run.
+- **Open:** the PDF / HTML-table display lines for `tag_disagrees` are not wired.
 - **Supersedes / superseded by:** the "within 25 %" of the 2026-10-07 tier entry (25 % of the
   larger). The rename to `corroborated` is the 2026-10-09 entry at the top.
 - **Source:** commit `b04b22f`; scratch `tiers/` (scripts and logs); Cartagena replay

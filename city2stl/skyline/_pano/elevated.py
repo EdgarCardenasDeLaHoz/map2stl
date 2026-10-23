@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import footprint_detect as fd
+from .._core import tiers as _tiers
 from .._core.segmentation import _ADE20K_VEGETATION_CLASSES, _ADE20K_WATER_CLASSES
 from .._core.types import BuildingRecord, RegisteredBuildingEstimate
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
@@ -1242,7 +1243,7 @@ def tower_behind(seeds: list[ElevatedSeed], satellite_raw: dict | None) -> dict:
                 sg = smax.get(g)
                 if sg is not None and sg >= SAT_LOW_M:
                     ev.append(sg)
-                e = next((e for e in ev if e >= CREDIT_MIN_M and abs(hg - e) <= CREDIT_TOL * e),
+                e = next((e for e in ev if e >= CREDIT_MIN_M and _tiers.agree(hg, e, rel=CREDIT_TOL)),
                          None)
                 if e is not None:
                     out[(s.seed_name, fid)] = (g, float(hg), float(e))
@@ -1371,7 +1372,7 @@ def drop_contradicted_floors(seeds: list[ElevatedSeed], readings: dict) -> tuple
         for d in rs:
             hs = own.get((d.get("seed"), d["footprint"]), ())
             h = float(d["height_m"])
-            if hs and not any(abs(h - x) <= tol * max(h, x) for x in hs):
+            if hs and not any(_tiers.agree(h, x, rel=tol) for x in hs):
                 dropped.append((d["footprint"], d.get("seed"), h, list(hs)))
             else:
                 out.append(d)

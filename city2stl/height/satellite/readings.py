@@ -45,7 +45,8 @@ from .weights import MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
 AGREE = 0.25
 #: Methods a footprint can have, in the order fusion considers them.
 METHODS = ("ls", "lean", "shadow", "stereo", "multiview", "sat_joint")
-READINGS_VERSION = 1
+#: 2 (2026-10-23): ``group`` agrees through ``tiers.agree`` (25 % of the smaller, was the larger).
+READINGS_VERSION = 2
 #: A lean under ``TALL_M`` is not a roof reading whatever its peak shape. LiDAR (2026-10-08,
 #: S/satellite_cities/val): Chicago lean 15-40 m at conf >= 0.7 within 25 % of truth 1 of 61
 #: (44 % under 0.6x truth), 3-15 m 1 of 16; Cartagena Ravello (published 144 m) lean 38 m at conf
@@ -87,7 +88,9 @@ class SatReading:
 
 
 def _agree(a: float, b: float) -> bool:
-    return abs(a - b) <= AGREE * max(1.0, max(a, b))
+    from city2stl.skyline._core.tiers import agree
+
+    return agree(a, b, rel=AGREE)   # the larger <= 1.25x the smaller, as the tiers (2026-10-23)
 
 
 def group(vals: list[tuple[float, float]]) -> tuple[float, float, int, list]:
@@ -95,7 +98,7 @@ def group(vals: list[tuple[float, float]]) -> tuple[float, float, int, list]:
     ``(height, max conf, n, members)`` (``seed_experiment._group``)."""
     best = None
     for h0, _ in vals:
-        g = [(h, c) for h, c in vals if abs(h - h0) <= AGREE * max(1.0, h0)]
+        g = [(h, c) for h, c in vals if _agree(h, h0)]
         s = sum(c for _, c in g)
         if best is None or s > best[0] or (s == best[0] and len(g) > len(best[1])):
             best = (s, g)
