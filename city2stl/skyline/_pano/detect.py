@@ -1236,6 +1236,29 @@ def _pano_sliding_window_split(
                 f"split (+{n_depth_cuts}){grad_diag}")
     return depth_split
 
+def matched_footprint_overlap(segments: list, width: int) -> float | None:
+    """Median column IoU of each matched segment with its footprint's projection (F-DET A7).
+
+    A low value with a high match count says the matcher pairs segments with footprints that
+    only graze them (segmentation or bearing trouble, not an OSM gap). Spans that wrap past the
+    pano seam (right < left, or wider than half the pano) are skipped.
+    """
+    ious = []
+    for s in segments or ():
+        m = s.get("matched_projection") if isinstance(s, dict) else None
+        if not m or m.get("x_left_px") is None or m.get("x_right_px") is None:
+            continue
+        a0, a1 = float(s["x_left"]), float(s["x_right"])
+        b0, b1 = float(m["x_left_px"]), float(m["x_right_px"])
+        if a1 < a0 or b1 < b0 or (width and max(a1 - a0, b1 - b0) > width / 2):
+            continue
+        inter = max(0.0, min(a1, b1) - max(a0, b0))
+        union = max(a1, b1) - min(a0, b0)
+        if union > 0:
+            ious.append(inter / union)
+    return float(np.median(ious)) if ious else None
+
+
 def _build_and_detect_pano(
     seed: SkylinePoint,
     cached_views: list[dict],
@@ -1818,6 +1841,9 @@ def _build_and_detect_pano(
             pano_sky_arr = None
             pano_veg_arr = None
 
+        footprint_overlap = matched_footprint_overlap(
+            pano_matched, pano_img.shape[1] if pano_img is not None else 0)
+
         # Center the pano on NORTH: roll every column-indexed array (image,
         # masks, depth, per-column headings) and shift each matched
         # segment's x-coords so the column whose heading is nearest 0° ends
@@ -1871,6 +1897,7 @@ def _build_and_detect_pano(
             geom_K=geom_K,
             geom_horizon_row=geom_horizon_row,
             bearing_shift_deg=bearing_shift_deg,
+            footprint_overlap=footprint_overlap,
         )
     except Exception as e:
         logger.warning(f"[pano] seed={seed.name} failed: {e}")
@@ -1886,4 +1913,5 @@ __all__ = [
     '_multires_pano_refine',
     '_pano_sliding_window_split',
     '_build_and_detect_pano',
+    'matched_footprint_overlap',
 ]

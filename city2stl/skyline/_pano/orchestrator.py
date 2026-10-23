@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -134,6 +136,7 @@ def _seed_multiview_registration(
         return f"{s.name}|{s.lat:.6f}|{s.lon:.6f}|{s.pano_id or ''}"
 
     resolved: list[tuple[SkylinePoint, float, bool]] = []
+    _snap_m: dict[str, float] = {}       # F-DET A7: proposed position -> resolved pano, metres
     seed_elevs = _fetch_elevations([(s.lat, s.lon) for s in seeds])
     for seed, seed_elev in zip(seeds, seed_elevs, strict=False):
         bound: SkylinePoint | None = None
@@ -210,6 +213,9 @@ def _seed_multiview_registration(
             _cache_save()
         if bound is None:
             continue
+        _snap_m[bound.name] = float(math.hypot(
+            (bound.lat - seed.lat) * M_PER_DEG_LAT,
+            (bound.lon - seed.lon) * m_per_deg_lon(seed.lat)))
         is_photosphere = (
             seed.pano_id is not None and bound.pano_id == seed.pano_id)
         resolved.append((bound, float(seed_elev), is_photosphere))
@@ -306,7 +312,7 @@ def _seed_multiview_registration(
             if got is not None:
                 elevated.append(got)
                 view_rows.extend(got.view_rows)
-                pano_results.append(got.pano_result)
+                pano_results.append(replace(got.pano_result, snap_m=_snap_m.get(seed.name)))
                 continue
             logger.warning(f"[elevated] {seed.name}: no waterline fit; street-level path instead")
 
@@ -490,7 +496,7 @@ def _seed_multiview_registration(
                 # by itself.
                 _smooth_pano_matches_against_views(
                     pano_result, seed_view_rows)
-                pano_results.append(pano_result)
+                pano_results.append(replace(pano_result, snap_m=_snap_m.get(seed.name)))
 
     # F-SKY1 diagnostic summary: how many estimates carried a usable
     # floor-period reading, and the spread of the OSM-independent

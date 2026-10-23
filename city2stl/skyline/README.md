@@ -379,8 +379,9 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
     of 13.73 m. Then consider raising the σ gate 0.10 → ~0.15 (seed_1 σ = 0.120 just misses).
   - Miami seed_3: visually confirm the bearing correction that passed at the 47 % gate edge.
 - **Detection (F-DET)** — assumptions challenged 2026-06-23, see the plan's "Critical review":
-  - A7: instrument Type 2 seeds (bearing shift, pano snap distance, segment ↔ footprint overlap) in
-    `_pano/orchestrator.py` + the pano summary table before any F-DET4a–c fix.
+  - A7: instruments done 2026-10-23 (pano summary `snap` and `overlap` columns, mismatch cause
+    on the label); next re-run tel_aviv, melbourne, honolulu and one more to confirm each cause
+    before any F-DET4a–c fix.
   - A2: correlate the good/medium/weak label with per-building height MAE on curated regions.
   - A4 done 2026-10-23: the F-DET2 FOV gate also counts satellite footprints (`ms_buildings`,
     `_propose_standoff_locations(extra_centroids=)`); saved proposals are reused, so a region

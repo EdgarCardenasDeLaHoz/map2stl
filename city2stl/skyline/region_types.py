@@ -91,6 +91,11 @@ class StitchedPanoResult:
     # Bearing-recovery shift actually APPLIED to pano_headings (deg); 0.0
     # when the gate skipped (anchor kept). Surfaced in the index summary.
     bearing_shift_deg: float = 0.0
+    # F-DET A7 (Type 2 diagnosis): metres from the seed's proposed position to the Street View
+    # pano it resolved to (None when unknown), and the median column IoU of each matched
+    # segment with its matched footprint's projection (None when nothing matched).
+    snap_m: float | None = None
+    footprint_overlap: float | None = None
 
 
 @dataclass(frozen=True)
