@@ -417,6 +417,30 @@ def widen_thin(geoms: np.ndarray, min_width_mm: float) -> tuple[np.ndarray, int]
     return geoms, int(thin.sum())
 
 
+def _open_pinches(parts: np.ndarray) -> np.ndarray:
+    """Holed polygons opened by one snap step (negative then positive mitre buffer).
+
+    GEOS sometimes returns an empty polygon for the negative buffer of a valid, snapped polygon
+    (the Palacio de Carlos V, ``relation/2640220``: 509 mm2 to 0 at -0.01 mm, fine at -0.005 or
+    -0.05), which dropped the whole building. A result that lost more than 10 % of the area is
+    retried at other distances; a polygon no distance opens is kept as it was.
+    """
+    out = shapely.buffer(shapely.buffer(parts, -SNAP_MM, join_style="mitre"), SNAP_MM,
+                         join_style="mitre")
+    area = shapely.area(parts)
+    bad = np.flatnonzero(shapely.area(out) < 0.9 * area)
+    for i in bad:
+        out[i] = parts[i]
+        for k in (0.5, 2.0, 5.0):
+            d = k * SNAP_MM
+            got = shapely.buffer(shapely.buffer(parts[i], -d, join_style="mitre"), d,
+                                 join_style="mitre")
+            if shapely.area(got) >= 0.9 * area[i]:
+                out[i] = got
+                break
+    return out
+
+
 def feature_polygons(name: str, features: list[dict], style: LayerStyle,
                      terrain: Terrain) -> tuple[list[Polygon], list[dict], dict]:
     """Features as clipped, simplified, snapped model-mm polygons (vectorised).
@@ -484,8 +508,7 @@ def feature_polygons(name: str, features: list[dict], style: LayerStyle,
     # one snap step changes the outline far below print resolution.
     holed = shapely.get_num_interior_rings(parts) > 0
     if holed.any():
-        parts[holed] = shapely.buffer(shapely.buffer(parts[holed], -SNAP_MM, join_style="mitre"),
-                                      SNAP_MM, join_style="mitre")
+        parts[holed] = _open_pinches(parts[holed])
         parts, sub = shapely.get_parts(parts, return_index=True)
         owner = owner[sub]
     # Extruded footprints print as drawn: only an empty one is dropped.
@@ -988,7 +1011,8 @@ def _polygon_constants() -> dict:
     # wall_piece_mm is read by build_layer, not feature_polygons: it is here so
     # that the solid key (built on this one) changes with it.
     return {"simplify": SIMPLIFY_TOL_MM, "snap": SNAP_MM, "min_footprint": MIN_FOOTPRINT_MM2,
-            "ring_layers": list(RING_LAYERS), "wall_piece_mm": WALL_PIECE_MM}
+            "ring_layers": list(RING_LAYERS), "wall_piece_mm": WALL_PIECE_MM,
+            "open_pinches": 2}   # bump when _open_pinches changes what a polygon becomes
 
 
 def _polygons_key(name: str, features: list[dict], style: LayerStyle, terrain: Terrain,

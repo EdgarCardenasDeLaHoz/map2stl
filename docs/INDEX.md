@@ -152,7 +152,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - Scale ("1 mm = X m", auto true scale): `map2stl/city2stl/city_model.py::choose_scale` (`ModelScale`)
 - Layer set and priority: `map2stl/city2stl/city_model.py::resolve_layers` (`LayerStyle`, `LAYER_PRIORITY`)
 - Terrain in model space (projection, sampling, DEM cells under footprints): `map2stl/city2stl/city_model.py::Terrain` (`prepare_dem`, `terrain_tin`, `terrain_solid`, `terrain_tolerance`)
-- Features → print polygons (line widths, min width, slenderness): `map2stl/city2stl/city_model.py::feature_polygons` (`_line_width_m`, `_widths`)
+- Features → print polygons (line widths, min width, slenderness): `map2stl/city2stl/city_model.py::feature_polygons` (`_line_width_m`, `_widths`, `_open_pinches`: opens a hole touching its outline, falls back when GEOS buffers a polygon to nothing)
 - Wall / fortification polygons as outline rings, cut into ground-following pieces: `map2stl/city2stl/city_model.py::split_on_ground` (`RING_LAYERS`, `WALL_PIECE_MM`) — [why](decisions/roofs-landmarks.md)
 - Flat roofs merged at one print layer (< 0.4 mm apart): `map2stl/city2stl/city_model.py::merge_flat_roofs`
 - Draped slab triangulation without Triangle (qhull + GEOS cavity recovery): `map2stl/city2stl/city_model.py::_slab` (`triangulate_polygon`, `_recover_segments`)
