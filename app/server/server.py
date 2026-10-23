@@ -65,6 +65,9 @@ async def _lifespan(app):
     loop = asyncio.get_running_loop()
     # Cache maintenance
     def _startup_cache_maintenance():
+        if os.environ.get("MAP2STL_NO_CACHE_MAINTENANCE", "").strip() not in ("", "0"):
+            logger.info("Startup cache maintenance skipped (MAP2STL_NO_CACHE_MAINTENANCE)")
+            return
         try:
             migrate_osm_plain_json(OSM_CACHE_PATH)
             counts = prune_all_caches()
