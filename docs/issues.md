@@ -306,12 +306,50 @@ the rest below.
     histogram: 19,263 flat, 4,604 gabled). The 23 skipped buildings are retried on each read.
   - Still open: a cold city still waits ~5 ms a building before its first preview; serving flat
     roofs while classifying in the background would remove the wait.
-- **Reference landmark `relation/2640220` reports "missing"** (17 of 18 units applied). Several
-  `ref:` free-standing units show `replaced_features: 0`; check that this is expected.
-- **Alcazaba, Abencerrajes, Sultana** are swapped although the study flagged their footprints
-  for a check.
-- **Edit panel:** Reset in Buildings & roads › Composite skips the Trees row; changing Roof shapes
-  takes effect only on the next buildings reload.
+- **Reference landmark `relation/2640220` reported "missing" — fixed 2026-10-23.** Not a data gap:
+  the relation (Palacio de Carlos V, outer ring + round courtyard) is in the fetched layer under
+  that id. `city_model.py::feature_polygons` opens holes by one snap step
+  (`buffer(-0.01)` then `buffer(+0.01)`), and GEOS returned an empty polygon for the negative
+  buffer of this exact snapped polygon (509 mm2 to 0; fine at -0.005 or -0.05), so the whole
+  building vanished from the model and the override found no feature. `_depinch` (another session's
+  parallel fix, kept over a first `_open_pinches` retry version) now opens only pinched holes, on
+  the geometry without its precision grid, and keeps the original if the result is empty or loses
+  1 % of the area. Any other holed building could have vanished the same
+  way; none is known.
+  - `replaced_features: 0` on the `ref:` units is expected: they exist because the buildings
+    layer has no footprint there (only the towers / churches layers do), and
+    `LandmarkPlan.take` counts only buildings-layer polygons inside the footprint. Their
+    towers-layer copies are removed by the later-layer rule, which is not counted. In the Granada
+    reproduction 6 of the 9 `ref:` units show 0 (ref:35, 89, 127, 142, 266, 275), the rest 1.
+  - Watch: an unnamed rule unit keyed by a way / relation id (`relation/20204471`) can be
+    absorbed into a larger neighbour by `heights._reduce_buildings` (touching, same rounded
+    height), and then reports "missing" by design. In a reproduction from the cached Granada
+    response without `building:part` data it was merged away; the real export did not report it.
+    Keying unnamed units by footprint would remove the risk.
+- **Alcazaba, Abencerrajes, Sultana — not swapped with each other (checked 2026-10-23); the swap
+  is applied to footprints the study flagged.** Ids, names, centroids and label cell counts agree
+  (Alcazaba `way/26935518` 4,100 m2 for 2,399 cells; Abencerrajes `way/196485671` 72 m2 for 48;
+  Sultana `ref:266` from the towers layer 38 m2 for 22), pinned by
+  `tests/test_landmarks_reference.py::test_stored_rule_names_footprints_and_labels_agree`. They
+  carry `flag_lower` (lidar 0.1-0.3 m while OSM says 12-14 m) and were swapped because the
+  Thingiverse model beats OSM there (3.2, 7.7, 10.5 m off lidar against 11.2, 12.8, 13.8 m).
+  **Open:** why lidar reads ground under tall towers is unexplained (the mapping is not it);
+  dropping them from the rule needs the gitignored study grids (`output/detail_study/shared`).
+- **Panorama heights vs survey / user heights — one gap fixed 2026-10-23.** Export order in
+  `city_model_task.py` is right: survey fill (inside `get_city_layers`), then the client's edits
+  (`merge_layer_data`), then panorama rows, then landmark overrides (which replace whole
+  footprints, so panorama cannot touch them). `panorama_heights.KEEP_SOURCES` already kept
+  `osm_tag`, `osm_levels`, `landmark`, `survey`, `lidar*`, but not `user_override`, so a height
+  typed in the Buildings panel could be replaced by a panorama row. Now kept;
+  `tests/test_panorama_heights.py::test_precedence_through_the_export_merge_order` runs
+  survey, user edit, tag and fallback through the real merge.
+- **Edit panel — fixed 2026-10-23:** Reset in Buildings & roads › Composite skipped the Trees row,
+  and changing Roof shapes took effect only on the next buildings reload.
+  - Cause: `LayerSettings.vue::reset` skipped every row with a `get` (Trees has one, to show "off"
+    where no survey lidar covers); nothing listened to `#cityRoofShapes` changes.
+  - Now `settings/resetRows.ts::resetActions` resets a getter row that owns a checkbox (Trees back to
+    on); and `event-listeners-export.js` reloads the buildings when Roof shapes changes and buildings
+    are loaded (`city-detail.js::reloadBuildingsForRoofShapes`). Tests: `tests/js/cityDetail.test.js`.
 - **Extrude viewer left out the trees — fixed 2026-10-18 (TM):** `model-viewer.js` builds its
   finished-model request synchronously, and on a region's first load the survey coverage was
   still 'unknown', so `cityDetailFields` dropped `layers.trees`. The viewer now rebuilds once

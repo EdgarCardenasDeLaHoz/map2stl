@@ -168,6 +168,31 @@ def test_granada_matches_the_study_method_b():
     assert stats["labels"] == 22 and len(ov) >= 17
 
 
+def test_stored_rule_names_footprints_and_labels_agree():
+    """Alcazaba, Abencerrajes and Sultana (flagged: lidar under 2 m) are not swapped with each other.
+
+    Each unit's label cells (1 m grid) fit inside its footprint, so a label put on the wrong
+    outline would show as a tower with more cells than it has square metres. Free-standing
+    units sit in the towers / churches layers, keyed ``ref:<label>``.
+    """
+    import math
+
+    from shapely.geometry import Polygon
+
+    *_, rule = lm.load_reference()
+    by_name = {u["name"]: u for u in rule["units"] if u["name"]}
+    assert by_name["Alcazaba"]["osm_id"] == "way/26935518" and by_name["Alcazaba"]["labels"][0]["label"] == 3
+    assert by_name["Torre de los Abencerrajes"]["osm_id"] == "way/196485671"
+    sultana = by_name["Torre de la Sultana"]
+    assert sultana["key"] == "ref:266" and sultana["layer"] == "towers"
+    assert all(by_name[n]["flag_lower"] for n in ("Alcazaba", "Torre de los Abencerrajes", "Torre de la Sultana"))
+    for u in rule["units"]:
+        if not u.get("footprint"):
+            continue
+        assert u["key"] == f"ref:{u['labels'][0]['label']}"
+        lat = math.radians(u["centroid"][1])
+        ring = [(x * 111320 * math.cos(lat), y * 110574) for x, y in u["footprint"][0]]
+        assert sum(lab["cells"] for lab in u["labels"]) <= Polygon(ring).area * 1.05, u["key"]
 class TestCourtyardsAndKeptOsm:
     """Reference cells under ``REFERENCE_OPEN_M`` are cut out; taller OSM buildings stay."""
 

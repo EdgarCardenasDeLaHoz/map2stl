@@ -13,7 +13,8 @@ carry the OSM tag and ``prior`` rows are the height model's guess, so neither ov
 anything; ``survey`` rows are lidar and are not touched by the exporter either way.
 
 Which features: a row replaces a building's height unless that height is already a
-measurement or a human's statement (OSM tag or levels, landmark, survey / lidar). It
+measurement or a human's statement (OSM tag or levels, landmark, survey / lidar, or a height
+the user typed in the Buildings panel: ``user_override``). It
 replaces the 10 m fallback and the raster estimates (GBA, Open Buildings 2.5D, ...), which
 measured the block or the 3 m grid, not the roof.
 
@@ -42,7 +43,9 @@ PANORAMA_TIERS = ("corroborated", "single")
 #: Smallest footprint overlap (intersection over union) that pairs a row with a feature.
 MIN_IOU = 0.5
 #: Height sources that are a measurement or a stated value: a panorama row never replaces them.
-KEEP_SOURCES = ("osm_tag", "osm_levels", "landmark", "survey", "lidar")
+#: ``user_override`` is the Buildings panel's edit (``building-heights.js``); the export merges it
+#: in before the panorama rows are applied (``city_model_task.py``), so it must be kept here.
+KEEP_SOURCES = ("osm_tag", "osm_levels", "landmark", "survey", "lidar", "user_override")
 #: ``<root>/<report>/heights.json``; the env var moves the root (the reports are not in git).
 _ROOT_ENV = "MAP2STL_SKYLINE_REPORTS"
 _REPORT_SUFFIX = "_skyline_report"

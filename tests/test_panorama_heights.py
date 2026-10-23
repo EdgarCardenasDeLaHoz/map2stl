@@ -42,7 +42,7 @@ def test_input_is_not_modified():
     assert fc["features"][0]["properties"] == {"height_m": 10.0, "height_source": "default"}
 
 
-@pytest.mark.parametrize("source", ["osm_tag", "osm_levels", "landmark", "survey", "lidar_3dep_copc"])
+@pytest.mark.parametrize("source", ["osm_tag", "osm_levels", "landmark", "survey", "lidar_3dep_copc", "user_override"])
 def test_measured_or_stated_heights_are_kept(source):
     out, summary = apply_panorama_heights(_fc(_feature(0, 0, 25.0, source)), [_row(0, 0)])
     assert out["features"][0]["properties"]["height_m"] == 25.0
@@ -101,3 +101,26 @@ def test_load_rows_resolves_name_folder_and_file(tmp_path, monkeypatch):
         resolve_report("Nope")
     with pytest.raises(FileNotFoundError):
         resolve_report("../escape")
+
+
+def test_precedence_through_the_export_merge_order():
+    """Export order (city_model_task): survey fill, client edits merged on, then panorama rows.
+
+    A survey height, a user's typed height and a tag keep theirs; only the fallback takes the row.
+    """
+    from app.server.core.city_data import merge_layer_data
+
+    server = _fc(_feature(0, 0, 10.0, "survey"), _feature(1, 1, 10.0, "default"),
+                 _feature(2, 2, 10.0, "default"), _feature(3, 3, 14.0, "osm_tag"))
+    client = _fc(_feature(0, 0, 10.0, "default"),          # client copy predates the survey fill
+                 _feature(1, 1, 10.0, "default"),
+                 _feature(2, 2, 33.0, "user_override"),
+                 _feature(3, 3, 14.0, "osm_tag"))
+    server["features"][0]["properties"]["height_m"] = 21.0
+    merged = merge_layer_data({"buildings": server}, {"buildings": client}, ["buildings"])["buildings"]
+    rows = [_row(i, i, "corroborated", 40.0) for i in range(4)]
+    out, summary = apply_panorama_heights(merged, rows)
+    got = [(f["properties"]["height_m"], f["properties"]["height_source"]) for f in out["features"]]
+    assert got == [(21.0, "survey"), (40.0, "panorama_corroborated"), (33.0, "user_override"),
+                   (14.0, "osm_tag")]
+    assert summary["skipped"] == {"kept_measured": 3} and summary["applied"] == {"corroborated": 1}

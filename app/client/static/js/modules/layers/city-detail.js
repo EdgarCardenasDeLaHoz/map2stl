@@ -22,6 +22,19 @@ export function bboxIntersects(a, b) {
     return a.west < b.east && a.east > b.west && a.south < b.north && a.north > b.south;
 }
 
+/**
+ * Roof shapes are classified when the buildings load, so a change only shows after a reload.
+ * Reloads right away when buildings are on the map (nothing to do before the first load).
+ * @param {{appState?:object, loadCityData?:Function}} w the window (or a stand-in)
+ * @returns {boolean} whether a reload was started
+ */
+export function reloadBuildingsForRoofShapes(w) {
+    if (!w?.appState?.osmCityData?.buildings?.features?.length) return false;
+    if (typeof w.loadCityData !== 'function') return false;
+    w.loadCityData();
+    return true;
+}
+
 /** "auto" | "off" from the #cityRoofShapes value (anything but "off" is auto). */
 export function roofShapesValue(raw) {
     return raw === 'off' ? 'off' : 'auto';

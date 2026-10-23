@@ -121,8 +121,8 @@ documentation checklist in `map2stl/CLAUDE.md` and bumps the cache version it in
   `reference_landmarks: true`, stats `report.json` `landmarks_reference`. Z scale: isotropic
   3.683 m/mm kept (median |Δ| 2.37 m, 18 of 19 scored improved) over the terrain fit 4.671 m/mm
   (3.93 m, 14 of 19). Raster alone: 21 of 22 improved, median 2.45 m (Torre del Criado level
-  with OSM). **Open:** footprint checks for the flagged-but-swapped Alcazaba, Abencerrajes,
-  Sultana; rebuilding needs the gitignored study grids.
+  with OSM). **Open:** the flagged-but-swapped Alcazaba, Abencerrajes, Sultana
+  (mapping checked 2026-10-23, see issues.md); rebuilding needs the gitignored study grids.
 
 ### D5. Settings UI (after D2-D4)
 - PNG mockups first (`claude/mockups/2026-10-17-detail/`): Roof shapes (Auto / Off), Trees
