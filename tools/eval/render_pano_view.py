@@ -102,7 +102,7 @@ class Scene:
             hit = self._ptree.query(pt, predicate="within")
             if not len(hit):
                 break
-            block = shapely.union_all(np.concatenate([self.polys[hit], [block]]) if block else self.polys[hit])
+            block = shapely.union_all(np.concatenate([self.polys[hit], [block]]) if block is not None else self.polys[hit])
             pt, moved = nearest_points(block.buffer(CLEAR_M).boundary, pt)[0], True
         return float(pt.x), float(pt.y), moved
 
