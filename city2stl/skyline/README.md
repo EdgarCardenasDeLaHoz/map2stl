@@ -110,7 +110,7 @@ Every caller, inside `skyline/` or not (tests, demos), imports the defining `_co
 | `height_trace.py` / `height_trace_render.py` | Per-building gate-decision tracer + render | glass-roof Phase 1 |
 | `web_image_seed.py` | Wikipedia/Wikimedia/Flickr skyline image seeds | F-WEB1 |
 | `scripts/` | `08_region_skyline_pdf.py` (production), `09_height_trace.py`, `build_landing_page.py`, `discover_city_seeds.py`, `height_diagnostic_report.py`; research probes 13–16 in `scripts/demos/` | — |
-| `sites/*.json` | Per-region config (17 regions) | — |
+| `sites/*.json` | Per-region config (16 regions) | — |
 
 Module DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ←
 `_region_render` ← `_pano` ← `region_pdf`; `_report_plots` ← `html_report`.
@@ -199,7 +199,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
   - Why kept: the IoU objective is multi-modal when buildings surround the seed; peninsula seeds have a 180° twin.
   - Drop one only after measuring (dropping seed_1's on Cartagena cost 54 matched buildings).
 - `negative_seeds` — excluded from aggregation, still rendered (Cartagena: `["seed_2", "seed_3"]`).
-- `elevated_seeds` — drone Photo Spheres (Cartagena: `["seed_1", "seed_4", "seed_5"]`), measured
+- `elevated_seeds` — drone Photo Spheres (Cartagena: `["seed_1", "seed_4", "seed_5", "seed_6"]`), measured
   footprint first (`_pano/elevated.py`, F-DET6) instead of by the street-level path:
   - camera from the waterline, then its position (waterline over ±600 m, parks and streets
     nearby); seed_4's recorded position was ~360 m off;
@@ -215,7 +215,9 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 - `max_plausible_height_m` (default 300) — bounds the glass-facade contour override and the y-consistency gate.
   Set just above the region's tallest tower (Cartagena 200).
 - Opt-ins: `use_satellite_footprints`, `use_cross_view_scoring`, `use_pano_coastline_recovery`,
-  `drive_pano_recovery_anchor`, `pano_only_pdf`.
+  `drive_pano_recovery_anchor`, `pano_only_pdf`, `use_survey_heights`, `use_commons_photos`,
+  `use_satellite_heights`, `use_ownership`, `use_cadastre_occluders`, `use_cadastre_heights`,
+  `use_cadastre_band` (the last four and their reasons: `docs/decisions/building-heights.md`).
 - `known_heights_m` — ground truth for the HTML report's validation panel.
 
 ## Environment variables
@@ -304,9 +306,10 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
 & "$HOME\.venvs\map2stl\Scripts\python.exe" -m pytest tests/test_skyline*.py -q
 ```
 
-- 8 files, 152 pass + 1 skip (2026-09-28, ~45 s).
+- 40 files (~560 tests).
 - Cover CV math: URL parsing, projection, occlusion, matching, silhouettes, aggregation, depth/pano-inverse
-  geometry, height datum, OSM water, height trace, HTML report.
+  geometry, height datum, OSM water, height trace, HTML report, benchmark scoring, verification tiers,
+  untagged withholding, footprint ownership, photo pipeline.
 - Orchestration (`region_pdf.py`, `_pano/`) is exercised only by full region runs.
 
 ## Troubleshooting
@@ -356,7 +359,8 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
 - **Heights**
   - **First: untagged buildings read 65–113 m too tall** in all six benchmarked cities
     ([STATUS](docs/STATUS.md#height-accuracy-on-surveyed-truth-f-skybench-baseline-2026-10-04)).
-    A roof pixel is credited to a near low building when a farther tower owns it. Check the
+    Published heights withhold them (`SKYLINE_WITHHOLD_UNTAGGED`), but the street-view reading
+    itself is still wrong and the owner check runs only on drone seeds (`_pano/ownership.py`). A roof pixel is credited to a near low building when a farther tower owns it. Check the
     owner before crediting: per-column depth vs each candidate's OSM distance, and the
     closest-in-column gate (`_core/height.py::estimate_heights_from_registration`). Measure with
     `scripts/10_benchmark.py --score-only` on the 2026-10-03 baseline reports.
@@ -382,11 +386,10 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
     F-DET4a targets).
 - **Benchmark truth**
   - Spain (Benidorm, Madrid): CNIG reads ~5.5 m under 3D Tiles in both cities (2.5 m grid,
-    2008-15); only 33 / 64 confirmed. Spain's 0.5 m PNOA surfaces would help (download form
-    only, see `reference/survey-sources.md`), or measure the offset and correct for it.
+    2008-15); only 33 / 64 confirmed. Measure the offset and correct for it (more survey
+    sources are not being pursued, see the roadmap's "Not pursuing").
   - Seattle: 3D Tiles reads +3.9 m above lidar on hills; check `google_3d.py::_ground_from_dsm` on slopes.
   - Prague: 3D Tiles gave one value (104.15 m) over many low footprints; find the coarse-tile cause.
-  - Miami inland has no USGS EPT lidar; Miami-Dade County's survey would be the next source.
 - **Validation and regions**
   - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery
@@ -396,7 +399,11 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
 
 ## Plans
 
-- Active: [F-DET](../../docs/plans/active/F-DET-detection-quality-and-early-out.md).
+- Active: [F-DET](../../docs/plans/active/F-DET-detection-quality-and-early-out.md),
+  [F-SKYBENCH](../../docs/plans/active/F-SKYBENCH-height-benchmark.md),
+  [F-WEB2](../../docs/plans/active/F-WEB2-commons-skyline-photos.md),
+  [F-SKY26](../../docs/plans/active/F-SKY26-skyline-signals-to-publish.md),
+  [F-PANOVIEW](../../docs/plans/active/F-PANOVIEW-pano-vs-model-views.md).
 - Done: `map2stl/docs/plans/done/skyline/` — F-SKY1, 2, 4–8, 10, 11.1, 12, 13, 15, 16, 18, glass-roof plan.
 - Archived (failed or superseded): `map2stl/docs/plans/archive/skyline/` — F-SKY3, F-SKY11.2, F-SKY17, the
   F-SKY10/11.2 work order, F-SKY-PIPELINE-CONSOLIDATION.

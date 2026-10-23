@@ -136,7 +136,7 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
 - Cartagena `negative_seeds` = `["seed_2", "seed_3"]` (seed_2: dense interior, screened out; seed_3: gas-station view).
 - Auto-proposed standoff locations now run the **full** pipeline, not just act as a swap pool.
   - Roughly doubled coverage: Cartagena 375 → 716, Chicago 101 → 210.
-- 17 regions have a `sites/*.json`; F-DET calibration used 82 panos across them
+- 16 regions have a `sites/*.json`; F-DET calibration (2026-06) used 82 panos across 17 regions
   ([F-DET plan](../../../docs/plans/active/F-DET-detection-quality-and-early-out.md)).
 
 ## HTML report (per seed page)
@@ -232,7 +232,7 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
   camera height in the search; a photo whose skyline is mostly blocked fits a sliver almost
   perfectly (misfit 0.015), so a minimum-coverage gate is needed.
 - **Untagged buildings read 65–113 m too tall** (benchmark above) — the main product gap since
-  2026-10-04. Roofs of farther towers are credited to near low buildings; the tag filter hides it
+  2026-10-04 (published heights withhold them since T28: `SKYLINE_WITHHOLD_UNTAGGED`). Roofs of farther towers are credited to near low buildings; the tag filter hides it
   on tagged buildings.
 
 - **Tall glass towers under-predict** — 15–34 m on the 2026-10-04 benchmark (was "50–100 m" on
@@ -245,8 +245,6 @@ pairs are ordered at chance (Miami 44 %), which points at roof-to-building assig
 - **Depth saturation > 1.2 km** (see Depth).
 - **F-SKY1 pano `f_px` calibration** blocks a trustworthy floor-derived distance.
 - **Miami seed_3** bearing correction passed at the 47 % gate edge — needs a visual confirm (a 50 % gate would skip it).
-- **Auto-proposal positions drift** with live OSM fetches, so coverage varies run to run
-  (fix: persist proposals per region, like `seed_resolution_cache.json`).
 - **Display (unverified since 2026-05):** FOV cone on the auto-zoomed minimap sized for 1500 m, not the zoomed span.
 
 ## Accepted weaknesses
