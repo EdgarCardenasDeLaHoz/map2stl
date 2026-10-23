@@ -556,6 +556,12 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                          _sc.source_hash(floor_bands, seed_floors)),
                         lambda: seed_floors(pano, pose, depth, instances, buildings),
                         kind="pickle")
+    chk = floor_bands.pose_check(floors)
+    if chk is not None:
+        logger.info("[elevated] %s: floor-spacing pose check (log only): %d counts, storey %.2f m, "
+                    "camera %.0f m off (shift E %+.0f N %+.0f, se %.0f m), residual %.0f %%",
+                    seed.name, chk["n"], chk["storey_m"], chk["shift_m"], chk["shift_e_m"],
+                    chk["shift_n_m"], chk["se_m"], 100 * chk["resid_rel"])
     own = seed_ownership(pano, pose, buildings, ms, depth, instances, seed.name)
     corners = seed_corners(pano, pose, fps, fids, ms, depth, instances, seed.name)
     out = ElevatedSeed(seed.name, pf, ms, fids,
@@ -1291,10 +1297,15 @@ def seed_floors(pano: fd.Pano, pose: fd.PanoPose, depth, instances,
         rec = recs.get(fid)
         tag = (float(rec.height_tag_m) if rec is not None and rec.height_tag_m
                and rec.height_source == "osm_tag" else None)
+        # the storey at the matched wall's range, for floor_bands.pose_check (step 8)
+        rng = float(hit[1])
+        storey = (float(e.storey_m) if e.plot is not None
+                  else fl.NOMINAL_FLOOR_M * rng / float(e.dist_m))
         out.append({"fid": fid, "floors": float(e.floors_visible), "base_seen": bool(e.base_seen),
                     "spread": float(e.spread), "n_strips": int(e.n_strips),
                     "instance": int(e.instance), "name": fps[sel[hit[0]]].name or fid,
-                    "tag_m": tag})
+                    "tag_m": tag, "storey_m": storey, "plot_dist_m": rng,
+                    "bearing_deg": float(e.bearing_deg)})
     return out
 
 
