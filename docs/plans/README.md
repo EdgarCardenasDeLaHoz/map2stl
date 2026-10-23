@@ -1,6 +1,6 @@
 # Roadmap — map2stl
 
-_Last updated: 2026-10-14._ The one place for "what's next".
+_Last updated: 2026-10-23._ The one place for "what's next".
 
 - One line per open item, grouped by area; the plan link holds the detail.
 - Bugs and debt live in [../issues.md](../issues.md); unreviewed ideas in [../proposals.md](../proposals.md).
@@ -28,7 +28,7 @@ _Last updated: 2026-10-14._ The one place for "what's next".
 | [F-USAGE](active/F-USAGE-local-usage-log.md) | in progress | usage log, then a flow report from real sessions |
 | [F-EDITPANEL](active/F-EDITPANEL-fetch-view-composite.md) | Edit right panel: selected layer only, Fetch / View / Composite / Canvas, one control per setting, resolution follows Detail | build to the approved mockup |
 | [F-DESIGN](active/F-DESIGN-guidelines-redesign.md) | Explore, Edit and Extrude rebuilt (cards, layers, More settings in each right panel, ✨, live composite) | retake old guide screenshots; consistency pass |
-| [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | in progress | truth per footprint (survey + 3D Tiles), then the scorer |
+| [F-SKYBENCH](active/F-SKYBENCH-height-benchmark.md) | in progress (truth and scorer built, eight cities run) | truth fixes: Seattle 3D Tiles on slopes, Prague coarse tiles, the Spain CNIG offset |
 | [F-COARSEBLD](active/F-COARSEBLD-coarse-building-layer.md) | planned (proposal pending) | block polygons from OSM landuse + roads, then the GHS-BUILT raster lookup |
 | [F-VIEW-SATPARTS](active/F-VIEW-SATPARTS-satellite-on-model-parts.md) | approved 2026-10-14 | planar UVs in `toViewerFrame`, then share the quick-view satellite texture |
 | [F-PLINTH](active/F-PLINTH-building-plinths-on-slopes.md) | approved 2026-10-14 | flatten DEM cells under footprints before the terrain TIN; heights from the pad |
@@ -40,7 +40,6 @@ _Last updated: 2026-10-14._ The one place for "what's next".
 | [F-PISTES](active/F-PISTES-ski-runs-on-the-print.md) | approved 2026-10-18 | piste line width, then trails on by default where pistes exist |
 | [F-ROOFLIDAR](active/F-ROOFLIDAR-roof-shape-from-survey.md) | approved 2026-10-18 | probe a buildings-bearing 1 m Granada nDSM (REDIAM MDS − MDT), then score the plane-fit reader on Granada's tagged roofs against the GBM's 0.783 balanced accuracy before wiring |
 | [F-ROOFIMG](active/F-ROOFIMG-roof-detail-from-imagery.md) | built 2026-10-20 | ridge direction shipped (imagery 0.75 vs long axis 0.58 on the confident subset); hip and courtyards measured, gated off; retry courtyards with finer lidar |
-| [F-PANOVIEW](active/F-PANOVIEW-pano-vs-model-views.md) | in progress 2026-10-20 | export height score vs Granada lidar truth; 6 Street View panos and model renders from the same camera |
 | [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | approved 2026-10-14; PNG mockups still need approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
 | [F-DATADIR](active/F-DATADIR-portable-data-dir.md) | approved 2026-10-14 | `DATA_DIR` in `app/paths.py`, then route the writers through it; runs before F-KEYS on the same PC |
 | [F-DESKTOP](active/F-DESKTOP-standalone-app.md) | approved 2026-10-14 | `[project.scripts]` plus `app/cli.py`, then a `numpy2stl` wheel; needs F-DATADIR first |
@@ -116,6 +115,9 @@ _Last updated: 2026-10-14._ The one place for "what's next".
   surveyed pack such as Old San Juan). [F-LANDMARK §6](active/F-LANDMARK-roofs-and-building-parts.md)
 - **Landmark ranking**: in *Find landmarks*, rank by prominence (height, parts, roof detail,
   type), not by category alone. [city guide §2.4](../guides/city-stl-and-puzzle-sop.md)
+- **Floor-count heights read high**: on the rebuilt Granada CNIG truth `osm_levels` rows read
+  +2.5 m (9,979 rows, MAE 3.25 m). Check the 3.2 m per floor and the ground datum before any
+  per-city change. [F-PANOVIEW results](done/F-PANOVIEW-pano-vs-model-views.md)
 
 ## Terrain stage, composite and large regions
 

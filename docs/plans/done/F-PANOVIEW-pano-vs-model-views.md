@@ -1,6 +1,6 @@
 # F-PANOVIEW — Panorama vs model views, and an export height score
 
-_Approved 2026-10-20 (user). Status: in progress. Proposal: [F-PANOVIEW](../../proposals.md)._
+_Approved 2026-10-20 (user). Status: done 2026-10-23. Proposal: [F-PANOVIEW](../../proposals.md)._
 
 Gives two checks of a finished city export: a numeric height score against survey lidar truth,
 and side-by-side pictures of a Street View panorama next to the model rendered from the same
@@ -54,5 +54,15 @@ camera.
     footprint. `render_pano_view.py::Scene.outside` now moves such a camera just outside the
     footprint (`CLEAR_M`), but the wall still fills the frame: a poor view for a footprint-scale model.
   - 4 San Nicolás: trees hide the Alhambra in the photo; poor view, not a model fault.
+- **Score on the rebuilt truth** (`score_2026-10-23_truth-cnig.json`; truth 12,805 CNIG +
+  327 REDIAM records, 11,365 matched):
+  - intended `height_m`: MAE 3.04 m, bias +2.22 m, 66 % within 25 % (old REDIAM truth: 6.60 /
+    +6.21 / 26 %); without the survey-filled rows 3.26 / +2.55 / 63 %.
+  - `osm_levels` (9,979 rows) reads +2.5 m high; `survey` rows 1.39 / -0.24 / 89 % (not
+    independent: CNIG fills them).
+  - mesh-measured: MAE 5.9 m, bias -0.5 m, 44 % within 25 % (old truth 7.93 / +3.42 / 16 %).
 - **Criteria:** the Gran Vía / Plaza Nueva / Puerta Real skylines line up; the cathedral tower
   view and the Alcazaba view do not, for the two reasons above. Neither is a building-height error.
+  The score runs in well under a minute.
+- **Left open (not this plan):** the SRTM terrain on the Alhambra hill ([issues](../../issues.md));
+  `osm_levels` reading +2.5 m high on the CNIG truth.

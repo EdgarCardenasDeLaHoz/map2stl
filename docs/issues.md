@@ -26,7 +26,7 @@ _Last updated: 2026-10-23_
 
 ## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
 
-- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); 3,173 of 13,132 records outside the cached rasters still carry REDIAM values (`survey_provider`) until a re-run with network. Original text below.
+- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); finished with network 2026-10-23: 12,805 CNIG, 327 REDIAM (234 where CNIG shows no building, 93 failed reads keeping the old value). Original text below.
 
 - `city2stl/skyline/benchmark.py::REGIONS` sends Granada's truth to `rediam_mdhn`. That raster
   suppresses lidar-classified building cells (see `city2stl/height/providers/rediam_mdhn.py`),

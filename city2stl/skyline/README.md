@@ -402,8 +402,7 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
 - Active: [F-DET](../../docs/plans/active/F-DET-detection-quality-and-early-out.md),
   [F-SKYBENCH](../../docs/plans/active/F-SKYBENCH-height-benchmark.md),
   [F-WEB2](../../docs/plans/active/F-WEB2-commons-skyline-photos.md),
-  [F-SKY26](../../docs/plans/active/F-SKY26-skyline-signals-to-publish.md),
-  [F-PANOVIEW](../../docs/plans/active/F-PANOVIEW-pano-vs-model-views.md).
+  [F-SKY26](../../docs/plans/active/F-SKY26-skyline-signals-to-publish.md).
 - Done: `map2stl/docs/plans/done/skyline/` — F-SKY1, 2, 4–8, 10, 11.1, 12, 13, 15, 16, 18, glass-roof plan.
 - Archived (failed or superseded): `map2stl/docs/plans/archive/skyline/` — F-SKY3, F-SKY11.2, F-SKY17, the
   F-SKY10/11.2 work order, F-SKY-PIPELINE-CONSOLIDATION.
