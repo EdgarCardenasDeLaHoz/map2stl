@@ -13,6 +13,8 @@ so downstream code can identify default-height buildings. Untagged ruins and
 fortress enclosures default to 3 m, not 10 m, and a ruin's levels tag is
 ignored (``low_height_override``;
 ``apply_low_default_heights`` does the same for payloads cached before it).
+``apply_levels_heights`` re-derives floor-count heights in cached payloads
+written before the roof floor was limited to pitched roofs.
 """
 
 from __future__ import annotations
@@ -228,6 +230,45 @@ def apply_low_default_heights(fc: dict) -> tuple[dict, int]:
             if new < h or new_src != src:
                 f = {**f, "properties": {**props, "height_m": new, "height_source": new_src}}
                 n += 1
+        out.append(f)
+    return ({**fc, "features": out}, n) if n else (fc, 0)
+
+
+#: Clip bounds ``city2stl.fetch`` passes to ``_fill_heights`` for buildings.
+_BUILDING_LO_M, _BUILDING_HI_M = 3.0, 300.0
+
+
+def apply_levels_heights(fc: dict) -> tuple[dict, int]:
+    """Re-derive ``"osm_levels"`` heights of a cached buildings FeatureCollection
+    with :func:`height_from_tags`: ``(fc, n_changed)``.
+
+    Payloads cached before 2026-10-20 added a roof floor to every levels-tagged
+    building; the rule now adds it only for a pitched ``roof:shape`` (or a
+    ``roof:levels`` tag). On Granada that left 22,992 of 23,538 floor-count
+    buildings exactly 3.2 m too tall. Uses the tags the features carry
+    (``building:levels``, ``roof:levels``, ``roof:shape`` and ``building:min_level``
+    survive the dissolve), clipped and rounded as ``_fill_heights`` does.
+    Idempotent; returns a new collection when anything changed and never mutates
+    the input. Run it before :func:`apply_low_default_heights`, which turns
+    levels-tagged ruins into ``"default"``.
+    """
+    feats = fc.get("features") if isinstance(fc, dict) else None
+    if not feats:
+        return fc, 0
+    out, n = [], 0
+    for f in feats:
+        props = f.get("properties") or {}
+        if props.get("height_source") == "osm_levels":
+            h, src = height_from_tags(props)
+            if h is not None and src == "osm_levels":
+                new = round(min(max(h, _BUILDING_LO_M), _BUILDING_HI_M), 1)
+                try:
+                    old = float(props.get("height_m"))
+                except (TypeError, ValueError):
+                    old = math.nan
+                if not math.isclose(new, old, abs_tol=0.05):
+                    f = {**f, "properties": {**props, "height_m": new}}
+                    n += 1
         out.append(f)
     return ({**fc, "features": out}, n) if n else (fc, 0)
 
