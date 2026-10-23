@@ -52,6 +52,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue';
 import { EDIT_LAYERS, useEditLayersStore } from '../../stores/editLayers';
 import { useEditPanelStore, type PanelTab } from '../../stores/editPanel';
 import { setChecked, setField, val } from '../../dom-fields';
+import { resetActions, type Probe } from './settings/resetRows';
 import SetRow from './settings/SetRow.vue';
 import { GROUPS, RES_IDS, click, type Row } from './settings/layerGroups';
 
@@ -115,17 +116,20 @@ function visible(rows: Row[], key: string): Row[] {
 }
 
 /** Per-group Reset: each control back to the value it had in the page's markup. */
+function probe(id: string): Probe {
+  const e = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+  if (!e) return null;
+  if (e instanceof HTMLInputElement && e.type === 'checkbox') return { kind: 'checkbox', initial: e.defaultChecked };
+  if (e instanceof HTMLSelectElement) {
+    const d = [...e.options].find((o) => o.defaultSelected) || e.options[0];
+    return { kind: 'select', initial: d ? d.value : e.value };
+  }
+  return { kind: 'input', initial: (e as HTMLInputElement).defaultValue };
+}
 function reset(rows: Row[]) {
-  for (const r of rows) {
-    if (!r.id || r.get) continue;
-    const e = document.getElementById(r.id) as HTMLInputElement | HTMLSelectElement | null;
-    if (!e) continue;
-    if (r.kind === 'res') setField(r.id, val('paramDim') || '600');
-    else if (e instanceof HTMLInputElement && e.type === 'checkbox') setChecked(r.id, e.defaultChecked);
-    else if (e instanceof HTMLSelectElement) {
-      const d = [...e.options].find((o) => o.defaultSelected) || e.options[0];
-      if (d) setField(r.id, d.value);
-    } else setField(r.id, (e as HTMLInputElement).defaultValue);
+  for (const a of resetActions(rows, probe, val('paramDim') || '600')) {
+    if (a.op === 'checked') setChecked(a.id, a.value);
+    else setField(a.id, a.value);
   }
   store.bump();
 }

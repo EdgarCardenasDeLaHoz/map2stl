@@ -257,8 +257,13 @@ the rest below.
   `ref:` free-standing units show `replaced_features: 0`; check that this is expected.
 - **Alcazaba, Abencerrajes, Sultana** are swapped although the study flagged their footprints
   for a check.
-- **Edit panel:** Reset in Buildings & roads › Composite skips the Trees row; changing Roof shapes
-  takes effect only on the next buildings reload.
+- **Edit panel — fixed 2026-10-23:** Reset in Buildings & roads › Composite skipped the Trees row,
+  and changing Roof shapes took effect only on the next buildings reload.
+  - Cause: `LayerSettings.vue::reset` skipped every row with a `get` (Trees has one, to show "off"
+    where no survey lidar covers); nothing listened to `#cityRoofShapes` changes.
+  - Now `settings/resetRows.ts::resetActions` resets a getter row that owns a checkbox (Trees back to
+    on); and `event-listeners-export.js` reloads the buildings when Roof shapes changes and buildings
+    are loaded (`city-detail.js::reloadBuildingsForRoofShapes`). Tests: `tests/js/cityDetail.test.js`.
 
 ## Vector rivers — known faults (2026-10-17)
 

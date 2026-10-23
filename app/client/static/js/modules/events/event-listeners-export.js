@@ -7,6 +7,7 @@
  *   window._setupModelExportListeners()
  *   window._setupCityAndExportListeners()
  */
+import { reloadBuildingsForRoofShapes } from '../layers/city-detail.js';
 
 window._setupModelExportListeners = function _setupModelExportListeners() {
     // Generate / Preview buttons removed — model auto-rebuilds via
@@ -58,6 +59,8 @@ window._setupModelExportListeners = function _setupModelExportListeners() {
 
 window._setupCityAndExportListeners = function _setupCityAndExportListeners() {
     document.getElementById('loadCityDataBtn')?.addEventListener('click', () => window.loadCityData?.());
+    document.getElementById('cityRoofShapes')
+        ?.addEventListener('change', () => reloadBuildingsForRoofShapes(window));
     document.getElementById('clearCityDataBtn')?.addEventListener('click', () => window.clearCityOverlay?.());
     document.getElementById('enhanceHeightsBtn')?.addEventListener('click', () => window.enhanceBuildingHeights?.());
 

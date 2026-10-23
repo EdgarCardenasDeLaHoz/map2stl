@@ -4,9 +4,10 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-    ALHAMBRA_BBOX, bboxIntersects, cityDetailFields, clearSurveyCoverage, coversTrees, roofShapesValue,
+    ALHAMBRA_BBOX, bboxIntersects, cityDetailFields, clearSurveyCoverage, coversTrees, reloadBuildingsForRoofShapes, roofShapesValue,
     surveyCoverage,
 } from '../../app/client/static/js/modules/layers/city-detail.js';
+import { resetActions } from '../../app/client/static/js/vue/components/dem/settings/resetRows.ts';
 import { GROUPS } from '../../app/client/static/js/vue/components/dem/settings/layerGroups.ts';
 
 const box = { north: 37.18, south: 37.17, east: -3.58, west: -3.60 };
@@ -83,5 +84,40 @@ describe('surveyCoverageReady', () => {
         const got = await surveyCoverageReady(box, async () => [{ name: 'rediam_mdhn', available: true }]);
         expect(got).toBe('yes');
         expect(await surveyCoverageReady(null, async () => [])).toBe('unknown');
+    });
+});
+
+describe('Edit panel Reset (Composite)', () => {
+    const rows = GROUPS.city.composite;
+    // A stand-in page: Trees is a checkbox that starts ticked, Roof shapes a select starting auto.
+    const page = {
+        cityTrees: { kind: 'checkbox', initial: true },
+        cityRoofShapes: { kind: 'select', initial: 'auto' },
+        cityAlhambra: { kind: 'checkbox', initial: false },
+    };
+    it('restores the Trees row like the others', () => {
+        const acts = resetActions(rows, (id) => page[id] ?? null, '600');
+        expect(acts).toContainEqual({ id: 'cityTrees', op: 'checked', value: true });
+        expect(acts).toContainEqual({ id: 'cityRoofShapes', op: 'field', value: 'auto' });
+    });
+    it('still leaves a getter row over a non-checkbox control alone', () => {
+        const sat = GROUPS.satellite.composite;
+        const acts = resetActions(sat, () => ({ kind: 'select', initial: 'terrain' }), '600');
+        expect(acts.find((a) => a.id === 'viewerColormap')).toBeUndefined();
+    });
+});
+
+describe('Roof shapes change', () => {
+    const loaded = { osmCityData: { buildings: { features: [{}] } } };
+    it('reloads the buildings at once when they are on the map', () => {
+        let n = 0;
+        expect(reloadBuildingsForRoofShapes({ appState: loaded, loadCityData: () => { n++; } })).toBe(true);
+        expect(n).toBe(1);
+    });
+    it('does nothing before the first load', () => {
+        let n = 0;
+        expect(reloadBuildingsForRoofShapes({ appState: {}, loadCityData: () => { n++; } })).toBe(false);
+        expect(reloadBuildingsForRoofShapes({ appState: { osmCityData: { buildings: { features: [] } } }, loadCityData: () => { n++; } })).toBe(false);
+        expect(n).toBe(0);
     });
 });
