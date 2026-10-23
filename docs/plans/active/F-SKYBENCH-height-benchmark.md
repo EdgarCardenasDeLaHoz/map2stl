@@ -55,7 +55,8 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
    - Cross-check: `confirmed` when the two agree within max(3 m, 10 %); otherwise `disputed`
      with both values (new construction, demolition, vegetation, ground estimate). The headline
      uses confirmed buildings only; disputed counts are reported.
-   - Cache per region at `runs/benchmark/<region>_truth.json` with the source vintages.
+   - Cache per region at `city2stl/skyline/runs/benchmark/truth/<region>.json` with the source
+     vintages.
 2. **Scorer** (`benchmark.py::score_region`)
    - Join on footprint geometry (`feature_id` is not stable across OSM fetches).
    - MAE, median AE, bias, % within 15 % / 25 %, by height band (< 30, 30–60, 60–100, > 100 m),
@@ -64,8 +65,9 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
    - Reuse `registration/critic.py::score_heights` conventions where they fit (per-building
      median absolute error as the headline).
 3. **Stable runs**
-   - Persist auto-proposed seed positions per region (open item in the skyline README), so
-     two runs see the same panoramas and score differences come from the code.
+   - Done: auto-proposed seed positions are saved per region, keyed by bbox
+     (`seed_selection.py`), so two runs see the same panoramas and score differences come from
+     the code.
    - Pin `SKYLINE_CV_*` flags in the benchmark command; record them and the git hash in the
      result.
 4. **New sites**: La Défense, Madrid Cuatro Torres, Prague Pankrác: bbox + seeds via
