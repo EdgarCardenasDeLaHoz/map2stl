@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-21_
+_Last updated: 2026-10-23_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,21 @@ _Last updated: 2026-10-21_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## SRTM terrain on the Alhambra hill is ±15 m off (found 2026-10-23, open)
+
+- **Symptom:** in F-PANOVIEW view 3 (Plaza de los Aljibes) the Alcazaba towers look half their
+  height. The tower meshes are right; the camera stands about 15 m above their bases.
+- **Measured:** the Granada export's terrain (SRTMGL1, 1000 px) against the IDEE MDT 5 m ground
+  model (WCS `servicios.idee.es/wcs-inspire/mdt`, coverage `Elevacion4258_5`), after removing the
+  datum offset: median |error| 4.4 m, p90 10.9 m, 13 % of vertices over 10 m. The Aljibes and
+  palace area read about +16 m, the Alcazaba spur about -15 m: SRTM's 30 m cells smear the ridge
+  and count the palaces and trees as ground. Ground truth at the points: Aljibes 775 m,
+  Torre del Homenaje 776 m, Torre de la Vela 767 m.
+- **Effect:** buildings on steep ground stand on the wrong base. Their heights above the terrain
+  are right, so `score_export_heights.py` does not see it.
+- **Fix (not started):** a DEM source for Spain from the free IDEE MDT WCS (5 m; 2 m where
+  covered) beside SRTM, or a correction of SRTM toward it. No OpenTopography (COP30) calls.
 
 ## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
 

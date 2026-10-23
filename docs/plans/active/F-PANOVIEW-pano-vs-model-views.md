@@ -35,3 +35,24 @@ camera.
 - Street View camera pose error (a few metres, a degree or two of heading).
 - Model scale: renders must undo the print's vertical exaggeration.
 - Paid calls: never more than the approved six without asking.
+
+## Results (2026-10-23)
+
+- **Export:** a fresh Granada city export (DEM 1000 px SRTMGL1, `mm_per_px` 1.0, 999 x 721 mm)
+  is `cache/city_models/2ee6aaa3538a0aa6a183872e7739a6f56deb5f0c.npz`, buildings
+  `cache/city_polygons/db1dfbff27f1…`; both are now the renderer's defaults (the previous default
+  npz was gone). Outputs in `runs/panoview/granada/` (gitignored): `images/`, `view_<n>_v2.png`, `score_*.json`.
+- **Panos:** 6 of 6 paid requests used (`manifest.json` `paid_requests`).
+- **Views:**
+  - 2 Gran Vía, 5 Plaza Nueva, 6 Puerta Real: street-canyon skylines match the photos.
+  - 3 Alcazaba from the Plaza de los Aljibes: aligned in heading, but the towers look half height.
+    The tower meshes are right (Vela, Homenaje, Quebrada 25–29 m above their base). The camera is
+    wrong: the model's SRTM terrain puts the plaza about 15 m above the tower bases, while the
+    IDEE MDT 5 m ground model has it level (Aljibes 775 m, Homenaje 776 m, Vela 767 m). This is a
+    terrain fault in the export, see [issues](../../issues.md) "SRTM terrain on the Alhambra hill".
+  - 1 Cathedral (Pasiegas): the pano stands against the facade and inside the Sagrario's OSM
+    footprint. `render_pano_view.py::Scene.outside` now moves such a camera just outside the
+    footprint (`CLEAR_M`), but the wall still fills the frame: a poor view for a footprint-scale model.
+  - 4 San Nicolás: trees hide the Alhambra in the photo; poor view, not a model fault.
+- **Criteria:** the Gran Vía / Plaza Nueva / Puerta Real skylines line up; the cathedral tower
+  view and the Alcazaba view do not, for the two reasons above. Neither is a building-height error.
