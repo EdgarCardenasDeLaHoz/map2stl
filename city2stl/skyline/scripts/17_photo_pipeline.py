@@ -418,6 +418,13 @@ def _thumb(url: str) -> str:
     return re.sub(r"/(\d+)px-", "/500px-", url)
 
 
+def _abs_dev_p75(towers: list[dict]) -> float:
+    """75th percentile of |photo - OSM| over a photo's measured towers (inf without any)."""
+    devs = [abs(t["photo_m"] - t["osm_m"]) for t in towers
+            if t.get("photo_m") is not None and t.get("osm_m") is not None]
+    return float(np.percentile(devs, 75)) if devs else float("inf")
+
+
 def _keep(r: dict, args) -> bool:
     """The keep decision: the route's gate, and (when set) agreement with OSM heights.
 
@@ -426,12 +433,21 @@ def _keep(r: dict, args) -> bool:
     the margin gate mostly measures line-of-sight ambiguity; on Miami run 2 (2026-10-04),
     "fit/margin OR (OSM dev <= 20 m and >= 12 towers)" measured 193 buildings (142 confirmed)
     against 142 (100) at the same accuracy (MAE 23.2 vs 21.7 m, pair order 0.86 vs 0.85).
+
+    ``--rescue-max-p75`` (2026-10-23): the rescued photo's 75th-percentile |photo - OSM| must
+    also stay under it. The median let Miami p20 through (dev 19.1 m, rejected in review): its
+    p75 is 76 m, as is p79's, against 23-33 m on every usable or unreviewed rescued Miami photo.
+    On Chicago it drops 11 of 53 rescued (truth MAE 26.9 m vs 18.1 m kept). Two bad photos:
+    confirm on the next reviewed screen.
     """
     if not r.get("gate_ok"):
         dev = r.get("anchor_dev_m")
-        return (args.rescue_anchor_dev is not None and dev is not None
-                and dev <= args.rescue_anchor_dev
-                and len(r.get("towers") or []) >= args.rescue_min_towers)
+        towers = r.get("towers") or []
+        if (args.rescue_anchor_dev is None or dev is None or dev > args.rescue_anchor_dev
+                or len(towers) < args.rescue_min_towers):
+            return False
+        cap = getattr(args, "rescue_max_p75", None)
+        return cap is None or _abs_dev_p75(towers) <= cap
     if args.max_anchor_dev is not None and r.get("route") != "labels":
         dev = r.get("anchor_dev_m")
         if dev is None or len(r.get("towers") or []) < args.min_towers or dev > args.max_anchor_dev:
@@ -641,7 +657,8 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
         "gates": {"max_misfit": args.max_misfit, "min_margin": args.min_margin,
                   "max_anchor_dev_m": args.max_anchor_dev, "min_towers": args.min_towers,
                   "rescue_anchor_dev_m": args.rescue_anchor_dev,
-                  "rescue_min_towers": args.rescue_min_towers},
+                  "rescue_min_towers": args.rescue_min_towers,
+                  "rescue_max_p75_m": args.rescue_max_p75},
         "photos": {k: sum(1 for r in results if r["route"] == k) for k in routes},
         "kept": {k: sum(1 for r in results if r["route"] == k and r["kept"]) for k in routes},
         "buildings_measured": len(rows), "confirmed": len(conf),
@@ -793,6 +810,9 @@ def main() -> int:
                     help="keep a photo failing its fit/margin gate when its towers sit within "
                          "this many m of their OSM heights (median); see _keep")
     ap.add_argument("--rescue-min-towers", type=int, default=12)
+    ap.add_argument("--rescue-max-p75", type=float, default=40.0,
+                    help="a rescued photo's 75th-percentile |photo - OSM| (m) must stay under "
+                         "this; see _keep")
     ap.add_argument("--untagged", action="store_true",
                     help="also measure untagged buildings that 2+ kept photos agree on (C2)")
     ap.add_argument("--untagged-max-dist-m", type=float, default=ph.UNTAGGED_MAX_DIST_M,

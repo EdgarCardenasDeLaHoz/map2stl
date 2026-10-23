@@ -350,6 +350,11 @@ def pano_hfov_guess(width: int, height: int) -> float:
 #: 23 % of all outlines score < 0.11 in haze, and no review says they are bad.
 MIN_SKYLINE_QUALITY = 0.11
 LOW_LIGHT_SKY_VALUE = 170.0
+#: Second low-light condition (2026-10-23): the outline must cover this share of columns. Of the
+#: 9 reviewed low-light photos the rejected ones cover <= 0.77 and the usable ones >= 0.86 (the
+#: one miss, Chicago p655 at 0.59, the score already rejects). It also catches Miami p20 (score
+#: 0.19, coverage 0.54, rejected). One reviewer, 9 photos: revisit with more verdicts.
+MIN_LOW_LIGHT_COVERAGE = 0.80
 #: Rows above and below the skyline compared for its edge strength (at 1600 px image width).
 EDGE_BAND_PX = 6
 
@@ -401,9 +406,11 @@ def quality_reject(q: dict | None, sky: float | None) -> str | None:
     low-light photo (night, dusk, glare) is kept when its skyline still stands out."""
     if q is None or sky is None or sky >= LOW_LIGHT_SKY_VALUE:
         return None
-    if q.get("score", 0.0) >= MIN_SKYLINE_QUALITY:
-        return None
-    return f"unclear low-light skyline (quality {q.get('score', 0.0):.2f})"
+    if q.get("score", 0.0) < MIN_SKYLINE_QUALITY:
+        return f"unclear low-light skyline (quality {q.get('score', 0.0):.2f})"
+    if q.get("coverage", 1.0) < MIN_LOW_LIGHT_COVERAGE:
+        return f"partial low-light skyline (coverage {q.get('coverage', 0.0):.2f})"
+    return None
 
 
 def is_dark(img) -> bool:
