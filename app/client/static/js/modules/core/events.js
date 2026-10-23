@@ -45,6 +45,8 @@ const _evConstants = {
     REGION_SELECTED: 'region:selected',
     /** Fired when the region box (appState.boundingBox) is set or moved; payload: (bbox). */
     BBOX_CHANGED: 'bbox:changed',
+    /** Fired after switchView shows a page; payload: (view: 'map'|'globe'|'dem'|'model'). */
+    VIEW_CHANGED: 'view:changed',
 };
 
 // Proxy warns on access to unknown event names — catches typos at runtime.
