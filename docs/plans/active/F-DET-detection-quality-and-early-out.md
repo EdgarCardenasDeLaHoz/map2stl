@@ -300,6 +300,9 @@ distance cut because it degrades gracefully.
    curated regions. If they don't correlate, re-base the labels on height error.
 3. **Fix the F-DET2/4a tension (A4):** make the FOV gate satellite-aware before adding
    more satellite-footprint regions.
+   *Done 2026-10-23:* `seed_selection._propose_standoff_locations(extra_centroids=)` counts
+   `ms_buildings` centroids in the FOV gate only (foreground and nearest-building checks stay
+   OSM-only); `region_pdf` passes them when `use_satellite_footprints` is on.
 4. **Then, and only then,** apply the confirmed 4a/4b/4c fixes — preferring the
    graceful bearing-penalty over the hard snap cut, and adding a held-out region to
    check the thresholds generalise.

@@ -707,3 +707,23 @@ def test_report_key_is_the_key_a_region_report_row_gets():
     written = [[round(x, 6), round(y, 6)] for x, y in ring]
     assert bm.report_key(ring) == bm.footprint_key(written)
     assert bm.report_key(ring) != bm.footprint_key(ring)
+
+
+def test_fov_gate_counts_satellite_footprints():
+    """F-DET A4: an OSM-sparse city gets proposals once satellite footprints are counted."""
+    from city2stl.skyline.region_types import RegionBBox
+    from city2stl.skyline.seed_selection import _propose_standoff_locations
+
+    lat0, lon0 = 10.0, -75.0
+    bbox = RegionBBox(name="t", north=lat0 + 0.03, south=lat0 - 0.03, east=lon0 + 0.03, west=lon0 - 0.03)
+    high_rises = [(lat0, lon0, 100.0), (lat0 + 0.0005, lon0, 80.0)]
+    d = 0.0002
+    feats = [{"type": "Feature", "properties": {},
+              "geometry": {"type": "Polygon", "coordinates": [[
+                  [lon0 + i * 0.001 - d, lat0 - d], [lon0 + i * 0.001 + d, lat0 - d],
+                  [lon0 + i * 0.001 + d, lat0 + d], [lon0 + i * 0.001 - d, lat0 - d]]]}}
+             for i in range(2)]
+    osm = {"buildings": {"features": feats}}
+    assert _propose_standoff_locations(bbox, high_rises, osm) == []        # 2 in any cone < 3
+    sat = [(lat0 + 0.0003 * k, lon0 - 0.0003 * k) for k in range(10)]
+    assert _propose_standoff_locations(bbox, high_rises, osm, extra_centroids=sat)

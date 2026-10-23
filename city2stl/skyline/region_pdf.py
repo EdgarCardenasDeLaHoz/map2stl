@@ -529,7 +529,10 @@ def run_region_pdf_report(
     # unless the user explicitly promotes them to seed_urls in the sites JSON.
     # Saved per region (and bbox) after the first run, so repeated runs look from the same places.
     auto_points = _persisted_proposals(
-        region_name, lambda: _propose_standoff_locations(bbox, high_rises, osm_data),
+        region_name, lambda: _propose_standoff_locations(
+            bbox, high_rises, osm_data,
+            extra_centroids=[(b.centroid_lat, b.centroid_lon) for b in building_records
+                             if b.height_source == "ms_buildings"]),
         bbox=bbox)
 
     # If no seeds were provided, use the top 3 auto-proposals as provisional

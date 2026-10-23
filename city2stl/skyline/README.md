@@ -382,9 +382,9 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - A7: instrument Type 2 seeds (bearing shift, pano snap distance, segment ↔ footprint overlap) in
     `_pano/orchestrator.py` + the pano summary table before any F-DET4a–c fix.
   - A2: correlate the good/medium/weak label with per-building height MAE on curated regions.
-  - A4: make the F-DET2 OSM-FOV gate count satellite footprints too (it currently rejects the OSM-sparse cities
-    F-DET4a targets).
-- **Benchmark truth**
+  - A4 done 2026-10-23: the F-DET2 FOV gate also counts satellite footprints (`ms_buildings`,
+    `_propose_standoff_locations(extra_centroids=)`); saved proposals are reused, so a region
+    proposes afresh only after its `runs/auto_proposals/<region>.json` is deleted.
   - Spain (Benidorm, Madrid): CNIG reads ~5.5 m under 3D Tiles in both cities (2.5 m grid,
     2008-15); only 33 / 64 confirmed. Measure the offset and correct for it (more survey
     sources are not being pursued, see the roadmap's "Not pursuing").
