@@ -9,6 +9,15 @@ _Last updated: 2026-10-23_
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
 
+## Prague benchmark truth: ČÚZK survey re-read at 0.07–0.33 m on V Tower (found 2026-10-23, open)
+- **Symptom:** the stat-2 refresh (`benchmark.py::refresh_survey_truth`) gives V Tower Pankrác a
+  `survey_m` of 0.07–0.33 m. The stat-1 backup had 107–108 m. The 104.15 m OSM figure itself looks
+  real: 8 overlapping `building:part` polygons share that roof.
+- **Suspect:** the `cuzk_dmp` transform or sampling in `survey_heights.survey_footprint_heights`.
+  It may be reading the DMR (terrain) or a wrong CRS window instead of the DMP.
+- **Also:** truth scoring counts nested `building:part`s as separate buildings. Dedupe them.
+- Diagnosis scratch from the session that found it: the session scratchpad `truthdiag/`.
+
 ## SRTM terrain on the Alhambra hill is ±15 m off (found 2026-10-23, open)
 
 - **Symptom:** in F-PANOVIEW view 3 (Plaza de los Aljibes) the Alcazaba towers look half their
