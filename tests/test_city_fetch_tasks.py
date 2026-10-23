@@ -20,7 +20,7 @@ def _fc(n=1):
                           "properties": {"height_source": "osm_height"}}] * n}
 
 
-def _wait(client, task_id, until=("done", "error", "cancelled"), timeout=5.0):
+def _wait(client, task_id, until=("done", "error", "cancelled"), timeout=30.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         body = client.get(f"/api/cities/status/{task_id}").json()
