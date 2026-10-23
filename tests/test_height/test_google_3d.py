@@ -455,3 +455,47 @@ def test_cached_unbuilt_raster_respects_require_built(monkeypatch):
     assert np.array_equal(loose.raster, flat)               # the benchmark still gets it
     strict = p.fetch_heights(bbox, (128, 128))
     assert np.isnan(strict.raster).all()                    # treated as outside coverage
+
+
+def _sloped_scene(slope: float, seed: int = 0):
+    """620 m square at 2 m cells: ground ``slope`` (rise per metre) up the rows, 9-60 m blocks
+    on about 85 % of it (streets between)."""
+    rng = np.random.default_rng(seed)
+    n = 310
+    rows = np.arange(n)[:, None] * 2.0
+    ground = np.broadcast_to(rows * slope, (n, n)).astype(np.float32)
+    bld = np.zeros((n, n), np.float32)
+    for r0 in range(0, n, 20):
+        for c0 in range(0, n, 20):
+            bld[r0 + 2:r0 + 19, c0 + 2:c0 + 19] = rng.uniform(9, 60)
+    lat = 620 / 111_320.0
+    bbox = (25.0 + lat, 25.0, -80.0 + 620 / (111_320.0 * math.cos(math.radians(25))), -80.0)
+    return ground + bld, ground, bld > 0, bbox
+
+
+@pytest.mark.parametrize("slope", [0.0, 0.03, 0.10])
+def test_plane_ground_holds_on_slopes(slope):
+    from city2stl.height.providers.google_3d import _ground_from_dsm
+    dsm, truth, roof, bbox = _sloped_scene(slope)
+    plane = _ground_from_dsm(dsm, bbox, method="plane")
+    err = float(np.mean((plane - truth)[roof]))
+    assert abs(err) < 0.5
+    if slope >= 0.03:          # the percentile ground reads tall there (+1.3 m per 1 %)
+        pct = _ground_from_dsm(dsm, bbox)
+        assert float(np.mean((truth - pct)[roof])) > 0.8 * slope * 100
+
+
+def test_ground_method_enters_the_cache_key_only_when_not_default(monkeypatch):
+    import city2stl.height.providers.google_3d as g3d
+
+    keys = []
+    monkeypatch.setattr(g3d, "read_array_cache",
+                        lambda ns, key: keys.append(key) or ({"height": np.zeros((4, 4), np.float32)}, {}))
+    bbox = (25.78, 25.77, -80.18, -80.19)
+    for ground in ("percentile", "plane"):
+        g3d.Google3DProvider(api_key="test", ground=ground).fetch_heights(bbox, (4, 4))
+    base = g3d.make_cache_key(g3d._NAMESPACE, *bbox, extra={"dim": [4, 4], "dem": False,
+                                                             "max_tiles": g3d._MAX_TILES})
+    assert keys[0] == base and keys[1] != base
+    with pytest.raises(ValueError):
+        g3d.Google3DProvider(api_key="test", ground="lowest")

@@ -7,6 +7,29 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-23 — Google 3D Tiles ground can be a sloped plane per window (`ground="plane"`), opt-in
+- **Problem:** `_ground_from_dsm` takes a per-window p5 of the DSM as flat ground. On a hillside the
+  window's low corner sets the ground, so buildings uphill read tall: about +1.26 m per 1 % of slope.
+  This is the likely cause of Seattle's +3.9 m bias against its LiDAR truth.
+- **Fix:** `Google3DProvider(ground="plane")` fits a plane per window: a least-squares fit, then 4
+  refits on the lowest 15 % of residuals. The windows are tent-blended.
+  - The keep share must stay under the window's ground share. At 30 %, roof cells got into a
+    synthetic scene with 28 % ground and read -0.75 m on every slope.
+- **Synthetic check** (`tests/test_height/test_google_3d.py::test_plane_ground_holds_on_slopes`), mean
+  roof error:
+
+  | Slope | Old p5 | Plane |
+  |---|---|---|
+  | 0 % | 0.0 m | 0.0 m |
+  | 3 % | -3.3 m | 0.0 m |
+  | 10 % | -11 m | 0.0 m |
+
+- **Why opt-in:** the cache stores ground-subtracted heights. Changing the default would re-key and
+  re-download (paid) every cached raster. So `ground` enters the cache key only when it is not the
+  default.
+- **Open:** verify on Seattle. That needs about 55 tile re-fetches against the 1k-roots free tier,
+  and is waiting for the user's OK. If it holds, make the benchmark use `ground="plane"`.
+
 ### 2026-10-23 — Commons photo screen: a rescued photo needs p75 |photo - OSM| <= 40 m; a low-light photo needs 80 % outline coverage
 - **Decision:** `17_photo_pipeline.py::_keep` rescues a gate-failing photo only when also `_abs_dev_p75(towers) <= --rescue-max-p75` (default 40 m). `commons_photos.quality_reject` keeps a low-light photo (sky value < 170) only when `score >= MIN_SKYLINE_QUALITY` (0.11) **and** `coverage >= MIN_LOW_LIGHT_COVERAGE` (0.80). Day photos stay ungated.
 - **Why:** the median OSM deviation let Miami p20 (19.1 m, rejected by the user) through; its p75 is 76 m (p79 too), against 23-33 m on all 10 other rescued Miami photos. On the 9 reviewed low-light photos no score threshold separates usable from bad (usable Chicago p655 scores 0.075, below four bad ones), but coverage does for 8 of 9 (bad <= 0.77, usable >= 0.86; the miss, p655, the score already rejects), and it also rejects p20.

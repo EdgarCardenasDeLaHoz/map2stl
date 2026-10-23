@@ -63,6 +63,15 @@ _DOWNLOAD_WORKERS = 12
 _GROUND_WINDOW_M = 200.0
 _GROUND_PERCENTILE = 5.0
 _GROUND_MIN_CELLS = 20
+#: Ground methods. ``percentile`` (the default): one low percentile per block, which reads
+#: about +1.3 m too tall per 1 % of slope (the low cells sit at the window's downhill edge;
+#: Seattle +3.9 m against LiDAR, 2026-10-23). ``plane``: a tilted plane per window fitted to its
+#: lowest cells, then shifted by the same percentile of the residuals, so flat terrain reads as
+#: before. Opt-in, and in the cache key only when used, so cached rasters stay valid.
+GROUND_METHODS = ("percentile", "plane")
+_PLANE_KEEP = 0.15         # share of lowest residuals each refit keeps; must stay under the ground share
+                           # (0.3 let roof cells into a 28 %-ground scene and read -0.75 m)
+_PLANE_PASSES = 4
 # Ceiling on points drawn from one tile. A coarse tile can span the whole
 # window, and without a cap the sample count grows with its area.
 _MAX_SAMPLES_PER_TILE = 400_000
@@ -510,9 +519,31 @@ def _looks_built(raster: np.ndarray, bbox: BBox) -> bool:
     return built / total >= _BUILT_MIN_FRACTION
 
 
+def _low_plane(rows: np.ndarray, cols: np.ndarray, vals: np.ndarray,
+               percentile: float) -> tuple[float, float, float]:
+    """``(a, b, c)`` of the ground plane ``a + b*row + c*col`` under scattered DSM cells.
+
+    Fits all cells, then refits on the lowest residuals (``_PLANE_KEEP``) a few times, so roofs
+    stop pulling the plane up; the offset is then set so the ``percentile`` of the residuals is
+    0, as the flat-ground percentile is.
+    """
+    x = np.column_stack([np.ones_like(vals), rows, cols])
+    keep = np.ones(vals.size, dtype=bool)
+    coef = np.zeros(3)
+    for _ in range(_PLANE_PASSES):
+        coef, *_ = np.linalg.lstsq(x[keep], vals[keep], rcond=None)
+        res = vals - x @ coef
+        keep = res <= np.quantile(res, _PLANE_KEEP)
+        if keep.sum() < 3:
+            break
+    coef[0] += np.percentile(vals - x @ coef, percentile)
+    return float(coef[0]), float(coef[1]), float(coef[2])
+
+
 def _ground_from_dsm(dsm: np.ndarray, bbox: BBox,
                      window_m: float = _GROUND_WINDOW_M,
-                     percentile: float = _GROUND_PERCENTILE) -> np.ndarray:
+                     percentile: float = _GROUND_PERCENTILE,
+                     method: str = "percentile") -> np.ndarray:
     """Estimate the ground surface from the DSM itself.
 
     An external DEM is the obvious way to turn surface altitude into building
@@ -536,6 +567,8 @@ def _ground_from_dsm(dsm: np.ndarray, bbox: BBox,
     win_r = max(1, int(round(window_m / max(lat_m / h, 1e-6))))
     win_c = max(1, int(round(window_m / max(lon_m / w, 1e-6))))
 
+    if method == "plane":
+        return _plane_ground(dsm, win_r, win_c, percentile)
     ground = np.full((h, w), np.nan, dtype=np.float32)
     for r0 in range(0, h, win_r):
         for c0 in range(0, w, win_c):
@@ -556,15 +589,53 @@ def _ground_from_dsm(dsm: np.ndarray, bbox: BBox,
     return ground
 
 
+def _plane_ground(dsm: np.ndarray, win_r: int, win_c: int, percentile: float) -> np.ndarray:
+    """``_ground_from_dsm(method="plane")``: per-window low planes, blended with tent weights.
+
+    Each window (twice the stride, as the percentile path) gets its plane, evaluated over the
+    whole window; overlapping windows are averaged with weights falling to 0 at their edges, so
+    the ground does not step at block seams.
+    """
+    h, w = dsm.shape
+    acc = np.zeros((h, w), dtype=np.float64)
+    wsum = np.zeros((h, w), dtype=np.float64)
+    for r0 in range(0, h, win_r):
+        for c0 in range(0, w, win_c):
+            ra, rb = max(0, r0 - win_r // 2), min(h, r0 + win_r + win_r // 2)
+            ca, cb = max(0, c0 - win_c // 2), min(w, c0 + win_c + win_c // 2)
+            block = dsm[ra:rb, ca:cb]
+            ok = np.isfinite(block)
+            if ok.sum() < _GROUND_MIN_CELLS:
+                continue
+            rr, cc = np.nonzero(ok)
+            a, b, c = _low_plane(rr.astype(float), cc.astype(float), block[ok].astype(float),
+                                 percentile)
+            gr, gc = np.mgrid[0:rb - ra, 0:cb - ca]
+            # tent weight about the block's own centre, never 0 inside the window
+            cr, ccen = (r0 + win_r / 2) - ra, (c0 + win_c / 2) - ca
+            wt = (np.clip(1 - np.abs(gr + 0.5 - cr) / (win_r * 1.0), 0.05, 1)
+                  * np.clip(1 - np.abs(gc + 0.5 - ccen) / (win_c * 1.0), 0.05, 1))
+            acc[ra:rb, ca:cb] += wt * (a + b * gr + c * gc)
+            wsum[ra:rb, ca:cb] += wt
+    ground = np.where(wsum > 0, acc / np.maximum(wsum, 1e-12), np.nan).astype(np.float32)
+    finite = ground[np.isfinite(ground)]
+    if finite.size:
+        ground = np.where(np.isfinite(ground), ground, np.median(finite)).astype(np.float32)
+    return ground
+
+
 class Google3DProvider:
     """Google Photorealistic 3D Tiles building height provider."""
 
     name = "google3d"
 
     def __init__(self, api_key: str | None = None,
-                 max_tiles: int = _MAX_TILES):
+                 max_tiles: int = _MAX_TILES, ground: str = "percentile"):
+        if ground not in GROUND_METHODS:
+            raise ValueError(f"ground must be one of {GROUND_METHODS}, not {ground!r}")
         self._api_key = api_key or get_api_key()
         self._max_tiles = max_tiles
+        self._ground = ground
 
     def covers(self, bbox: BBox) -> bool:
         """Returns True if an API key is configured (coverage is global
@@ -601,7 +672,10 @@ class Google3DProvider:
         # without them a DEM-grounded raster was served to mesh-grounded calls.
         cache_key = make_cache_key(_NAMESPACE, north, south, east, west,
                                    extra={"dim": list(dim), "dem": dem is not None,
-                                          "max_tiles": self._max_tiles})
+                                          "max_tiles": self._max_tiles,
+                                          # only a non-default ground enters the key
+                                          **({"ground": self._ground}
+                                             if self._ground != "percentile" else {})})
         # require_built is applied to a cache hit as to a fresh fetch, not put in the key:
         # a raster cached by a require_built=False caller (the F-SKYBENCH truth reads)
         # would otherwise reach a require_built=True caller as heights, and a key change
@@ -703,7 +777,7 @@ class Google3DProvider:
         if dem is not None:
             ground = _resample(dem.astype(np.float32), dim)
         else:
-            ground = _ground_from_dsm(dsm, bbox)
+            ground = _ground_from_dsm(dsm, bbox, method=self._ground)
         raster = (dsm - ground).astype(np.float32)
         # Below the ground estimate means ground, not a negative building.
         raster = np.where(raster < 0, 0.0, raster).astype(np.float32)
