@@ -1,6 +1,6 @@
 # F-SKYBENCH — Skyline height benchmark on surveyed truth
 
-**Status**: planned (user-requested 2026-10-03)
+**Status**: in progress (user-requested 2026-10-03; truth and scorer built, eight cities run)
 **Owner module**: `city2stl/skyline/` (reads `city2stl/height/providers/`, writes nothing back)
 
 ## Goal
@@ -132,7 +132,7 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
   - its 1.7 km tile boxes would hit the 3D Tiles cap of 1,000 tiles;
   - one failure there aborts a city, and its proposal cache saves empty lists.
 
-  Worth porting from it, as small commits:
+  Worth porting from it, as small commits (all done, checked 2026-10-23):
   - Pin the `SKYLINE_CV_*` flags, record whether Street View signing was on, and pin the values
     the baseline used: b1/512, tag filter on.
   - Make the auto-proposal cache recompute when the bbox changes; it is keyed by name today.
@@ -142,6 +142,11 @@ Cartagena stays a heading and registration smoke test, not an accuracy benchmark
     covers only the coast).
   - `discover_city_seeds`: the city filter, and keep existing site files unless `--force`.
   - The `google_3d` cache key: add the dem and max_tiles, plus `require_built`.
+  - Where each landed: `10_benchmark.py` pins the flags and records signing; `seed_selection.py`
+    keys the saved proposals by bbox; `10_benchmark.py --refresh-truth`, and `benchmark.py` saves
+    no failed or `--no-tiles` read; `benchmark.py::MIN_FINITE_FRACTION` 0.5;
+    `discover_city_seeds.py` takes cities and `--force`; `google_3d.py` keys on dem and
+    max_tiles and applies `require_built` to a cache hit (not in the key, so no paid re-download).
 
   Decide separately, since either needs a new baseline: the tag filter off, and dropping the
   Cartagena opt-ins (`pano_only_pdf`, cross-view, coastline) that six of the eight site files
