@@ -97,7 +97,7 @@ def _seed_multiview_registration(
     agree on a single camera position.
 
     F-CLEAN8: this function is now a thin orchestrator. The five named
-    helpers implement each phase:
+    helpers implement each phase (``web_image_cache`` is consumed: an entry is dropped once its seed is done):
       _capture_pano_views        — Pass 1: fetch + pitch-correct spin views
       _recover_pano_heading      — F-SKY11.1 pano-coastline heading recovery
       _recover_anchor_offset     — joint IoU optimization across all views
@@ -267,7 +267,12 @@ def _seed_multiview_registration(
     # seed's nominal location, because snapping is what causes the collision.
     _seen_pano_ids: set[str] = set()
 
+    _web_done: str | None = None
     for seed, seed_elev, is_photosphere in resolved:
+        # T21: a web seed's image is read only by its own seed; free it once that seed is done
+        if _web_done is not None and web_image_cache is not None:
+            web_image_cache.pop(_web_done, None)
+        _web_done = seed.name
         # A seed's views are fresh arrays, so the previous seed's label maps, masks and anchored
         # images in the SegFormer cache can never hit again: free them (0.3-0.7 GB, 2026-10-05).
         clear_neural_cache()
@@ -497,6 +502,8 @@ def _seed_multiview_registration(
     # floor-period reading, and the spread of the OSM-independent
     # inferred height. Confirms the facade-striation signal is live and
     # gives a feel for its reliability before it feeds the aggregate.
+    if web_image_cache is not None:
+        web_image_cache.clear()                 # T21: every web seed is done
     if _F_SKY1_ENABLED and all_estimates:
         fp = [e for e in all_estimates
               if getattr(e, "floor_period_px", None) is not None]

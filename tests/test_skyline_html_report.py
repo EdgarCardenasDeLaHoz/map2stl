@@ -322,3 +322,32 @@ class TestWriteRegionReport:
         # pano visual layers, not a text table any more).
         assert page.startswith("<!doctype html>")
         assert "5" in page
+
+
+class TestHonestUncertainty:
+    """Plan item 10: confidence and seed disagreement are not accuracy; views and anchor
+    deviation are the reliability signals."""
+
+    def _html(self, fake_sv):
+        rows = [
+            {"feature_id": "w1", "name": "Tower A", "n_seeds": 2, "n_views": 5,
+             "effective_height_m": 80.0, "weighted_height_m": 80.0, "median_height_m": 80.0,
+             "mean_confidence": 0.93, "seed_disagreement_m": 7.0, "anchor_dev_m": 3.4},
+            {"feature_id": "w2", "name": "Block B", "n_seeds": 1, "n_views": 1,
+             "effective_height_m": 30.0, "weighted_height_m": 30.0, "median_height_m": 30.0,
+             "mean_confidence": 0.5, "seed_disagreement_m": 0.0, "anchor_dev_m": None},
+        ]
+        return render_region_index("miami", [fake_sv], rows)
+
+    def test_views_and_anchor_dev_shown(self, fake_sv):
+        html = self._html(fake_sv)
+        assert "<th title=\"Street View images" in html and ">Views</th>" in html
+        assert "Anchor dev (m)" in html
+        assert '<td class="num">5</td><td class="num">3.4</td>' in html
+        assert '<td class="num">1</td><td class="num">&mdash;</td>' in html
+
+    def test_confidence_and_disagreement_not_presented_as_accuracy(self, fake_sv):
+        html = self._html(fake_sv).lower()
+        assert "lower = better" not in html
+        assert "does not track error" in html
+        assert "0.93" not in html  # mean_confidence is not printed in the table

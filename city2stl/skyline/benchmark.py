@@ -579,10 +579,27 @@ def _drop_tiles(rec: dict) -> dict:
     return rec
 
 
+#: Threads measuring 500 m truth tiles at once (T27); the reads are network-bound.
+TRUTH_WORKERS = 4
+
+
+def truth_workers(workers: int | None = None) -> int:
+    """``workers`` if given, else env ``MAP2STL_TRUTH_WORKERS``, else ``TRUTH_WORKERS``; >= 1."""
+    import os
+
+    if workers is None:
+        try:
+            workers = int(os.environ.get("MAP2STL_TRUTH_WORKERS", ""))
+        except ValueError:
+            workers = TRUTH_WORKERS
+    return max(1, int(workers))
+
+
 def footprint_truth(region: str, footprints: dict[str, list], survey_provider: str | None,
                     *, use_tiles: bool = True, resolution_m: float = RESOLUTION_M,
                     tiles_provider=None, refresh: bool = False,
-                    tags_m: dict[str, float] | None = None) -> dict[str, dict]:
+                    tags_m: dict[str, float] | None = None,
+                    workers: int | None = None) -> dict[str, dict]:
     """Truth record per footprint key, from the region cache plus any missing tiles.
 
     ``footprints``: key (``footprint_key``) → lon/lat ring. Returns key → ``{survey_m,
@@ -598,6 +615,13 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
     tile, and over all of the region's records (cached ones included, so old records from a
     flat mesh are dropped without new reads), 3D Tiles from a mesh without buildings are
     treated as not covered. Such records carry ``tiles_flat``.
+
+    Tiles are measured in a thread pool of ``workers`` threads (T27; default ``truth_workers``:
+    env ``MAP2STL_TRUTH_WORKERS`` or ``TRUTH_WORKERS``; 1 = serial). Workers only read the
+    sources; the cache is merged and written (atomically) by the calling thread in tile order,
+    so records, cache contents and log order equal the serial run's. A source that raises marks
+    only its own tile incomplete (as serially); any other exception propagates after the
+    running tiles finish.
     """
     cache = load_truth_cache(region)
     todo = {k: _erode(_polygon(ring), ERODE_M) for k, ring in footprints.items()
@@ -605,7 +629,9 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
     fresh: dict[str, dict] = {}
     part = (lambda p: survey_part(survey_provider, p)) if survey_provider else None
     tiles = tiles_for(todo, resolution_m=resolution_m, part=part)
-    for i, tile in enumerate(tiles, 1):
+
+    def measure(i: int, tile) -> tuple[dict[str, dict], bool]:
+        """One tile's records and whether every source answered. Touches no shared state."""
         logger.info("[bench] %s tile %d/%d: %d footprints", region, i, len(tiles),
                     len(tile.keys))
         grids, complete = {}, use_tiles
@@ -646,15 +672,32 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
                            "(tagged towers read flat); treated as not covered", region, i,
                            len(tiles))
             recs = {k: _drop_tiles(r) for k, r in recs.items()}
-        for k, rec in recs.items():
-            fresh[k] = rec
+        return recs, complete
+
+    n_workers = max(1, min(truth_workers(workers), len(tiles)))
+    if n_workers == 1:
+        results = (measure(i, tile) for i, tile in enumerate(tiles, 1))
+        pool = None
+    else:  # network-bound reads overlap; map() yields in tile order, so results match serial
+        from concurrent.futures import ThreadPoolExecutor
+
+        pool = ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="truth")
+        results = pool.map(measure, range(1, len(tiles) + 1), tiles)
+    try:
+        # the cache is read and written here only, never from a worker thread
+        for i, (recs, complete) in enumerate(results, 1):
+            for k, rec in recs.items():
+                fresh[k] = rec
+                if complete:
+                    cache[k] = rec
             if complete:
-                cache[k] = rec
-        if complete:
-            save_truth_cache(region, cache)
-        else:
-            logger.info("[bench] %s tile %d/%d not cached (a source failed or was skipped)",
-                        region, i, len(tiles))
+                save_truth_cache(region, cache)
+            else:
+                logger.info("[bench] %s tile %d/%d not cached (a source failed or was skipped)",
+                            region, i, len(tiles))
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
     out = {k: fresh.get(k, cache.get(k)) for k in footprints if k in fresh or k in cache}
     if tags_m and flat_mesh({k: r.get("tiles_m") for k, r in out.items()}, tags_m):
         # the whole region's tiles are a flat mesh: drop them from every record, cached ones

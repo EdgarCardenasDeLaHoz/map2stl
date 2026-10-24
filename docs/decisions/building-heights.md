@@ -7,6 +7,29 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-23 — T41: the untagged-building fallback is the geometry prior, with a 12 m constant behind it; scored leave-one-city-out on cached truth
+- **Decision:** `city2stl/skyline/_core/height.py::untagged_fallback` hands `withhold_untagged_street_view` the T38 geometry model (`city2stl/skyline/untagged_prior.py::fallback_for`, trained on `city2stl/skyline/data/untagged_prior_train.csv`, 872 confirmed untagged buildings in 8 cities). `SKYLINE_UNTAGGED_FALLBACK=constant`, a missing training file or no scikit-learn gives `UNTAGGED_FALLBACK_M` (12 m, was 10 m). One switch, the existing T28 path.
+- **Why:** measured 2026-10-23 with `10_benchmark --score-only --cached-truth` and a re-score of each newest report (Street View put back, then withheld three ways). The model is fitted without the scored city (`exclude_city`), so every number is out-of-sample. MAE in m on confirmed untagged buildings (all confirmed buildings in brackets; tagged rows keep their tag):
+
+  | City | n untagged | 10 m | 12 m | model |
+  |---|---|---|---|---|
+  | Miami | 83 | 6.4 (9.7) | 6.4 (9.7) | 6.7 (9.9) |
+  | Chicago | 133 | 19.8 (20.8) | 19.1 (20.5) | **17.4 (19.6)** |
+  | Seattle | 120 | 12.0 (13.5) | 12.0 (13.5) | **9.9 (11.9)** |
+  | Boston | 393 | 10.1 (12.8) | 9.4 (12.4) | **8.0 (11.6)** |
+  | Benidorm | 9 | 5.7 (19.5) | 7.3 (19.6) | 8.3 (19.7) |
+  | La Défense | 87 | 8.0 (8.3) | 8.1 (8.3) | **5.5 (6.0)** |
+  | Madrid | 59 | 11.5 (17.9) | 11.6 (18.0) | **10.4 (17.3)** |
+  | Prague | 9 | 26.0 (25.5) | 24.6 (25.0) | 25.7 (25.4) |
+  | **pooled** | 893 | 11.4 | 11.0 | **9.6** |
+
+  - Model beats both constants in 5 of the 6 cities with 50 or more untagged buildings; Miami is 0.3 m worse than either constant; Benidorm and Prague (9 each) are too small to read. Pooled gain over 12 m: 13 %; over 10 m: 16 %. Matches T38's own leave-one-city-out (9.4 against 11.3 m).
+  - The 12 m constant beats 10 m pooled (11.0 against 11.4 m), so it is the floor when the model is absent.
+  - Street View left in scores 51-102 m headline MAE per city (Miami 77 m unwithheld), against 6-20 m withheld.
+- **Rejected:** a per-city calibrated constant — the median untagged truth is 11.5-13.1 m whichever city is left out, so there is nothing to calibrate. Tagged rows in training — worse in the 0-30 m band (T38).
+- **Supersedes / superseded by:** — (T28 flag unchanged).
+- **Source:** `docs/research/ml-blind-2026-10-05/T38-results.md`; `tests/test_skyline_untagged_prior.py`.
+
 ### 2026-10-21 — Cached floor-count heights are re-derived on read with the pitched-roof rule
 - **Decision:** `city2stl/heights.py::apply_levels_heights` re-runs `height_from_tags` on every `"osm_levels"` building of a cached payload (clip 3–300 m, as `fetch.py` does), first thing in `app/server/core/city_data.py::with_low_default_heights`, so every read path gets it. No OSM cache version bump and no refetch; the model cache follows by itself because its keys hash the features.
 - **Why:** the 2026-10-20 rule (a roof floor only for a pitched `roof:shape` or a `roof:levels` tag) reached only fresh fetches. Both cached Granada payloads (pipeline v5) had 22,992 of 23,538 floor-count buildings exactly 3.2 m above the rule, which was the whole `osm_levels` bias. Granada rebuilt against the CNIG truth (`runs/panoview/granada/score_after.json` -> `score_levels_fix.json`): intended, all rows, MAE 3.57 -> 2.31 m, bias +2.80 -> +0.74 m, within 25 % 59.9 -> 74.3 %; `osm_levels` bias +3.19 -> +0.91 m; mesh reading MAE 6.81 -> 5.87 m, within 25 % 36.5 -> 46.6 %, bias -0.94 -> -2.45 m (the mesh was already reading about 3 m under intended; the old roof floor hid it).

@@ -24,6 +24,7 @@ $env:SKYLINE_CV_SEGFORMER_SIZE = "b1"     # production setting (see Environment 
 
 - Outputs (gitignored, under `city2stl/skyline/runs/region_reports/`):
   - `runs/region_reports/Cartagena_skyline_report/index.html` — the HTML diagnostic report (per-building tables live here).
+  - Reliability in the report: view count (`n_views`) and photo anchor deviation (`anchor_dev_m`). `mean_confidence` and seed disagreement/std stay in `heights.json` as diagnostics (`diagnostic_fields`); they do not track error.
   - `runs/region_reports/Cartagena_skyline_report.pdf` — compact archival PDF (`pano_only_pdf: true` trims tables).
 - Cost: a Cartagena run is a few minutes and ~$0.10 of Street View quota (12 spin views × seeds + screening probes).
 - `scripts/build_landing_page.py` builds the cross-region landing page; `scripts/discover_city_seeds.py`
@@ -244,7 +245,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 
 ## Caches (under `runs/`, gitignored)
 
-- `runs/seed_resolution_cache.json` — pins each seed URL's snapped (lat, lon, pano_id).
+- `_pano/runs/seed_resolution_cache.json` — pins each seed URL's snapped (lat, lon, pano_id).
   Why: the Static API's location snap drifts between calls. Delete to re-resolve.
 - `runs/image_cache/*.png` — Street View images keyed by request hash (API key excluded).
 - `runs/satellite_footprints_cache/` — ~12 MB per quadkey tile (F-SKY8).

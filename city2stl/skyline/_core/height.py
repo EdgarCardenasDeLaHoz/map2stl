@@ -1118,10 +1118,15 @@ def aggregate_building_heights(estimates: Sequence[RegisteredBuildingEstimate]) 
                 "mad_m": spread,
                 # Reported from the same weights the weighted mean uses, so
                 # a depth-downweighted view shows up in both.
+                # DIAGNOSTIC, not accuracy: confidence and seed disagreement do not track
+                # error (corr 0.02-0.16); reports show n_views and anchor_dev_m instead.
                 "mean_confidence": float(np.mean(eff_confidences_adj)),
                 "per_seed_median_m": per_seed_median,
                 "seed_disagreement_m": seed_disagreement_m,
                 "seed_std_m": seed_std_m,
+                # Photo anchor deviation: None here (a Street View only row has no photo anchor);
+                # the photo pipeline fills it.
+                "anchor_dev_m": None,
                 # F-SKY1: OSM-independent floor-count height (None when <2
                 # views locked a facade period).
                 "f_sky1_height_m": f1_height_m,

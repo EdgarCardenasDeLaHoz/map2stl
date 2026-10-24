@@ -108,6 +108,15 @@ logger = logging.getLogger(__name__)
 #: (``tiers.upgrade_tiers`` maps schema 1-2 files on read).
 HEIGHTS_SCHEMA_VERSION = 3
 
+#: Row fields that look like accuracy but do not track error (Miami SV: seed disagreement vs
+#: error corr 0.0; confidence vs error 0.02-0.16). Kept for readers; the reports show ``n_views``
+#: and ``anchor_dev_m`` instead (plan item 10). Written to ``heights.json`` as ``diagnostic_fields``.
+DIAGNOSTIC_FIELDS = {
+    "mean_confidence": "diagnostic only, not an accuracy",
+    "seed_disagreement_m": "diagnostic only, not an error bar",
+    "seed_std_m": "diagnostic only, not an error bar",
+}
+
 
 def _drone_seen_rows(building_heights: list, building_records: list[BuildingRecord],
                      pano_results: list, elevated_seeds) -> list[dict]:
@@ -147,7 +156,8 @@ def _drone_seen_rows(building_heights: list, building_records: list[BuildingReco
                     "n_seeds": 0, "n_outlier_seeds": 0, "outlier_seeds": [],
                     "median_height_m": None, "weighted_height_m": None, "mad_m": None,
                     "mean_confidence": 0.0, "per_seed_median_m": {},
-                    "seed_disagreement_m": None, "seed_std_m": None, "f_sky1_height_m": None,
+                    "seed_disagreement_m": None, "seed_std_m": None, "anchor_dev_m": None,
+                    "f_sky1_height_m": None,
                     "f_sky1_n_views": 0, "depth_rescue_height_m": None, "views": [],
                     "effective_height_m": None, "effective_height_source": None,
                     "drone_seen": sorted(by)})
@@ -292,6 +302,7 @@ def _write_heights_json(
         "tier_counts": tier_counts(rows),
         **({"survey": summarize_survey(rows)} if survey is not None else {}),
         "tag_disagreements": disagreements,
+        "diagnostic_fields": DIAGNOSTIC_FIELDS,
         "buildings": rows,
     }
     try:
@@ -629,6 +640,11 @@ def run_region_pdf_report(
     if _load_site_use_cadastre_band(region_name):
         from .cadastre_heights import load_band  # noqa: PLC0415
         cadastre_band = load_band(region_name, building_records) or None
+    # T21: the screening thumbnails are read only by the PDF's screening page.
+    if skip_pdf or not _load_site_render_pdf(region_name):
+        for _row in screened:
+            if isinstance(_row, dict):
+                _row["image"] = None
     with _timed("Multiview registration (per-seed)"):
         seed_views, building_heights, pano_results = _seed_multiview_registration(
             seeds, building_records, api_key,

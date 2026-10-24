@@ -376,7 +376,7 @@ def pano_result(seed: SkylinePoint, pano: fd.Pano, pose: fd.PanoPose, measured: 
         n_segments=len(segs), n_matched=len(segs), n_buildings_in_view=len(segs),
         anchor_offset_deg=float(pose.offset_deg), headings_per_col=headings,
         pano_building_mask=masks["building"], pano_water_mask=masks["water"],
-        pano_sky_mask=masks["sky"], pano_vegetation_mask=masks["vegetation"],
+        pano_vegetation_mask=masks["vegetation"],
         pano_depth=None if depth is None else np.roll(depth, roll, axis=1),
         pano_instances=None if instances is None else np.roll(instances, roll, axis=1),
         # F-SKY25's distance model for an elevated camera: a base at distance d sits

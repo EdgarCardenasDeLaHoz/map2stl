@@ -796,3 +796,84 @@ def test_source_ndsm_merged_uses_the_fine_providers(monkeypatch):
     _, _, bbox = _grid(size_m=50)
     arr, _t = bm.source_ndsm("merged", bbox)
     assert asked == ["open_buildings"] and np.nanmax(arr) == pytest.approx(20.0)
+
+
+# ------------------------------------------------------------ parallel truth tiles (T27)
+
+def _tile_fakes(monkeypatch, tmp_path, *, delay=0.0, fail_east=False):
+    """Four footprints 1.5 km apart (one 500 m tile each); survey and tiles mocked."""
+    import threading
+    import time
+
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    grid, t, _ = _grid(size_m=4000)
+    for i in range(4):
+        _paint(grid, 100 + 1000 * i, 100, 30, 30, 10.0 * (i + 1))
+    state = {"threads": set(), "active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake_survey(provider, bbox, res, *a):
+        with lock:
+            state["threads"].add(threading.get_ident())
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(delay)
+        with lock:
+            state["active"] -= 1
+        if fail_east and bbox[3] > LON + 2000 / KX:
+            raise RuntimeError("endpoint down")
+        return grid, t
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (grid, t))
+    fps = {f"F{i}": _ring(100 + 1000 * i, 100, 30, 30) for i in range(4)}
+    return fps, state
+
+
+def test_parallel_truth_equals_serial_and_keeps_order(tmp_path, monkeypatch):
+    fps, _ = _tile_fakes(monkeypatch, tmp_path / "s")
+    serial = bm.footprint_truth("Par", fps, "usgs_3dep", workers=1)
+    cache_serial = bm.load_truth_cache("Par")
+    fps, state = _tile_fakes(monkeypatch, tmp_path / "p", delay=0.05)
+    parallel = bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    assert list(parallel) == list(serial) == list(fps)
+    assert parallel == serial
+    assert bm.load_truth_cache("Par") == cache_serial and len(cache_serial) == 4
+    assert len(state["threads"]) > 1
+
+
+def test_parallel_truth_is_concurrent(tmp_path, monkeypatch):
+    import time
+
+    fps, state = _tile_fakes(monkeypatch, tmp_path, delay=0.5)
+    t0 = time.monotonic()
+    bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    wall = time.monotonic() - t0
+    assert wall < 1.5           # serial would be >= 4 * 0.5 = 2.0 s
+    assert state["peak"] > 1
+
+
+def test_workers_one_is_serial(tmp_path, monkeypatch):
+    import threading
+
+    fps, state = _tile_fakes(monkeypatch, tmp_path)
+    bm.footprint_truth("Par", fps, "usgs_3dep", workers=1)
+    assert state["threads"] == {threading.get_ident()} and state["peak"] == 1
+
+
+def test_workers_env_override(monkeypatch):
+    monkeypatch.setenv("MAP2STL_TRUTH_WORKERS", "2")
+    assert bm.truth_workers() == 2 and bm.truth_workers(3) == 3
+    monkeypatch.setenv("MAP2STL_TRUTH_WORKERS", "x")
+    assert bm.truth_workers() == bm.TRUTH_WORKERS
+    assert bm.truth_workers(0) == 1
+
+
+def test_parallel_failed_tile_is_not_cached_and_others_finish(tmp_path, monkeypatch):
+    fps, _ = _tile_fakes(monkeypatch, tmp_path, fail_east=True)
+    out = bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    assert set(out) == set(fps)
+    cached = bm.load_truth_cache("Par")
+    assert out["F0"]["status"] == "confirmed" and "F0" in cached
+    assert out["F3"]["status"] == "tiles_only" and "F3" not in cached
+    assert set(cached) == {"F0", "F1"} | ({"F2"} if out["F2"]["status"] == "confirmed" else set())

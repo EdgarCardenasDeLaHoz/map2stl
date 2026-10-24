@@ -19,6 +19,14 @@ heading and focal length on the small-angle model), then robust least squares
 (``soft_l1``) from the best cells. Position uncertainty comes from the Jacobian at the
 solution. Bearings are taken to footprint centroids; a 40 m wide tower 2 km away subtends
 ~1 deg, which the robust loss absorbs.
+
+Roll (T19): a handheld photo is rarely level. A roll of ``r`` rotates the image about its
+centre, moving a tower top that sits ``up`` px above the centre row sideways by ``up * sin r``.
+Give each ``Obs`` its ``up_px`` and pass ``roll_deg`` (known roll) or ``fit_roll=True`` (solve
+it, bounded by +-``MAX_ROLL_DEG``); the columns are unrolled before the pose is fitted.
+Positive roll = the right side of the frame is higher (the convention of
+``skyline_match.Hit.roll_deg``). Observations without ``up_px`` are left as they are, and the
+defaults (roll 0, not fitted) reproduce the level-photo solution exactly.
 """
 
 from __future__ import annotations
@@ -38,6 +46,7 @@ class Obs:
     lat: float
     lon: float
     name: str = ""
+    up_px: float | None = None      # outline height above the image centre row (for roll)
 
 
 @dataclass(frozen=True)
@@ -53,6 +62,7 @@ class Pose:
     residuals_px: tuple[float, ...]
     names: tuple[str, ...]
     rejected: tuple[str, ...] = ()   # identifications dropped as outliers
+    roll_deg: float = 0.0            # camera roll used or fitted (+: right side higher)
 
     def residual_table(self) -> list[tuple[str, float]]:
         return list(zip(self.names, self.residuals_px, strict=True))
@@ -111,12 +121,28 @@ def _linear_fit(alpha: np.ndarray, x: np.ndarray, cx: float):
 
 #: An identification is an outlier when its residual exceeds this many px and 4x the median.
 OUTLIER_PX = 30.0
+#: Bound on a fitted camera roll, degrees.
+MAX_ROLL_DEG = 5.0
+
+
+def unroll_columns(x: np.ndarray, up: np.ndarray, cx: float, roll_rad) -> np.ndarray:
+    """Columns as a level camera would see them: ``x - cx`` turned back by the roll.
+
+    ``up`` is NaN where an observation has no row (its column is kept).
+    """
+    out = cx + (x - cx) * np.cos(roll_rad) + np.nan_to_num(up) * np.sin(roll_rad)
+    return np.where(np.isfinite(up), out, x)
 
 
 def solve_pose(obs: list[Obs], image_width: int, projection: str = "pinhole",
                search_radius_m: float = 8000.0, grid_step_m: float = 200.0,
-               min_standoff_m: float = 150.0, f_prior_px: float | None = None) -> Pose:
+               min_standoff_m: float = 150.0, f_prior_px: float | None = None,
+               roll_deg: float = 0.0, fit_roll: bool = False) -> Pose:
     """Camera pose from >= 4 identified buildings (>= 3 when ``f_prior_px`` is given).
+
+    ``roll_deg``: known camera roll (the start value when ``fit_roll``); ``fit_roll`` solves
+    it within +-``MAX_ROLL_DEG`` from the observations' ``up_px`` (ignored when fewer than
+    ``need`` observations carry one).
 
     The grid covers ``search_radius_m`` around the buildings' centroid, excluding points
     closer than ``min_standoff_m`` to any building (the camera is not inside a tower).
@@ -125,9 +151,10 @@ def solve_pose(obs: list[Obs], image_width: int, projection: str = "pinhole",
     mislabel but still moved the camera 77 m in the synthetic test.
     """
     need = 3 if f_prior_px else 4
+    fit_roll = fit_roll and sum(o.up_px is not None for o in obs) >= need
     rejected: list[str] = []
     pose = _solve_once(obs, image_width, projection, search_radius_m, grid_step_m,
-                       min_standoff_m, f_prior_px)
+                       min_standoff_m, f_prior_px, roll_deg, fit_roll)
     while len(obs) > need + 1:
         r = np.abs(np.array(pose.residuals_px))
         i = int(np.argmax(r))
@@ -136,7 +163,7 @@ def solve_pose(obs: list[Obs], image_width: int, projection: str = "pinhole",
         rejected.append(obs[i].name)
         obs = obs[:i] + obs[i + 1:]
         pose = _solve_once(obs, image_width, projection, search_radius_m, grid_step_m,
-                           min_standoff_m, f_prior_px)
+                           min_standoff_m, f_prior_px, roll_deg, fit_roll)
     if rejected:
         from dataclasses import replace
         pose = replace(pose, rejected=tuple(rejected))
@@ -144,7 +171,8 @@ def solve_pose(obs: list[Obs], image_width: int, projection: str = "pinhole",
 
 
 def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius_m: float,
-                grid_step_m: float, min_standoff_m: float, f_prior_px: float | None) -> Pose:
+                grid_step_m: float, min_standoff_m: float, f_prior_px: float | None,
+                roll_deg: float = 0.0, fit_roll: bool = False) -> Pose:
     from scipy.optimize import least_squares
 
     if projection not in ("pinhole", "cylindrical"):
@@ -156,6 +184,9 @@ def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius
     bx, by = frame.to_xy([o.lat for o in obs], [o.lon for o in obs])
     x = np.array([o.x_px for o in obs], float)
     cx = image_width / 2.0
+    up = np.array([np.nan if o.up_px is None else o.up_px for o in obs], float)
+    x_raw = x
+    x = unroll_columns(x_raw, up, cx, math.radians(roll_deg))     # start value for the grid
 
     # 1. coarse grid: closed-form heading + focal per cell, keep the order-consistent best
     g = np.arange(-search_radius_m, search_radius_m + 1, grid_step_m)
@@ -183,7 +214,8 @@ def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius
         ex, ny, psi = p[0], p[1], p[2]
         f = f_prior_px if f_prior_px else math.exp(p[3])
         d = _wrap(_bearings(ex, ny, bx, by) - psi)
-        return project(d, f, cx, projection) - x
+        xs = unroll_columns(x_raw, up, cx, p[-1]) if fit_roll else x
+        return project(d, f, cx, projection) - xs
 
     best = None
     for _, gx, gy, psi, f in cands[:5]:
@@ -191,14 +223,18 @@ def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius
         # identifications otherwise drive it to 0 (seen in skyline matching, 2026-10-04)
         lo_f, hi_f = math.log(0.05 * image_width), math.log(50.0 * image_width)
         p0 = [gx, gy, psi] + ([] if f_prior_px else [min(max(math.log(f), lo_f + 1e-6), hi_f - 1e-6)])
-        bounds = ([-np.inf] * 3 + ([] if f_prior_px else [lo_f]),
-                  [np.inf] * 3 + ([] if f_prior_px else [hi_f]))
+        rmax = math.radians(MAX_ROLL_DEG)
+        if fit_roll:
+            p0 = p0 + [min(max(math.radians(roll_deg), -rmax + 1e-9), rmax - 1e-9)]
+        bounds = ([-np.inf] * 3 + ([] if f_prior_px else [lo_f]) + ([-rmax] if fit_roll else []),
+                  [np.inf] * 3 + ([] if f_prior_px else [hi_f]) + ([rmax] if fit_roll else []))
         r = least_squares(resid, p0, loss="soft_l1", f_scale=15.0, bounds=bounds)
         if best is None or r.cost < best.cost:
             best = r
     p = best.x
     f = f_prior_px if f_prior_px else math.exp(p[3])
     res = resid(p)
+    roll_out = math.degrees(p[-1]) if fit_roll else float(roll_deg)
 
     # 3. position uncertainty from the Jacobian (pixel noise from the residuals)
     dof = max(1, len(x) - len(p))
@@ -213,4 +249,4 @@ def _solve_once(obs: list[Obs], image_width: int, projection: str, search_radius
                 f_px=float(f), hfov_deg=hfov_deg(f, image_width, projection),
                 projection=projection, rms_px=float(np.sqrt(np.mean(res ** 2))),
                 sigma_m=sigma, residuals_px=tuple(float(r) for r in res),
-                names=tuple(o.name for o in obs))
+                names=tuple(o.name for o in obs), roll_deg=roll_out)
