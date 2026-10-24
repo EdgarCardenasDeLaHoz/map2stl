@@ -277,6 +277,11 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   report's OSM-tagged towers (>= 30 m) mostly read under 30 % of their tag, per tile and over the
   region, the tiles readings are dropped, cached records included (`benchmark.py::flat_mesh`,
   records marked `tiles_flat`). `10_benchmark` passes the tags; no new reads are needed.
+- The app's shipped sources on the same truth (T29): `10_benchmark --sources overture gba merged`
+  reads each per footprint with the truth's statistic (`benchmark.py::source_heights`, cached in
+  `runs/benchmark/sources/<region>.json`, network reads of Overture and GBA) and scores them with
+  coverage, all and untagged, next to the published height and Street View on the same buildings
+  (`benchmark.py::score_sources`, `sources` in `summary.json`, a printed table).
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
 - The headline scores the survey-blind height `no_survey_height_m` (F-SKY26 2c; a report from
