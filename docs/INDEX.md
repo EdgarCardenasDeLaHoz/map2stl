@@ -139,6 +139,7 @@ Walkthrough: [reference/pipeline.md](reference/pipeline.md); why: [decisions/mes
 - City export task (layers, trails, landmark overrides): `map2stl/app/server/core/city_model_task.py::run_city_model` (`normalize_request`, `city_osm_params`, `wants_ski_trails` = trails on by default where downhill runs exist)
 - Panorama (skyline report) heights into a city export, opt-in `panorama_heights`: `map2stl/city2stl/panorama_heights.py::apply_panorama_heights` — [why](decisions/building-heights.md)
 - OSM city layers served from an outdated cache when Overpass is down: `map2stl/app/server/core/city_data.py::_serve_stale_or_raise` (`_stale_payload`)
+- Skip the startup cache prune and OSM migration (env `MAP2STL_NO_CACHE_MAINTENANCE=1`; launch config `map2stl-nocache`): `map2stl/app/server/server.py::_startup_cache_maintenance`
 - Where the skyline single-use caches live (Street View, satellite, Commons, dated benchmark runs; env `SKYLINE_LOCAL_DIR`; stage cache `SKYLINE_STAGE_CACHE_DIR`; both outside OneDrive since 2026-10-18): `map2stl/city2stl/skyline/local_dirs.py::local_dir`
 - Live 3D preview (TIN capped at `PREVIEW_MAX_FACES`, strided DEMs): `map2stl/app/server/core/export.py::generate_mesh_preview` (`_preview_mesh`)
 - Terrain puzzle: `map2stl/app/server/core/export.py::generate_puzzle` (`puzzle_spec`); cutting, engraving, plates `map2stl/app/server/core/puzzle.py` (`plan_grid`, `choose_method`, `knob_size`, `cut_pieces`, `cut_to_zip`, `volume_check`)
