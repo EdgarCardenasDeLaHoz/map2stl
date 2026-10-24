@@ -328,6 +328,7 @@ function collectAllSettings() {
             water_depression_m: _flt('cityWaterOffset', -2.0),
             roof_shapes: _str('cityRoofShapes', 'auto'),
             trees: _chk('cityTrees', true),
+            level_ground: _chk('cityLevelGround', true),
             reference_landmarks: _chk('cityAlhambra', false),
             simplify_terrain: true,
         },
@@ -543,6 +544,7 @@ function applyAllSettings(s) {
     if (city.water_depression_m != null) set('cityWaterOffset', city.water_depression_m);
     if (city.roof_shapes != null) set('cityRoofShapes', city.roof_shapes === 'off' ? 'off' : 'auto');
     if (typeof city.trees === 'boolean') setChk('cityTrees', city.trees);
+    if (typeof city.level_ground === 'boolean') setChk('cityLevelGround', city.level_ground);
     if (typeof city.reference_landmarks === 'boolean') setChk('cityAlhambra', city.reference_landmarks);
     if (Array.isArray(city.layers)) {
         setChk('cityLayerBuildings', city.layers.includes('buildings'));

@@ -369,13 +369,23 @@
               <div class="mcap">3D view</div>
               <div class="param-grid">
                 <label for="viewerColormap">Colours</label>
-                <select id="viewerColormap" class="ctrl-input-sm" style="width:auto;">
+                <select id="viewerColormap" v-model="viewerCmap" class="ctrl-input-sm" style="width:auto;">
                   <option value="terrain" selected>Terrain</option>
                   <option value="viridis">Viridis</option>
                   <option value="gray">Gray</option>
                   <option value="satellite">Satellite image</option>
                   <option value="none">None (flat)</option>
                 </select>
+              </div>
+              <!-- Only for the Satellite image colour (F-VIEW-SATPARTS): off keeps buildings in their own colour. -->
+              <div v-if="viewerCmap === 'satellite'" class="msat">
+                <div class="mrow mswitch-row">
+                  <div><div class="mname">Satellite image on roofs</div>
+                    <div class="mhint">Off: buildings keep their own colour</div></div>
+                  <input type="checkbox" id="viewerSatRoofs" class="mswitch" role="switch" aria-label="Satellite image on roofs"
+                         :checked="store.viewerSatRoofs" @change="onSatRoofs">
+                </div>
+                <div class="mhint msat-note">Roofs in a satellite image lean and carry shadows, so they look smeared.</div>
               </div>
               <div class="mchecks">
                 <label title="Overlay mesh wireframe"><input type="checkbox" id="viewerWireframe"> Wireframe</label>
@@ -652,6 +662,11 @@ const bedValue = ref(DEFAULT_BED);
 function onPieceInput(e: Event) {
   if (e.isTrusted) pieceTouched.value = true;
 }
+// 3D view: the Colours choice shows the "Satellite image on roofs" switch under it.
+const viewerCmap = ref('terrain');
+function onSatRoofs(e: Event) {
+  (window as any).setViewerSatRoofs?.((e.target as HTMLInputElement).checked);
+}
 function onBedChange() {
   bedValue.value = _val('bedSizeSelect') || DEFAULT_BED;
   if (!pieceTouched.value) _setField('cityPieceMm', String(defaultPieceMm(_bed())));
@@ -745,6 +760,8 @@ function cancelExport() {
 .mval { font-variant-numeric: tabular-nums; }
 .mrange { width: 100%; accent-color: #0a84ff; }
 .mswitch-row { margin-top: 14px; margin-bottom: 0; }
+.msat .mswitch-row { margin-top: 10px; }
+.msat-note { margin-top: 6px; }
 .mswitch {
   appearance: none; -webkit-appearance: none; flex: none; position: relative; cursor: pointer;
   width: 40px; height: 24px; border-radius: 999px; background: #3a3a3c; margin: 0; transition: background .15s;
