@@ -70,6 +70,68 @@ export function partColor(name, buildingsColor = '#c8b89a') {
     return BUILDING_PARTS.has(name) ? buildingsColor : (PART_COLORS[name] || '#bbbbbb');
 }
 
+/** Parts the satellite image drapes over (their tops are horizontal, so a top-down image fits). */
+const SATELLITE_PARTS = new Set(['terrain', 'roads', 'railways', 'trails', 'green']);
+/** Colour of faces too steep for a top-down image (the terrain block's walls, cliffs). */
+export const SOIL_COLOR = '#8a7258';
+/** A face takes the image when its normal's vertical part is at least this (cos 60 deg). */
+export const STEEP_FACE_MIN_NY = 0.5;
+
+/**
+ * Does `name` get the satellite image in the 3D view's Satellite colour mode? Ground,
+ * roads, railways, trails and green always; buildings only with "Satellite image on
+ * roofs"; water and the rest keep their own colour.
+ */
+export function takesSatelliteImage(name, roofs = false) {
+    return SATELLITE_PARTS.has(name) || (!!roofs && BUILDING_PARTS.has(name));
+}
+
+/**
+ * Planar top-down texture coordinates for a part already in the viewer frame
+ * (toViewerFrame): u = east across the DEM box, v = 1 at the north edge, the same
+ * mapping as the preview terrain (model-viewer.js::_buildMeshFromPreview), so the image
+ * lands on the same place whichever mesh shows it.
+ *
+ * @param {Float32Array} positions viewer-frame xyz triples
+ * @param {{scale: number, xOffset: number, zOffset: number, cols: number, rows: number, mmPerPx: number}} f
+ * @returns {Float32Array} one (u, v) pair per vertex
+ */
+export function satelliteUVs(positions, f) {
+    const w = Math.max((f.cols - 1) * f.mmPerPx * f.scale, 1e-9);
+    const d = Math.max((f.rows - 1) * f.mmPerPx * f.scale, 1e-9);
+    const n = positions.length / 3;
+    const uv = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+        uv[i * 2] = (positions[i * 3] + f.xOffset) / w;
+        uv[i * 2 + 1] = 1 - (positions[i * 3 + 2] + f.zOffset) / d;
+    }
+    return uv;
+}
+
+/**
+ * Split triangles by slope for the satellite drape: faces whose normal points up at
+ * least `minNy` (default: flatter than 60 deg) take the image, every other face
+ * (steep walls, undersides) gets a plain colour instead of a smeared image.
+ * Positions are in the viewer frame (y up).
+ *
+ * @param {Float32Array} positions
+ * @param {Uint32Array} indices
+ * @returns {{flat: Uint32Array, steep: Uint32Array}} index lists, three per face
+ */
+export function splitFacesBySlope(positions, indices, minNy = STEEP_FACE_MIN_NY) {
+    const flat = [], steep = [];
+    for (let t = 0; t < indices.length; t += 3) {
+        const a = indices[t] * 3, b = indices[t + 1] * 3, c = indices[t + 2] * 3;
+        const ux = positions[b] - positions[a], uy = positions[b + 1] - positions[a + 1], uz = positions[b + 2] - positions[a + 2];
+        const vx = positions[c] - positions[a], vy = positions[c + 1] - positions[a + 1], vz = positions[c + 2] - positions[a + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz);
+        const up = len > 0 && ny / len >= minNy;
+        (up ? flat : steep).push(indices[t], indices[t + 1], indices[t + 2]);
+    }
+    return { flat: Uint32Array.from(flat), steep: Uint32Array.from(steep) };
+}
+
 /**
  * Parts of a shown finished model to hide after a City model layer edit, until the
  * rebuild lands: every part whose layer is now off, and the buildings when their

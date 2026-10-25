@@ -42,6 +42,7 @@ import './modules/map/map-globe.js';
 import './modules/regions/region-boxes.js';
 import './modules/regions/regions.js';
 import './modules/regions/region-editor.js';
+import './modules/regions/region-links.js';     // #region=<name>&tab=<tab> shortcut links
 import './modules/map/bbox-panel.js';
 import './modules/ui/app-setup.js';
 import './modules/ui/keyboard-shortcuts.js';

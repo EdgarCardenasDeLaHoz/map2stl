@@ -37,7 +37,7 @@ from city2stl.cache_policy import (
 from city2stl.fetch import FetchCancelled, OverpassUpstreamError, fetch_osm_data
 from city2stl.height.service import enhance_city_data
 from city2stl.height.survey_fill import fill_layer_heights, fillable
-from city2stl.heights import apply_low_default_heights
+from city2stl.heights import apply_levels_heights, apply_low_default_heights
 from geo2stl.cache import list_osm_cache_params, write_osm_cache_params
 from geo2stl.geo import M_PER_DEG_LAT, bbox_diagonal_km
 
@@ -394,16 +394,22 @@ def merge_layer_data(layers: dict, layer_data: dict | None, enabled=None) -> dic
 def with_low_default_heights(payload: dict) -> dict:
     """``payload`` with its default-height ruins and fortress enclosures, and its
     ruins whose height came from a levels tag, at 3 m with ``height_source``
-    ``"default"`` (``city2stl.heights.apply_low_default_heights``), applied on
-    read so city caches written before that rule need no refetch (no cache
-    version bump). Idempotent; the payload passed in is not mutated."""
+    ``"default"`` (``city2stl.heights.apply_low_default_heights``), and its
+    floor-count heights re-derived with the current roof-floor rule
+    (``city2stl.heights.apply_levels_heights``), applied on read so city caches
+    written before those rules need no refetch (no cache version bump).
+    Idempotent; the payload passed in is not mutated."""
     fc = payload.get("buildings") if isinstance(payload, dict) else None
     if not _is_fc(fc):
         return payload
+    fc, n_levels = apply_levels_heights(fc)
     fc, n = apply_low_default_heights(fc)
-    if not n:
+    if not (n or n_levels):
         return payload
-    logger.info("Lowered %d ruins / enclosures to the 3 m default", n)
+    if n_levels:
+        logger.info("Re-derived %d floor-count heights", n_levels)
+    if n:
+        logger.info("Lowered %d ruins / enclosures to the 3 m default", n)
     return {**payload, "buildings": fc}
 
 

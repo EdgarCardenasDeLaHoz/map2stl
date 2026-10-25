@@ -727,3 +727,173 @@ def test_fov_gate_counts_satellite_footprints():
     assert _propose_standoff_locations(bbox, high_rises, osm) == []        # 2 in any cone < 3
     sat = [(lat0 + 0.0003 * k, lon0 - 0.0003 * k) for k in range(10)]
     assert _propose_standoff_locations(bbox, high_rises, osm, extra_centroids=sat)
+
+
+# ── T29: the shipped height sources on the same truth ───────────────────────
+
+def _source_scene():
+    arr, t, _ = _grid()
+    _paint(arr, 20, 20, 25, 25, 50.0)      # A: tagged tower, source right
+    _paint(arr, 100, 100, 25, 25, 30.0)    # B: untagged, truth 12 m, source 30 m
+    fps = {"A": _ring(20, 20, 25, 25), "B": _ring(100, 100, 25, 25),
+           "C": _ring(160, 160, 20, 20)}   # C: nothing in the source
+    return arr, t, fps
+
+
+def test_source_heights_read_and_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    arr, t, fps = _source_scene()
+    calls = []
+
+    def reader(src, bbox, res):
+        calls.append(src)
+        return (arr, t) if src == "gba" else None          # overture: not covered
+
+    hs = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert hs["gba"]["A"] == pytest.approx(50.0) and hs["gba"]["B"] == pytest.approx(30.0)
+    assert hs["gba"]["C"] is None and all(v is None for v in hs["overture"].values())
+    n = len(calls)
+    again = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert again == hs and len(calls) == n                  # served from the cache
+
+
+def test_failed_source_read_is_not_cached(tmp_path, monkeypatch):
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    arr, t, fps = _source_scene()
+
+    def reader(src, bbox, res):
+        if src == "overture":
+            raise RuntimeError("parquet host unreachable")
+        return arr, t
+
+    hs = bm.source_heights("Srcville", fps, ("gba", "overture"), reader=reader)
+    assert hs["gba"]["A"] == pytest.approx(50.0)            # scored this time
+    assert bm.load_sources_cache("Srcville") == {}           # but nothing pinned
+
+
+def test_score_sources_same_buildings():
+    truth = {"A": {"status": "confirmed", "truth_m": 50.0},
+             "B": {"status": "confirmed", "truth_m": 12.0},
+             "C": {"status": "confirmed", "truth_m": 20.0},
+             "D": {"status": "disputed", "truth_m": None}}
+    blds = [{"key": "A", "effective_height_m": 48.0, "height_tag_m": 50.0,
+             "height_source": "osm_tag"},
+            {"key": "B", "effective_height_m": 12.0, "street_view_m": 110.0,
+             "height_source": "default"},
+            {"key": "C", "effective_height_m": 12.0, "street_view_m": 90.0,
+             "height_source": "default"},
+            {"key": "D", "effective_height_m": 30.0, "height_source": "default"}]
+    hs = {"gba": {"A": 50.0, "B": 30.0, "C": None, "D": 25.0}}
+    sc = bm.score_sources(blds, truth, hs)["gba"]
+    assert sc["coverage"] == pytest.approx(2 / 3, abs=1e-3)   # A and B of 3 confirmed
+    assert sc["source"]["overall"]["n"] == 2
+    assert sc["source"]["overall"]["mae_m"] == pytest.approx(9.0)          # (0 + 18) / 2
+    assert sc["published_same"]["overall"]["mae_m"] == pytest.approx(1.0)  # (2 + 0) / 2
+    assert sc["street_view_same"]["overall"]["mae_m"] == pytest.approx(50.0)  # (2 + 98) / 2
+    assert sc["source"]["osm_tag"]["untagged"]["n"] == 1
+
+
+def test_source_ndsm_merged_uses_the_fine_providers(monkeypatch):
+    """``merged`` merges the registered providers fine enough for one building, as the app
+    does; coarse ones (90 m WSF3D) stay out."""
+    from types import SimpleNamespace
+
+    from city2stl.height import HeightResult, service
+
+    asked = []
+
+    def prov(name, value, res_m):
+        def fetch(bbox, dim):
+            asked.append(name)
+            r = np.full(dim, value, np.float32)
+            return HeightResult(r, np.full(dim, 0.6, np.float32), name, res_m)
+        return SimpleNamespace(instance=SimpleNamespace(name=name, covers=lambda b: True,
+                                                        fetch_heights=fetch),
+                               resolution_m=res_m, confidence=0.6)
+
+    monkeypatch.setattr(service, "_REGISTRY", [prov("open_buildings", 20.0, 5.0),
+                                               prov("wsf3d", 99.0, 90.0)])
+    _, _, bbox = _grid(size_m=50)
+    arr, _t = bm.source_ndsm("merged", bbox)
+    assert asked == ["open_buildings"] and np.nanmax(arr) == pytest.approx(20.0)
+
+
+# ------------------------------------------------------------ parallel truth tiles (T27)
+
+def _tile_fakes(monkeypatch, tmp_path, *, delay=0.0, fail_east=False):
+    """Four footprints 1.5 km apart (one 500 m tile each); survey and tiles mocked."""
+    import threading
+    import time
+
+    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    grid, t, _ = _grid(size_m=4000)
+    for i in range(4):
+        _paint(grid, 100 + 1000 * i, 100, 30, 30, 10.0 * (i + 1))
+    state = {"threads": set(), "active": 0, "peak": 0}
+    lock = threading.Lock()
+
+    def fake_survey(provider, bbox, res, *a):
+        with lock:
+            state["threads"].add(threading.get_ident())
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(delay)
+        with lock:
+            state["active"] -= 1
+        if fail_east and bbox[3] > LON + 2000 / KX:
+            raise RuntimeError("endpoint down")
+        return grid, t
+
+    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (grid, t))
+    fps = {f"F{i}": _ring(100 + 1000 * i, 100, 30, 30) for i in range(4)}
+    return fps, state
+
+
+def test_parallel_truth_equals_serial_and_keeps_order(tmp_path, monkeypatch):
+    fps, _ = _tile_fakes(monkeypatch, tmp_path / "s")
+    serial = bm.footprint_truth("Par", fps, "usgs_3dep", workers=1)
+    cache_serial = bm.load_truth_cache("Par")
+    fps, state = _tile_fakes(monkeypatch, tmp_path / "p", delay=0.05)
+    parallel = bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    assert list(parallel) == list(serial) == list(fps)
+    assert parallel == serial
+    assert bm.load_truth_cache("Par") == cache_serial and len(cache_serial) == 4
+    assert len(state["threads"]) > 1
+
+
+def test_parallel_truth_is_concurrent(tmp_path, monkeypatch):
+    import time
+
+    fps, state = _tile_fakes(monkeypatch, tmp_path, delay=0.5)
+    t0 = time.monotonic()
+    bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    wall = time.monotonic() - t0
+    assert wall < 1.5           # serial would be >= 4 * 0.5 = 2.0 s
+    assert state["peak"] > 1
+
+
+def test_workers_one_is_serial(tmp_path, monkeypatch):
+    import threading
+
+    fps, state = _tile_fakes(monkeypatch, tmp_path)
+    bm.footprint_truth("Par", fps, "usgs_3dep", workers=1)
+    assert state["threads"] == {threading.get_ident()} and state["peak"] == 1
+
+
+def test_workers_env_override(monkeypatch):
+    monkeypatch.setenv("MAP2STL_TRUTH_WORKERS", "2")
+    assert bm.truth_workers() == 2 and bm.truth_workers(3) == 3
+    monkeypatch.setenv("MAP2STL_TRUTH_WORKERS", "x")
+    assert bm.truth_workers() == bm.TRUTH_WORKERS
+    assert bm.truth_workers(0) == 1
+
+
+def test_parallel_failed_tile_is_not_cached_and_others_finish(tmp_path, monkeypatch):
+    fps, _ = _tile_fakes(monkeypatch, tmp_path, fail_east=True)
+    out = bm.footprint_truth("Par", fps, "usgs_3dep", workers=4)
+    assert set(out) == set(fps)
+    cached = bm.load_truth_cache("Par")
+    assert out["F0"]["status"] == "confirmed" and "F0" in cached
+    assert out["F3"]["status"] == "tiles_only" and "F3" not in cached
+    assert set(cached) == {"F0", "F1"} | ({"F2"} if out["F2"]["status"] == "confirmed" else set())

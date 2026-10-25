@@ -3,6 +3,20 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-10-23 — The satellite image drapes the finished model's ground parts; steep faces stay soil colour
+- **Decision:** with Colours = Satellite image, the City Model's terrain, roads, railways, trails
+  and green take the image through planar top-down UVs (`city-fullmodel.js::satelliteUVs`).
+  Faces steeper than 60° (the block's side walls, cliffs) get a plain soil colour
+  (`city-fullmodel.js::splitFacesBySlope`). Buildings keep their colour unless the new
+  "Satellite image on roofs" switch is on (default off); water and trees stay plain.
+- **Why:** the PNG mockup (`claude/mockups/2026-10-23-satparts-plinth/01`) showed planar UVs
+  smearing the image down the block's steep edge; the user chose soil colour over the smear and
+  over triplanar mapping. Roofs default off because roofs in the image lean and carry shadows.
+- **Rejected:** triplanar projection — more shader work for walls nobody reads as photo;
+  accepting the smear — stretched pixels on every edge.
+- **Supersedes / superseded by:** —
+- **Source:** [F-VIEW-SATPARTS](../plans/active/F-VIEW-SATPARTS-satellite-on-model-parts.md), T49.
+
 ### 2026-10-14 — Every Edit-map grid starts on, and a true lat/lon grid shows the projection's distortion
 - **Decision:** the Edit map has three grids, all on by default (server
   `app/server/routers/settings.py::get_default_settings` `view.pixel_grid_show`,

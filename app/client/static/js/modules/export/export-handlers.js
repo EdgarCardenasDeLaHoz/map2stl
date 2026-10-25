@@ -333,6 +333,8 @@ function _cityExtra() {
         alhambraInBox: bboxIntersects(window.appState?.selectedRegion, ALHAMBRA_BBOX),
     });
     extra.roof_shapes = detail.roof_shapes;
+    // F-PLINTH: level pads under buildings (server default true).
+    extra.level_ground = document.getElementById('cityLevelGround')?.checked ?? true;
     extra.reference_landmarks = detail.reference_landmarks;
     if (detail.trees) extra.layers.trees = { ...extra.layers.trees, ...detail.trees };
     // Heights edited in the Buildings panel exist only here; send the edited

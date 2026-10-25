@@ -53,7 +53,8 @@ _Last updated: 2026-10-23_
 ## Fixed 2026-10-20: Alcazaba plaza slab, lowered landmarks, +1 roof floor, sliver leftovers
 
 - **Fix:** `city_model.py::is_open_enclosure`, `survey_fill.py::is_landmark` / `_burn_stats`, `heights.py::has_pitched_roof_shape`, `MIN_LEFTOVER_WIDTH_MM`; `MODEL_CACHE_VERSION` 7. Entries: [building-heights](decisions/building-heights.md), [roofs-landmarks](decisions/roofs-landmarks.md).
-- **Open:** cached payload floor-count heights keep the old +1 roof floor until a fresh fetch (or survey re-measure); landmark parts only rise, so 19% of floor-count parts stay over 3 m off.
+- **Fixed 2026-10-21:** cached payloads kept the old +1 roof floor on floor-count heights; `heights.py::apply_levels_heights` now re-derives them on read (Granada `osm_levels` bias +3.2 -> +0.9 m, [entry](decisions/building-heights.md)).
+- **Open:** the mesh reading sits about 3 m under the intended heights (Granada, `score_levels_fix.json`): scorer baseline (highest terrain under a footprint) or the mesh, not yet separated. Landmark parts only rise, so 19% of floor-count parts stay over 3 m off.
 
 ## Fixed 2026-10-18: Alhambra reference swap filled courtyards and dropped OSM buildings
 

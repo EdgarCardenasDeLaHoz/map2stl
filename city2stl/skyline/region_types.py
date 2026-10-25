@@ -13,6 +13,61 @@ from dataclasses import dataclass
 
 import numpy as np  # noqa: F401  (referenced by lazy string annotations below)
 
+# --- compact pixel storage (T21) -------------------------------------------------------
+# A region run keeps every view's pixels until the report, so the result types hold them
+# packed and give back the original array on access (same dtype, shape and values).
+
+def pack_mask(arr):
+    """``(bits, shape, dtype)`` for a 0/1 mask (1 bit per pixel); any other array unchanged."""
+    if not isinstance(arr, np.ndarray) or arr.size == 0:
+        return arr
+    if arr.dtype != np.bool_:
+        if arr.dtype.kind not in "ui" or int(arr.min()) < 0 or int(arr.max()) > 1:
+            return arr
+    return (np.packbits(arr.ravel().astype(np.uint8, copy=False)), arr.shape, arr.dtype)
+
+
+def unpack_mask(packed):
+    """Inverse of :func:`pack_mask` (a fresh, writable array)."""
+    if not isinstance(packed, tuple):
+        return packed
+    bits, shape, dtype = packed
+    return np.unpackbits(bits, count=int(np.prod(shape))).reshape(shape).astype(dtype, copy=False)
+
+
+def encode_png(arr):
+    """Lossless PNG bytes for a uint8 image (an array of any other kind is returned as is)."""
+    if not (isinstance(arr, np.ndarray) and arr.dtype == np.uint8 and arr.ndim in (2, 3)
+            and arr.size and (arr.ndim == 2 or arr.shape[2] in (1, 3, 4))):
+        return arr
+    import cv2  # noqa: PLC0415
+
+    ok, buf = cv2.imencode(".png", arr, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+    return (buf.tobytes(), arr.shape) if ok else arr
+
+
+def decode_png(blob):
+    """Inverse of :func:`encode_png`."""
+    if not isinstance(blob, tuple):
+        return blob
+    import cv2  # noqa: PLC0415
+
+    data, shape = blob
+    out = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    return out.reshape(shape)
+
+
+def _packed_property(name, pack, unpack):
+    slot = "_packed_" + name
+
+    def _get(self):
+        return unpack(self.__dict__.get(slot))
+
+    def _set(self, value):
+        self.__dict__[slot] = pack(value)
+
+    return property(_get, _set, doc=f"``{name}``, stored compactly; reads give the original array.")
+
 
 @dataclass(frozen=True)
 class RegionBBox:
@@ -61,6 +116,7 @@ class StitchedPanoResult:
     # pano layer; ``None`` when unavailable.
     pano_building_mask: np.ndarray | None = None
     pano_water_mask: np.ndarray | None = None
+    # Deprecated: never stored, reads give None (nothing read it; T21).
     pano_sky_mask: np.ndarray | None = None
     pano_vegetation_mask: np.ndarray | None = None
     # Building instances (``building_instances``, MobileSAM): int label per pixel, 0 = none,
@@ -108,7 +164,9 @@ class SeedViewRegistration:
     registration_score: float
     best_offset: float
     estimates_count: int
-    image: np.ndarray
+    # The registration overlay. Not stored when ``overlay_spec`` is set: reading it redraws
+    # the overlay from ``raw_image`` and the spec (T21). Pass None then.
+    image: np.ndarray | None
     matched_segments: list  # list[dict] from match_segments_to_buildings
     is_aerial: bool = False
     iou: float = 0.0  # semantic mIoU at best offset (heading-quality signal)
@@ -173,4 +231,72 @@ class SeedViewRegistration:
     # the HTML diagnostic report can render the depth diagnostics today
     # without waiting for the PDF rendering path. None elsewhere.
     view_estimates: list | None = None
+    # T21: what ``_region_render._draw.overlay_spec`` copied when the overlay was drawn.
+    overlay_spec: dict | None = None
 
+    def set_overlay_spec(self, spec: dict | None) -> None:
+        """Replace the overlay (frozen dataclass: the one sanctioned mutation); drops any stored image."""
+        object.__setattr__(self, "overlay_spec", spec)
+        self.__dict__["_image_arr"] = None
+        self.__dict__["_image_is_raw"] = False
+
+    @property
+    def stored_bytes(self) -> int:
+        """Bytes of pixel data this row holds (the T21 measure)."""
+        return _stored_bytes(self.__dict__)
+
+
+def _stored_bytes(d: dict) -> int:
+    total = 0
+    for k, v in d.items():
+        if not (k.startswith("_packed_") or k == "_image_arr"):
+            continue
+        if isinstance(v, tuple) and v and isinstance(v[0], (bytes, np.ndarray)):
+            total += v[0].nbytes if isinstance(v[0], np.ndarray) else len(v[0])
+        elif isinstance(v, np.ndarray):
+            total += v.nbytes
+    return total
+
+
+def _view_image_get(self):
+    arr = self.__dict__.get("_image_arr")
+    if arr is not None:
+        return arr
+    raw = self.raw_image
+    if raw is None:
+        return None
+    if self.__dict__.get("_image_is_raw"):
+        return raw
+    if self.overlay_spec is not None:
+        from ._region_render._draw import render_overlay  # noqa: PLC0415
+
+        return render_overlay(raw, self.overlay_spec)
+    return None
+
+
+def _view_image_set(self, value):
+    self.__dict__["_image_arr"] = value
+    self.__dict__["_image_is_raw"] = False
+
+
+def _view_raw_set(self, value):
+    # the overlay-less rows pass one array as both ``image`` and ``raw_image``: keep one copy
+    if value is not None and value is self.__dict__.get("_image_arr"):
+        self.__dict__["_image_arr"] = None
+        self.__dict__["_image_is_raw"] = True
+    self.__dict__["_packed_raw_image"] = encode_png(value)
+
+
+for _n in ("building_mask", "sky_mask", "water_mask", "vegetation_mask"):
+    setattr(SeedViewRegistration, _n, _packed_property(_n, pack_mask, unpack_mask))
+SeedViewRegistration.raw_image = property(
+    lambda self: decode_png(self.__dict__.get("_packed_raw_image")), _view_raw_set,
+    doc="Raw frame, stored as PNG bytes; reads decode it.")
+SeedViewRegistration.image = property(
+    _view_image_get, _view_image_set,
+    doc="Overlay image: stored as given, else redrawn from ``raw_image`` + ``overlay_spec``.")
+for _n in ("pano_building_mask", "pano_water_mask", "pano_vegetation_mask"):
+    setattr(StitchedPanoResult, _n, _packed_property(_n, pack_mask, unpack_mask))
+StitchedPanoResult.pano_sky_mask = property(lambda self: None, lambda self, value: None,
+                                            doc="Never stored (nothing reads it).")
+StitchedPanoResult.stored_bytes = property(lambda self: _stored_bytes(self.__dict__))

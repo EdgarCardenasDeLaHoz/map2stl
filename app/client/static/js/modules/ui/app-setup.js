@@ -173,6 +173,7 @@ window.ensureA11yLabels = function ensureA11yLabels() {
         layerWaterwaysColor: 'Waterways layer color',
         cityRoofShapes: 'Roof shapes',
         cityTrees: 'Trees from survey lidar',
+        cityLevelGround: 'Level ground under buildings',
         cityAlhambra: 'Alhambra reference model',
         exportSeaLevelCap: 'Enable sea level cap',
         exportWalls: 'Enable model side walls',

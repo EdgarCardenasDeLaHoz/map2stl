@@ -111,6 +111,9 @@ export const useAppStore = defineStore('app', {
         modelPreviewState: 'idle' as 'idle' | 'building' | 'ready' | 'error',
         generatedModelData: null as unknown,
         terrainMesh: null as unknown,
+        // 3D view, Colours = Satellite image: also drape the image on buildings (roofs).
+        // ModelContainer.vue's switch sets it; model-viewer.js reads it. Off by default.
+        viewerSatRoofs: false,
 
         // ── UI state ──────────────────────────────────────────────────────────
         activeView: 'map' as 'map' | 'dem' | 'model',

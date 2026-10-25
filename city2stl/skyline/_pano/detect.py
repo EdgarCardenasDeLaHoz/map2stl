@@ -29,7 +29,7 @@ from .._core.skyline import (
 )
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
-from .._region_render._draw import _registration_overlay
+from .._region_render._draw import overlay_spec
 from ..region_config import (
     _F_SKY1_ENABLED,
     _F_SKY5_ENABLED,
@@ -440,7 +440,7 @@ def _register_views(
 
         _assign_seed_index(matched_segments)
         with _sub("registration overlay + band"):
-            overlay = _registration_overlay(image, reg, matched_segments=matched_segments)
+            spec = overlay_spec(reg, matched_segments)
             band = compute_building_band(_bmask, slack_px=20)
         view_rows.append(
             SeedViewRegistration(
@@ -453,7 +453,8 @@ def _register_views(
                 best_offset=float(reg.get("best_offset", 0.0)),
                 estimates_count=len(est_for_view),
                 matched_segments=matched_segments,
-                image=overlay,
+                image=None,
+                overlay_spec=spec,
                 is_aerial=is_aerial,
                 iou=float(reg.get("best_iou", 0.0)),
                 band_y=band,
@@ -516,6 +517,39 @@ def _dedup_matches(segments: list[dict], restore_swapped: bool = False) -> int:
                 loser.pop("seed_index", None)
             dropped += 1
     return dropped
+
+
+def _count_skyline_buildings(mask: np.ndarray, min_step_frac: float = 0.02,
+                             min_width_frac: float = 0.01) -> int:
+    """Buildings in a building mask, for the F-DET1 early-out (T26).
+
+    Counting connected components called a continuous city one building, so good
+    far-skyline seeds were dropped (Cartagena ``auto_180_2000m``: 4 blobs). This walks the
+    mask's top edge instead: after a median filter (``min_width_frac`` of the width, so
+    1-2 px mask noise does not count), the edge is cut wherever it jumps by at least
+    ``min_step_frac`` of the image height or drops to no building, and every piece at least
+    ``min_width_frac`` wide is a building. Towers side by side give one piece each, a sloped
+    roof one. Never less than the old component count.
+    """
+    import cv2  # noqa: PLC0415
+    from scipy.ndimage import median_filter  # noqa: PLC0415
+
+    m = np.asarray(mask) > 0
+    if m.ndim != 2 or not m.any():
+        return 0
+    h_img, w_img = m.shape
+    has = m.any(axis=0)
+    prof = np.where(has, h_img - m.argmax(axis=0), 0).astype(float)
+    k = max(3, int(min_width_frac * w_img)) | 1
+    prof = median_filter(prof, size=k, mode="nearest")
+    cut = np.abs(np.diff(prof)) >= min_step_frac * h_img
+    cut |= (prof[1:] == 0) != (prof[:-1] == 0)
+    bounds = np.concatenate([[0], np.flatnonzero(cut) + 1, [w_img]])
+    min_w = max(1, int(min_width_frac * w_img))
+    pieces = sum(1 for a, b in zip(bounds[:-1], bounds[1:], strict=True)
+                 if b - a >= min_w and prof[a:b].max() > 0)
+    n_components = cv2.connectedComponents(m.astype(np.uint8))[0] - 1
+    return max(pieces, n_components)
 
 
 def _smooth_matches_across_views(
@@ -620,24 +654,14 @@ def _smooth_matches_across_views(
                     next_idx += 1
                 seg["seed_index"] = rebuilt[fid]
         # Re-render the per-view registration overlay so the badge
-        # numbers + colours in the image reflect the smoothed matches.
-        # ``raw_image`` is the unannotated frame stashed during Pass 2.
-        # Falls back to skipping the redraw when raw_image is missing
-        # (older code paths), in which case the badges in the rendered
-        # PNG can diverge from the badges on the map — accepted as
-        # cosmetic until the upstream change lands.
+        # numbers + colours in the image reflect the smoothed matches. The
+        # overlay is redrawn from ``raw_image`` on access (T21), so only its
+        # spec is replaced. The contour & projections were not re-validated
+        # here, so they stay out of the redraw (no stale per-view info).
         for sv in seed_view_rows:
-            raw = getattr(sv, "raw_image", None)
-            if raw is None:
+            if getattr(sv, "raw_image", None) is None:
                 continue
-            # Use a minimal registration dict — the contour & projections
-            # were not re-validated here, so we keep them out of the
-            # redraw to avoid showing stale per-view info.
-            new_overlay = _registration_overlay(
-                raw, {}, matched_segments=sv.matched_segments)
-            # SeedViewRegistration is a frozen dataclass; use object.__setattr__
-            # to mutate ``image`` after construction.
-            object.__setattr__(sv, "image", new_overlay)
+            sv.set_overlay_spec(overlay_spec({}, sv.matched_segments))
 
 def _smooth_pano_matches_against_views(
     pano_result: StitchedPanoResult,
@@ -1828,17 +1852,14 @@ def _build_and_detect_pano(
                                     f"{geom_horizon_row:.0f} "
                                     f"(from {len(geom_pairs)} towers)")
 
-        # Stitch sky + vegetation as separate pano-coord channels (same
-        # source view set & sort order as the building/water stitches
-        # above, so the column geometry agrees with ``pano_img``).
+        # Stitch the vegetation channel (same source view set & sort order as the
+        # building/water stitches above, so the column geometry agrees with
+        # ``pano_img``). The sky channel is not stitched: nothing reads it (T21).
         try:
             from .._core.pano import stitch_pano_mask_channel  # noqa: PLC0415
-            pano_sky_arr = stitch_pano_mask_channel(
-                spin_views_for_pano, seed.fov, spin_step_deg, "sky_mask")
             pano_veg_arr = stitch_pano_mask_channel(
                 spin_views_for_pano, seed.fov, spin_step_deg, "vegetation_mask")
         except Exception:
-            pano_sky_arr = None
             pano_veg_arr = None
 
         footprint_overlap = matched_footprint_overlap(
@@ -1863,8 +1884,6 @@ def _build_and_detect_pano(
                     pano_bmask = np.roll(pano_bmask, roll, axis=1)
                     if pano_wmask is not None:
                         pano_wmask = np.roll(pano_wmask, roll, axis=1)
-                    if pano_sky_arr is not None:
-                        pano_sky_arr = np.roll(pano_sky_arr, roll, axis=1)
                     if pano_veg_arr is not None:
                         pano_veg_arr = np.roll(pano_veg_arr, roll, axis=1)
                     if pano_depth_arr is not None:
@@ -1890,7 +1909,6 @@ def _build_and_detect_pano(
             headings_per_col=pano_headings,
             pano_building_mask=pano_bmask,
             pano_water_mask=pano_wmask,
-            pano_sky_mask=pano_sky_arr,
             pano_vegetation_mask=pano_veg_arr,
             pano_depth=pano_depth_arr,
             depth_scale=depth_scale,
@@ -1908,6 +1926,7 @@ __all__ = [
     '_register_views',
     '_smooth_matches_across_views',
     '_smooth_pano_matches_against_views',
+    '_count_skyline_buildings',
     '_multires_sam_instances',
     '_split_by_depth_discontinuity',
     '_multires_pano_refine',

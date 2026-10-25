@@ -90,3 +90,25 @@ def test_benchmark_withheld_with_the_model():
     assert w[1] is report[1]                                   # tagged: untouched
     c = bm.withheld_buildings(report)
     assert c[0]["effective_height_m"] == UNTAGGED_FALLBACK_M
+
+
+def test_missing_model_file_falls_back_to_the_constant(tmp_path, monkeypatch):
+    """No training file: ``untagged_fallback`` returns None and the withheld row gets the
+    constant; with the file present it gets the model's height."""
+    recs = [_rec("u", 0, 0, 12), _rec("t", 0, 60, 30, "osm_tag", 90.0)]
+    monkeypatch.delenv("SKYLINE_UNTAGGED_FALLBACK", raising=False)
+    monkeypatch.delenv("SKYLINE_WITHHOLD_UNTAGGED", raising=False)
+    up._model.cache_clear()
+    monkeypatch.setattr(up, "TRAIN_CSV", tmp_path / "missing.csv")
+    try:
+        fb = untagged_fallback(recs, "miami")
+        assert fb is None
+        rows = [{"feature_id": "u", "effective_height_m": 120.0,
+                 "effective_height_source": "geometric"}]
+        withhold_untagged_street_view(rows, recs, fallback=fb)
+        assert rows[0]["effective_height_m"] == UNTAGGED_FALLBACK_M
+        assert rows[0]["effective_height_source"] == "withheld:default"
+    finally:
+        up._model.cache_clear()
+    monkeypatch.undo()                                       # file back
+    assert untagged_fallback(recs, "miami") is not None      # the model

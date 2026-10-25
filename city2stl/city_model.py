@@ -1523,6 +1523,7 @@ def build_city_model(
     cache: bool = True,
     trail_context: dict | None = None,
     canopy=None,
+    level_ground: bool = False,
 ) -> CityModel:
     """Terrain from ``dem_m`` (metres, row 0 north, already projected like the
     app's DEM) plus the OSM layers in ``layers_geojson`` ({layer: FeatureCollection}).
@@ -1539,7 +1540,8 @@ def build_city_model(
                             terrain_max_error_mm=terrain_max_error_mm, simplify=simplify,
                             layer_overrides=layer_overrides,
                             landmark_overrides=landmark_overrides, cache=cache,
-                            trail_context=trail_context, canopy=canopy)
+                            trail_context=trail_context, canopy=canopy,
+                            level_ground=level_ground)
 
 
 #: Layers whose OSM query also returns features the buildings layer already has
@@ -1609,6 +1611,134 @@ def drop_building_copies(feats: list[dict], cover: shapely.STRtree | None) -> tu
     return [f for i, f in enumerate(feats) if i not in drop], len(drop)
 
 
+# Level ground under buildings (F-PLINTH). Each building on a slope gets a level pad at
+# the lowest ground under its footprint: the terrain heightfield is flattened there
+# before anything is built on it, so build_layer / _roofed / merge_flat_roofs (which seat
+# a building from the ground under it) see lo == hi == the pad level and need no change:
+# the top is pad + height, the wall is the true height on every side, and every draped
+# layer (roads, green) samples the same terrace.
+PAD_LAYERS = ("buildings", "churches", "towers")   # extruded, not RING_LAYERS
+PAD_MAX_DROP_MM = 3.0     # a building on a bigger drop keeps the buried skirt (no pit)
+
+
+def _patch_corner_cells(terrain: Terrain, polys: Sequence[Polygon]
+                        ) -> tuple[np.ndarray, np.ndarray]:
+    """(polygon index, flat DEM index) of every DEM cell that is a corner of a bilinear
+    patch (the square between four cell centres) touching the polygon: exactly the cells
+    :meth:`Terrain.sample` mixes anywhere inside it. Flatten these and the ground is
+    level under the whole footprint, vertices and cell centres alike."""
+    h, w = terrain.z.shape
+    s = terrain.scale.mm_per_px
+    arr = np.asarray(polys, dtype=object)
+    b = shapely.bounds(arr)
+    ok = np.isfinite(b).all(axis=1)
+    b = np.where(ok[:, None], b, 0.0)
+    j0 = np.clip(np.floor(b[:, 0] / s), 0, w - 2).astype(np.int64)
+    j1 = np.clip(np.floor(b[:, 2] / s), 0, w - 2).astype(np.int64)
+    i0 = np.clip(np.floor((h - 1) - b[:, 3] / s), 0, h - 2).astype(np.int64)
+    i1 = np.clip(np.floor((h - 1) - b[:, 1] / s), 0, h - 2).astype(np.int64)
+    nj = np.where(ok, j1 - j0 + 1, 0)
+    ni = np.where(ok, i1 - i0 + 1, 0)
+    cnt = nj * ni
+    total = int(cnt.sum())
+    if not total:
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
+    k = np.repeat(np.arange(len(arr)), cnt)
+    r = np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+    pi = i0[k] + r // nj[k]
+    pj = j0[k] + r % nj[k]
+    patch = shapely.box(pj * s, (h - 2 - pi) * s, (pj + 1) * s, (h - 1 - pi) * s)
+    shapely.prepare(arr)
+    hit = shapely.intersects(arr[k], patch)
+    k, pi, pj = k[hit], pi[hit], pj[hit]
+    kk = np.concatenate([k, k, k, k])
+    cells = np.concatenate([pi * w + pj, (pi + 1) * w + pj, pi * w + pj + 1, (pi + 1) * w + pj + 1])
+    pair = np.unique(kk * (h * w) + cells)
+    return pair // (h * w), pair % (h * w)
+
+
+def level_pads(terrain: Terrain, polys: Sequence[Polygon], min_drop_mm: float,
+               max_drop_mm: float = PAD_MAX_DROP_MM) -> tuple[np.ndarray, dict]:
+    """The terrain heightfield with a level pad under every building that needs one.
+
+    A building needs a pad when the ground under its footprint drops by at least
+    ``min_drop_mm`` (one print layer) and at most ``max_drop_mm``; the pad level is the
+    lowest ground under it. Pads that share DEM cells are one cluster and take the
+    cluster's lowest level (the stepped terraces of a hill town, and deterministic);
+    a building the cluster level would sink deeper than ``max_drop_mm`` is released
+    to the old buried-skirt seating and the clusters are formed again. Returns
+    (new z, counts).
+    """
+    n = len(polys)
+    z = terrain.z.copy()
+    stats = {"candidates": 0, "pads": 0, "clusters": 0, "capped": 0,
+             "mean_drop_mm": 0.0, "max_drop_mm": 0.0}
+    if not n:
+        return z, stats
+    lo, hi = terrain.ranges_under(polys)
+    drop = hi - lo
+    cand = np.isfinite(drop) & (drop >= min_drop_mm)
+    stats["candidates"] = int(cand.sum())
+    sel = cand & (drop <= max_drop_mm)
+    if not sel.any():
+        stats["capped"] = stats["candidates"]
+        return z, stats
+    arr = np.asarray(polys, dtype=object)
+    idx0 = np.flatnonzero(sel)
+    k0, cell0 = _patch_corner_cells(terrain, arr[idx0])
+    k0 = idx0[k0]
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    level = lo.copy()
+    comp = np.arange(n)
+    for _ in range(8):
+        keep = sel[k0]
+        k, cell = k0[keep], cell0[keep]
+        order = np.argsort(cell, kind="stable")
+        k, cell = k[order], cell[order]
+        same = cell[1:] == cell[:-1]
+        a, b = k[:-1][same], k[1:][same]
+        _, comp = connected_components(coo_matrix((np.ones(len(a)), (a, b)), shape=(n, n)),
+                                       directed=False)
+        floor = np.full(comp.max() + 1, np.inf)
+        np.minimum.at(floor, comp[sel], lo[sel])
+        level = np.where(sel, floor[comp], lo)
+        bad = sel & (hi - level > max_drop_mm)
+        if not bad.any():
+            break
+        sel = sel & ~bad
+    else:
+        sel = sel & (hi - level <= max_drop_mm)
+    if not sel.any():
+        stats["capped"] = stats["candidates"]
+        return z, stats
+    keep = sel[k0]
+    z.ravel()[cell0[keep]] = level[k0[keep]]
+    stats.update(pads=int(sel.sum()), clusters=int(len(np.unique(comp[sel]))),
+                 capped=int(cand.sum() - sel.sum()),
+                 mean_drop_mm=round(float((hi - level)[sel].mean()), 3),
+                 max_drop_mm=round(float((hi - level)[sel].max()), 3))
+    return z, stats
+
+
+def _pad_polygons(terrain: Terrain, layers_geojson: dict, styles: dict[str, LayerStyle],
+                  skip_ids: set[str], cache: bool) -> list[Polygon]:
+    """Footprints of the pad layers as ``build_layer`` extrudes them (parts standing on a
+    tower and landmark-replaced buildings excluded)."""
+    out: list[Polygon] = []
+    for name in PAD_LAYERS:
+        style = styles.get(name)
+        feats = (layers_geojson.get(name) or {}).get("features") or []
+        if style is None or not style.enabled or style.mode != "extrude" or not feats:
+            continue
+        polys, props, _, _ = layer_polygons(name, feats, style, terrain, cache)
+        polys, props, _, _ = assemble_parts(polys, props)
+        out.extend(p for p, pr in zip(polys, props, strict=True)
+                   if min_height_from_tags(pr) <= 0 and str(pr.get("osm_id") or "") not in skip_ids)
+    return out
+
+
 def build_on_terrain(
     z_mm: np.ndarray,
     bbox: dict | None,
@@ -1622,6 +1752,7 @@ def build_on_terrain(
     cache: bool = True,
     trail_context: dict | None = None,
     canopy=None,
+    level_ground: bool = False,
 ) -> CityModel:
     """The feature stage: OSM layers on a finished terrain heightfield.
 
@@ -1629,6 +1760,12 @@ def build_on_terrain(
     as produced by the terrain stage with ``scale``. With no layers this is the
     terrain-only model every mesh export uses. ``bbox`` is needed only to place
     features.
+
+    ``level_ground`` (F-PLINTH): flatten the terrain under every building that stands
+    on a slope to a pad at its lowest ground (:func:`level_pads`), so the building top is
+    pad + height. False (default here; the city export defaults to True): the old seating,
+    top from the highest ground with a buried skirt. The report's ``level_ground`` block
+    counts the pads.
 
     ``landmark_overrides``: ``{osm_id: LandmarkOverride}`` from
     ``city2stl.landmarks.resolve_overrides`` -- those buildings are replaced by an
@@ -1657,11 +1794,19 @@ def build_on_terrain(
         terrain_max_error_mm = max(TERRAIN_MAX_ERROR_MM,
                                    0.5 * SOURCE_VERTICAL_STEP_M * scale.z_mm_per_m)
     t0 = time.perf_counter()
+    styles = resolve_layers(layer_overrides)
+    pad_stats = None
+    if level_ground and bbox:
+        pad_polys = _pad_polygons(terrain, layers_geojson, styles,
+                                  {str(k) for k in (landmark_overrides or {})}, cache)
+        layer_h = max((styles[n].layer_height_mm for n in PAD_LAYERS if n in styles), default=0.1)
+        z_pad, pad_stats = level_pads(terrain, pad_polys, layer_h)
+        if pad_stats["pads"]:
+            terrain = Terrain(z_pad, terrain.bbox, scale)
     ground = terrain_solid(terrain, terrain_max_error_mm, cache=cache)
     timings = {"terrain": round(time.perf_counter() - t0, 2)}
     ground_m = _manifold(ground)
 
-    styles = resolve_layers(layer_overrides)
     report: dict = {"scale": scale.describe(), "dem_shape": list(dem_shape),
                     "diagonal_km": round(bbox_diagonal_km(bbox), 2) if bbox else None,
                     "tolerances_mm": {"terrain": terrain_max_error_mm, "outline": SIMPLIFY_TOL_MM,
@@ -1670,6 +1815,8 @@ def build_on_terrain(
                     "terrain_faces": {"grid": 4 * (dem_shape[0] - 1) * (dem_shape[1] - 1),
                                       "adaptive": int(len(ground[1]))},
                     "layers": {}}
+    if pad_stats is not None:
+        report["level_ground"] = pad_stats
 
     terrain_digest = mc.digest(terrain.z) if cache else ""
     trail_stats = None
@@ -1730,7 +1877,7 @@ def build_on_terrain(
     # The whole model: with every input unchanged, assembly and the lossless
     # simplification (most of a rebuild) are skipped too.
     model_key = (mc.digest(mc.MODEL_CACHE_VERSION, "model", terrain_digest, terrain_max_error_mm,
-                           scale.mm_per_px, sorted(layer_keys.items()), bool(simplify))
+                           scale.mm_per_px, sorted(layer_keys.items()), bool(simplify), bool(level_ground))
                  if cache else "")
     got = _read_model(model_key) if cache else None
     if got is not None:

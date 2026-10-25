@@ -100,3 +100,43 @@ def test_labels_choose_the_tower_that_fits():
     labels[2]["osm_names"] = ["decoy", obs[2].name]
     pose, chosen = solve_from_labels({"labels": labels, "image_px": [4608, 3072]}, index)
     assert chosen[obs[2].name] == obs[2].name and _err_m(pose, cam) < 5
+
+
+# ── T19: camera roll ─────────────────────────────────────────────────────────
+
+def _rolled_scene(cam_en, heading_deg, f, width, roll_deg, n=9, seed=7):
+    """Observations of a photo rolled by ``roll_deg``: columns shift by ``up * sin(roll)``."""
+    rng = np.random.default_rng(seed + 100)
+    obs = _scene(cam_en, heading_deg, f, width, "pinhole", n=n, seed=seed)
+    r, cx = math.radians(roll_deg), width / 2
+    out = []
+    for o in obs:
+        up = rng.uniform(80, 500)                       # tower tops well above the centre row
+        x = cx + (o.x_px - cx) * math.cos(r) - up * math.sin(r)
+        out.append(cs.Obs(x, o.lat, o.lon, o.name, up_px=up * math.cos(r) + (o.x_px - cx) * math.sin(r)))
+    return out
+
+
+def test_fit_roll_recovers_roll_and_pose():
+    cam = (-2500.0, 400.0)
+    obs = _rolled_scene(cam, 80.0, 3000.0, 4608, 4.0)
+    level = cs.solve_pose(obs, 4608)
+    pose = cs.solve_pose(obs, 4608, fit_roll=True)
+    assert abs(pose.roll_deg - 4.0) < 0.5
+    assert pose.rms_px < 1.0 and pose.rms_px < level.rms_px
+    assert _err_m(pose, cam) < 0.5 * _err_m(level, cam)
+    known = cs.solve_pose(obs, 4608, roll_deg=4.0)               # a known roll needs no fitting
+    assert known.roll_deg == 4.0 and known.rms_px < 1.0
+
+
+def test_level_photo_pose_is_unchanged_by_the_roll_options():
+    cam = (-2500.0, 400.0)
+    # rows that differ between towers: equal rows would make roll the same as a heading shift
+    obs = [cs.Obs(o.x_px, o.lat, o.lon, o.name, up_px=80.0 + 60.0 * i)
+           for i, o in enumerate(_scene(cam, 80.0, 3000.0, 4608, "pinhole", n=8, noise=2.0, seed=5))]
+    base = cs.solve_pose([cs.Obs(o.x_px, o.lat, o.lon, o.name) for o in obs], 4608)
+    same = cs.solve_pose(obs, 4608)                              # rows given, roll 0, not fitted
+    assert (same.lat, same.lon, same.heading_deg, same.f_px) == (base.lat, base.lon,
+                                                                   base.heading_deg, base.f_px)
+    fitted = cs.solve_pose(obs, 4608, fit_roll=True)
+    assert abs(fitted.roll_deg) < 1.5 and _err_m(fitted, cam) < 60   # noise leaks into a free roll

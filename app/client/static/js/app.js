@@ -249,6 +249,9 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // Activate default tab (map) so tab button gets .active class
     window.switchView?.('map');
+
+    // A shortcut link (/#region=Granada&tab=edit, region-links.js) opens that region.
+    await window.openRegionFromLocation?.();
 });
 
 // Backward-compat aliases — modules should prefer window.appState.xxx directly.

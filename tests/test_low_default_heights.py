@@ -15,6 +15,7 @@ from app.server.core.city_data import with_low_default_heights
 from city2stl.heights import (
     LOW_DEFAULT_HEIGHT_M,
     _fill_heights,
+    apply_levels_heights,
     apply_low_default_heights,
     default_height_for,
     is_low_default_footprint,
@@ -132,3 +133,39 @@ def test_with_low_default_heights_payload():
     assert payload["buildings"]["features"][0]["properties"]["height_m"] == 10.0
     assert with_low_default_heights(out) is out
     assert with_low_default_heights({}) == {}
+
+
+def test_post_cache_rederives_levels_without_the_flat_roof_floor():
+    # Cached before 2026-10-20: every levels-tagged building got a roof floor.
+    fc = _fc(
+        {"building:levels": "4", "height_m": 16.0, "height_source": "osm_levels"},
+        {"building:levels": "4", "roof:shape": "flat", "height_m": 16.0,
+         "height_source": "osm_levels"},
+        {"building:levels": "4", "roof:shape": "gabled", "height_m": 16.0,
+         "height_source": "osm_levels"},
+        {"building:levels": "4", "roof:levels": "2", "height_m": 16.0,
+         "height_source": "osm_levels"},
+        {"building:levels": "4", "height_m": 22.0, "height_source": "osm_tag"},
+        {"building:levels": "4", "height_m": 19.0, "height_source": "survey"},
+        {"height_m": 9.6, "height_source": "osm_levels"},       # tags lost: keep
+    )
+    before = copy.deepcopy(fc)
+    out, n = apply_levels_heights(fc)
+    assert fc == before
+    assert n == 3
+    hs = [f["properties"]["height_m"] for f in out["features"]]
+    assert hs == [12.8, 12.8, 16.0, 19.2, 22.0, 19.0, 9.6]
+    assert all(f["properties"]["height_source"] == g["properties"]["height_source"]
+               for f, g in zip(out["features"], fc["features"], strict=True))
+    again, n2 = apply_levels_heights(out)
+    assert n2 == 0 and again is out
+
+
+def test_with_low_default_heights_rederives_levels_before_lowering_ruins():
+    payload = {"buildings": _fc(
+        {"building:levels": "3", "height_m": 12.8, "height_source": "osm_levels"},
+        {"building": "ruins", "building:levels": "3", "height_m": 12.8,
+         "height_source": "osm_levels"})}
+    props = [f["properties"] for f in with_low_default_heights(payload)["buildings"]["features"]]
+    assert [p["height_m"] for p in props] == [9.6, 3.0]
+    assert [p["height_source"] for p in props] == ["osm_levels", "default"]

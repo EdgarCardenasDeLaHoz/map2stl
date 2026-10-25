@@ -24,7 +24,13 @@ the route's gate passes:
    38 rejected photos, 2026-10-07 (``docs/decisions/building-heights.md``).
 
 Towers in each kept photo: ``photo_heights.measure_towers`` + ``loo_heights``, towers beyond
-``--max-dist-m`` dropped (a tower 7.7 km away read +208 m). Per building: median over photos.
+``--max-dist-m`` dropped (a tower 7.7 km away read +208 m). Each reading has a median-row height
+(``photo_m``) and a peak-row height (``peak_m``, T17 stepped tops). Per building: the photos'
+readings are combined with ``photo_heights.combine_photo_heights``, a median weighted by each
+photo's anchor deviation (T30, ``--photo-weighting anchor``, the default; ``median`` is the plain
+median), on the peak readings where ``photo_heights.choose_top`` finds the photos agree better on
+the peak (``--top``: ``auto`` default, ``median`` never uses the peak). A row keeps the old
+plain-median result as ``photo_median_m`` and says which top it used (``top``).
 Every candidate photo is measured, kept or not, and saved to ``photo_results.json`` with its
 towers' truth, so the gates (incl. ``--max-anchor-dev``: towers must agree with their own OSM
 heights) can be tuned with ``--rescore`` without placing photos again. Refinement tries camera
@@ -113,13 +119,17 @@ def _measure(prof, pose: ph.PhotoPose, max_dist_m: float, h_cam: float = 2.0):
     # bias the others' tilt and camera-height fit too, so refit without them and flag them
     flags = {m.index: f for m in ms if m.index in est
              and (f := ph.reading_flag(est[m.index], m.osm_height_m, m.dist_m, h_cam))}
+    est_peak = ph.loo_heights(ms, top="peak")
     if flags:
-        refit = ph.loo_heights([m for m in ms if m.index not in flags])
+        good = [m for m in ms if m.index not in flags]
+        refit = ph.loo_heights(good)
         est = {**refit, **{i: est[i] for i in flags}}
+        est_peak = {**ph.loo_heights(good, top="peak"), **{i: est_peak[i] for i in flags if i in est_peak}}
         flags.update({m.index: f for m in ms if m.index in refit
                       and (f := ph.reading_flag(refit[m.index], m.osm_height_m, m.dist_m, h_cam))})
     rows = [{"tower": m.index, "name": m.name, "dist_m": round(m.dist_m),
              "photo_m": round(est[m.index], 1), "osm_m": m.osm_height_m, "fp": _tower_key(towers, m.index),
+             **({"peak_m": round(est_peak[m.index], 1)} if m.index in est_peak else {}),
              **({"flag": flags[m.index]} if m.index in flags else {})}
             for m in ms if m.index in est]
     # every reading counts here: a misplaced photo shows up as many towers far from their tags
@@ -219,6 +229,26 @@ def _shared_buildings(results: list[dict], rows: list[dict]) -> list[dict]:
     return sorted(out, key=lambda b: (-len(b["reads"]), b["name"]))
 
 
+def _building_row(towers, keys: dict, ti: int, reads: list[tuple], weighted: bool,
+                  use_peak: bool, n_confirmed: int, truth_m) -> dict:
+    """One building's row from its readings ``(median m, peak m, photo anchor dev)``: the top
+    (``ph.choose_top``), then the combination (``ph.combine_photo_heights``). ``photo_median_m``
+    is the plain median of the median readings, what this stage gave before T17/T30."""
+    med = [r[0] for r in reads]
+    top = ph.choose_top(med, [r[1] for r in reads]) if use_peak else "median"
+    hs = [r[1] for r in reads] if top == "peak" else med
+    devs = [r[2] for r in reads] if weighted else None
+    row = {"tower": int(ti), "name": towers.names[ti], "key": keys[ti],
+           "photo_m": round(ph.combine_photo_heights(hs, devs), 1), "n_photos": len(hs),
+           "n_confirmed": n_confirmed,
+           "spread_m": round(float(np.ptp(hs)), 1) if len(hs) > 1 else 0.0,
+           "photo_median_m": round(float(np.median(med)), 1), "top": top,
+           "osm_m": float(towers.height_m[ti]), "truth_m": truth_m}
+    if weighted:
+        row["weight"] = round(sum(ph.photo_weight(d) for d in devs), 3)
+    return row
+
+
 def _tower_key(towers, ti: int) -> str:
     """Stable id of a tower (its footprint key): the table index changes when OSM is re-fetched."""
     return bm.footprint_key([list(towers.to_ll(x, y))[::-1] for x, y in towers.verts[ti]])
@@ -311,10 +341,8 @@ def _job(job: dict) -> dict:
         if not hits:
             return {**res, "gate_ok": False, "why": "no fit", "towers": [], "anchor_dev_m": None}
         best = hits[0]
-        x0, y0 = towers.to_xy(best.lat, best.lon)
-        rival = next((h for h in hits[1:]
-                      if math.hypot(*np.subtract(towers.to_xy(h.lat, h.lon), (x0, y0))) > 500), None)
-        margin = (rival.misfit - best.misfit) if rival else 1.0
+        # T18: only a rival that identifies a different set of towers counts.
+        margin, _rival = sm.gate_margin(prof, towers, hits)
         kept = margin >= job["min_margin"] and cover >= job["min_coverage"]
         pose = ph.PhotoPose(best.lat, best.lon, best.heading_deg, best.hfov_deg)
         res.update(camera={"lat": best.lat, "lon": best.lon, "heading_deg": best.heading_deg,
@@ -617,20 +645,19 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
               if t["truth_m"] is not None and not t.get("flag")]
         r["score"] = _score(*zip(*ct, strict=True)) if len(ct) >= 2 else {}
     _cross_check(results)
-    per: dict[int, list[float]] = {}
+    per: dict[int, list[tuple[float, float, float | None]]] = {}   # (median m, peak m, photo dev)
     confirmed: dict[int, int] = {}
     for r in results:
         if r["kept"]:
             for t in r.get("towers") or []:
                 if not t.get("flag"):
-                    per.setdefault(t["tower"], []).append(t["photo_m"])
+                    per.setdefault(t["tower"], []).append(
+                        (t["photo_m"], t.get("peak_m", t["photo_m"]), r.get("anchor_dev_m")))
                     confirmed[t["tower"]] = confirmed.get(t["tower"], 0) + bool(t.get("confirmed_by"))
-    rows = [{"tower": int(ti), "name": towers.names[ti], "key": keys[ti],
-             "photo_m": round(float(np.median(hs)), 1), "n_photos": len(hs),
-             "n_confirmed": confirmed.get(ti, 0),
-             "spread_m": round(float(np.ptp(hs)), 1) if len(hs) > 1 else 0.0,
-             "osm_m": float(towers.height_m[ti]), "truth_m": tv(ti)}
-            for ti, hs in per.items()]
+    weighted = getattr(args, "photo_weighting", "anchor") == "anchor"
+    use_peak = getattr(args, "top", "auto") == "auto"
+    rows = [_building_row(towers, keys, ti, rd, weighted, use_peak, confirmed.get(ti, 0), tv(ti))
+            for ti, rd in per.items()]
 
     # Street View on the same buildings (footprint key, else nearest centroid within 30 m)
     heights = args.report / "heights.json"
@@ -813,6 +840,12 @@ def main() -> int:
     ap.add_argument("--rescue-max-p75", type=float, default=40.0,
                     help="a rescued photo's 75th-percentile |photo - OSM| (m) must stay under "
                          "this; see _keep")
+    ap.add_argument("--photo-weighting", choices=("anchor", "median"), default="anchor",
+                    help="combine a building's photo readings by a median weighted 1/max(photo "
+                         "anchor deviation, 5 m) (T30, default), or the plain median")
+    ap.add_argument("--top", choices=("auto", "median"), default="auto",
+                    help="auto: a tower's peak row where photos agree better on it (T17 stepped "
+                         "tops); median: always the median row")
     ap.add_argument("--untagged", action="store_true",
                     help="also measure untagged buildings that 2+ kept photos agree on (C2)")
     ap.add_argument("--untagged-max-dist-m", type=float, default=ph.UNTAGGED_MAX_DIST_M,

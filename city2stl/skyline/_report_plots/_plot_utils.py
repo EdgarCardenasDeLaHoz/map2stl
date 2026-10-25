@@ -175,7 +175,31 @@ def _bearing_xcorr_offset(
     return shift, best_mae, scores, applied, improve
 
 
+def colormap_u8(cmap, values) -> np.ndarray:
+    """``(cmap(values) * 255).astype(uint8)[..., :3]`` without the float64 RGBA temporary (T22).
+
+    ``cmap(values)`` for a float array builds an (H, W, 4) float64 array (~1 GB for a
+    Commons pano). A colormap has ``cmap.N`` colours, so the same result is a 256-entry
+    table and one small integer index per pixel, with matplotlib's own binning
+    (``floor(v * N)``, 1.0 into the last bin; NaN, below 0 and above 1 get the bad, under
+    and over colours).
+    """
+    n = int(cmap.N)
+    lut = (cmap(np.arange(n)) * 255).astype(np.uint8)[:, :3]
+    extra = (cmap(np.array([np.nan, -1, n])) * 255).astype(np.uint8)[:, :3]
+    table = np.concatenate([lut, extra])         # rows n, n+1, n+2: bad, under, over
+    v = np.asarray(values)
+    x = v * np.asarray(n, dtype=v.dtype) if v.dtype.kind == "f" else v.astype(np.float64) * n
+    x[x == n] = n - 1
+    bad, under, over = np.isnan(x), x <= -1, x >= n
+    with np.errstate(invalid="ignore"):
+        idx = np.clip(x, 0, n - 1).astype(np.intp)       # truncation, as matplotlib's astype(int)
+    idx[bad], idx[under], idx[over] = n, n + 1, n + 2
+    return table[idx]
+
+
 __all__ = [
+    'colormap_u8',
     'POLAR_MAX_M',
     'NO_BUILDING_M',
     '_fmt_optional_float',
