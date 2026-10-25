@@ -92,6 +92,7 @@ def _propose_standoff_locations(
     high_rises: list[tuple[float, float, float]],
     osm_data: dict,
     n_max: int = 6,
+    extra_centroids: list[tuple[float, float]] | None = None,
 ) -> list[SkylinePoint]:
     """Generate candidate viewpoints from OSM building geometry.
 
@@ -103,6 +104,11 @@ def _propose_standoff_locations(
        (fewer obstructions = better), water adjacency bonus × 1.4.
     4. Deduplicate candidates within 200 m of each other.
     5. Return top ``n_max`` as SkylinePoint(source="auto").
+
+    ``extra_centroids`` (lat, lon): footprints OSM lacks (satellite, F-SKY8), counted by the
+    F-DET2 FOV gate only (F-DET A4: an OSM-only count rejects every view of an OSM-sparse city,
+    the cities satellite footprints are for). The foreground and nearest-building checks stay
+    OSM-only, so a hallucinated satellite pier never vetoes a camera.
 
     The camera heading is always aimed at the cluster centroid so the skyline
     is centred in the frame. This replicates the geometry that made seed_1
@@ -126,6 +132,8 @@ def _propose_standoff_locations(
         c = _feature_centroid(feat)
         if c is not None:
             all_centroids.append(c)
+
+    fov_centroids = all_centroids + list(extra_centroids or ())
 
     # 3. Water-polygon vertex list for the adjacency bonus.
     water_verts: list[tuple[float, float]] = []
@@ -186,7 +194,7 @@ def _propose_standoff_locations(
         30–60 s on registration.
         """
         count = 0
-        for (blat, blon) in all_centroids:
+        for (blat, blon) in fov_centroids:
             d = _distance_m(lat, lon, blat, blon)
             if d > max_dist_m:
                 continue

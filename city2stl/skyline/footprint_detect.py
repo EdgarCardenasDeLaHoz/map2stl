@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._core.segmentation import _ADE20K_VEGETATION_CLASSES, _ADE20K_WATER_CLASSES
+from ._core.tiers import agree as _agree
 
 BEARING_BIN_DEG = 0.1
 N_BEARINGS = int(round(360 / BEARING_BIN_DEG))
@@ -905,12 +906,11 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0,
 
         def bound(r, top=top_photo):            # a lower bound under a photo reading
             h = r[1]["height_m"]
-            return bool(r[1].get("lower_bound")) and top > h + agree * max(1.0, h)
+            return bool(r[1].get("lower_bound")) and top > h and not _agree(top, h, rel=agree)
 
         anchor = next((r for r in got if not bound(r)), got[0])
         best = anchor[1]["height_m"]
-        tol = agree * max(1.0, best)
-        keep = [r for r in got if abs(r[1]["height_m"] - best) <= tol and not bound(r)]
+        keep = [r for r in got if _agree(r[1]["height_m"], best, rel=agree) and not bound(r)]
         out_v = [r for r in got if r not in keep and not (bound(r) and r[1]["height_m"] < best)]
         w = np.array([r[2] for r in keep])
         drones = {grp(r[0]) for r in keep

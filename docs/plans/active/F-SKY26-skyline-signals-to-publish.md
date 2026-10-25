@@ -515,6 +515,15 @@ Two constraints follow:
     flagged; Honolulu 0 of 19 only); see Rejected hypotheses, building-heights.md. Needs tag-independent height
     evidence for F.
 
+- 2026-10-23, approach step 8 (camera pose check), logged only: `floor_bands.pose_check` fits
+  `storey ~ s - s (u . e) / range` over each seed's plot-matched floor counts (`seed_floors` now
+  keeps `storey_m`, `plot_dist_m`, `bearing_deg`) and returns the camera offset `e` that the floor
+  spacing implies, with its standard error. `elevated.measure_elevated_seed` logs it after the floors cache
+  ("floor-spacing pose check (log only)"). Tests: synthetic 11 m offset recovered within 1 m, with
+  an outlier dropped. Matching keeps storeys inside `STOREY_M`, so a large offset is
+  underestimated. Next: read the logged offsets on the Cartagena seeds against the waterline
+  positions before making it a gate or tie-break.
+
 ## Addendum (2026-10-07): survey LiDAR and verification tiers
 The user chose all three ways to handle low-rises: near-field street views (being studied), tiered
 verification, and survey LiDAR where it is free. Design review findings:

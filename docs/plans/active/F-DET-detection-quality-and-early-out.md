@@ -296,10 +296,20 @@ distance cut because it degrades gracefully.
 1. **Instrument before fixing (replaces blind F-DET4):** add the per-seed diagnostics
    in A7 to `city2stl/skyline/_pano/orchestrator.py` + the pano summary table. Re-run the 4 suspect
    cities and *confirm* each cause.
+   *Instruments done 2026-10-23:* `StitchedPanoResult.snap_m` (orchestrator: proposed seed ->
+   resolved pano, metres) and `footprint_overlap` (`_pano/detect.py::matched_footprint_overlap`,
+   median column IoU of matched tower vs footprint projection) are columns in the pano summary;
+   a "weak — mismatch" label names the likely cause (`html_report._mismatch_cause`: snap
+   > 100 m far snap; overlap < 0.35 segmentation, or bearing when a shift was applied; else
+   OSM gap?). Thresholds are guesses; the re-run of the 4 suspect cities (needs Street View on
+   cache misses and a GPU) is still to do.
 2. **Validate the quality proxy (A2):** correlate label vs. actual height MAE on
    curated regions. If they don't correlate, re-base the labels on height error.
 3. **Fix the F-DET2/4a tension (A4):** make the FOV gate satellite-aware before adding
    more satellite-footprint regions.
+   *Done 2026-10-23:* `seed_selection._propose_standoff_locations(extra_centroids=)` counts
+   `ms_buildings` centroids in the FOV gate only (foreground and nearest-building checks stay
+   OSM-only); `region_pdf` passes them when `use_satellite_footprints` is on.
 4. **Then, and only then,** apply the confirmed 4a/4b/4c fixes — preferring the
    graceful bearing-penalty over the hard snap cut, and adding a held-out region to
    check the thresholds generalise.

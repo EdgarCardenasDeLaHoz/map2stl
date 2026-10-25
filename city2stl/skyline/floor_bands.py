@@ -1061,3 +1061,68 @@ def high_rise_height(prior_m: float | None, info: dict | None) -> float | None:
         return None
     h = floors_height(info["floors"], info.get("storey_m") or NOMINAL_FLOOR_M)
     return max(float(prior_m), h) if prior_m is not None else h
+
+
+# --------------------------------------------------------------------------- pose check (step 8)
+
+#: Fewest plot-matched floor counts :func:`pose_check` fits a camera offset to.
+POSE_CHECK_MIN = 8
+#: Residuals under this share of the storey are never dropped as outliers.
+POSE_CHECK_FLOOR = 0.03
+
+
+def pose_check(entries) -> dict | None:
+    """Camera-position check from floor spacing (F-SKY26 step 8; logged only, not a gate yet).
+
+    A floor count's storey height read at its matched footprint's range (``storey_m`` = period x
+    ``plot_dist_m``) is the true storey ``s`` times the pose's range over the true one. A pose
+    camera off the true one by ``e`` (east, north metres) shortens the range on bearing ``u`` by
+    ``u . e``, so ``storey_m ~ s - s (u . e) / plot_dist_m``: linear in ``s`` and ``s e``. Floor
+    spacing does not depend on the camera's position, heading or height, so this checks the
+    position independently. Least squares, refitted without residuals over 3 MADs
+    (and over :data:`POSE_CHECK_FLOOR`).
+
+    ``entries``: dicts with ``storey_m``, ``plot_dist_m`` and ``bearing_deg`` (``seed_floors``);
+    others are skipped. Only footprints at a plausible storey (``STOREY_M``) are ever matched, so
+    a large offset is underestimated. ``None`` with fewer than :data:`POSE_CHECK_MIN` counts.
+
+    Returns ``{"n", "storey_m", "shift_e_m", "shift_n_m", "shift_m", "se_m", "resid_rel"}``:
+    ``shift`` moves the pose camera to where the floor spacing puts it (``-e``); ``se_m`` its
+    standard error (inf when the bearings cannot resolve it); ``resid_rel`` the residual MAD
+    over the storey."""
+    rows = []
+    for d in entries or ():
+        try:
+            s, r, b = float(d["storey_m"]), float(d["plot_dist_m"]), float(d["bearing_deg"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(s) and math.isfinite(r) and math.isfinite(b) and r > 0:
+            rows.append((s, r, b))
+    if len(rows) < POSE_CHECK_MIN:
+        return None
+    y, d, b = (np.array(c, float) for c in zip(*rows, strict=True))
+    br = np.radians(b)
+    x = np.column_stack([np.ones_like(y), -np.sin(br) / d, -np.cos(br) / d])
+    keep = np.ones(len(y), bool)
+    for _ in range(2):
+        beta = np.linalg.lstsq(x[keep], y[keep], rcond=None)[0]
+        res = y - x @ beta
+        mad = 1.4826 * float(np.median(np.abs(res[keep] - np.median(res[keep]))))
+        # floor: the linear model's own error on near walls is a few per cent
+        new = np.abs(res) <= max(3.0 * mad, POSE_CHECK_FLOOR * float(beta[0]))
+        if new.sum() < POSE_CHECK_MIN or (new == keep).all():
+            break
+        keep = new
+    xk, rk = x[keep], res[keep]
+    n = int(keep.sum())
+    s = float(beta[0])
+    e = beta[1:] / s
+    dof = max(n - 3, 1)
+    if np.linalg.matrix_rank(xk) < 3:
+        se = math.inf
+    else:
+        cov = float(rk @ rk) / dof * np.linalg.inv(xk.T @ xk)
+        se = float(math.hypot(math.sqrt(max(cov[1, 1], 0.0)), math.sqrt(max(cov[2, 2], 0.0)))) / s
+    return {"n": n, "storey_m": s, "shift_e_m": float(-e[0]), "shift_n_m": float(-e[1]),
+            "shift_m": float(math.hypot(*e)), "se_m": se,
+            "resid_rel": 1.4826 * float(np.median(np.abs(rk - np.median(rk)))) / s}

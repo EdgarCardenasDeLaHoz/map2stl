@@ -410,3 +410,42 @@ def test_high_rise_hook_only_raises_the_prior():
     assert fl.high_rise_height(12.0, dict(info, storey_m=None)) == pytest.approx(20 * 3.1 + 3)
     assert fl.high_rise_height(12.0, dict(info, high_rise_seen=False)) is None
     assert fl.high_rise_height(12.0, None) is None
+
+
+# --------------------------------------------------------------------------- pose check (step 8)
+
+def _pose_entries(shift=(10.0, -5.0), storey=3.2, n=40, seed=0):
+    """Plots seen from a pose camera at ``shift`` (east, north) off the true camera at (0, 0)."""
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(n):
+        b = rng.uniform(0, 2 * np.pi)
+        r = rng.uniform(60, 300)
+        p = np.array([r * np.sin(b), r * np.cos(b)])         # the wall, from the true camera
+        v = p - np.array(shift)                               # ... and from the pose camera
+        d = float(np.hypot(*v))
+        # period x pose range: the true storey scaled by pose range over true range
+        out.append({"storey_m": storey * d / r, "plot_dist_m": d,
+                    "bearing_deg": float(np.degrees(np.arctan2(v[0], v[1])))})
+    return out
+
+
+def test_pose_check_recovers_the_camera_offset():
+    from city2stl.skyline.floor_bands import pose_check
+    chk = pose_check(_pose_entries())
+    assert chk["n"] == 40
+    assert chk["storey_m"] == pytest.approx(3.2, abs=0.05)
+    # the shift moves the pose camera back onto the true one
+    assert chk["shift_e_m"] == pytest.approx(-10.0, abs=1.0)
+    assert chk["shift_n_m"] == pytest.approx(5.0, abs=1.0)
+
+
+def test_pose_check_drops_an_outlier_and_needs_enough_counts():
+    from city2stl.skyline.floor_bands import POSE_CHECK_MIN, pose_check
+    ents = _pose_entries(n=30, seed=1)
+    ents[0] = {**ents[0], "storey_m": 4.9}                  # a miscounted building
+    chk = pose_check(ents)
+    assert chk["n"] == 29
+    assert chk["shift_e_m"] == pytest.approx(-10.0, abs=1.0)
+    old = [{"floors": 5.0}] * 20                              # cached dicts without the new keys
+    assert pose_check(old + ents[: POSE_CHECK_MIN - 1]) is None

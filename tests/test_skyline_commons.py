@@ -187,3 +187,33 @@ def test_pipeline_reuses_only_unchanged_outcomes(monkeypatch):
     assert pp._reusable(job("p3", "File:C.jpg", "recorded")) is not None
     assert pp._reusable(job("p3", "File:C.jpg", "recorded", projection="cylindrical")) is None
     assert pp._reusable(job("p4", "File:D.jpg", "recorded")) is None     # newly reaches the fit
+
+
+def test_low_light_needs_score_and_coverage():
+    # the 2026-10-07 review: dark and murky, dark and partial, dark and clear, day photos
+    assert cp.quality_reject({"score": 0.108, "coverage": 0.64}, 150.0).startswith("unclear")
+    assert cp.quality_reject({"score": 0.19, "coverage": 0.54}, 150.0).startswith("partial")
+    assert cp.quality_reject({"score": 0.110, "coverage": 0.90}, 150.0) is None
+    assert cp.quality_reject({"score": 0.02, "coverage": 0.30}, 200.0) is None
+
+
+def test_rescue_needs_a_tight_upper_quartile():
+    import importlib.util
+    from argparse import Namespace
+    from pathlib import Path
+
+    path = Path(cp.__file__).parent / "scripts" / "17_photo_pipeline.py"
+    spec = importlib.util.spec_from_file_location("photo_pipeline_17", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    args = Namespace(rescue_anchor_dev=20.0, rescue_min_towers=12, rescue_max_p75=40.0,
+                     max_anchor_dev=None, min_towers=4)
+
+    def photo(devs):
+        return {"gate_ok": False, "anchor_dev_m": sorted(devs)[len(devs) // 2],
+                "towers": [{"photo_m": 50.0 + d, "osm_m": 50.0} for d in devs]}
+
+    assert mod._keep(photo([10.0] * 12 + [30.0] * 8), args)           # p75 30 m
+    assert not mod._keep(photo([10.0] * 11 + [80.0] * 9), args)       # median 10, p75 80 (Miami p20)
+    assert mod._keep(photo([10.0] * 11 + [80.0] * 9), Namespace(**{**vars(args), "rescue_max_p75": None}))
+    assert not mod._keep(photo([10.0] * 11), args)                    # too few towers

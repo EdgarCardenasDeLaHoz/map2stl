@@ -9,7 +9,9 @@ left the panorama with the render's skyline in red, right the render with the sa
 The model cache holds model millimetres; they are turned back into metres with the true print
 scale (``Georef``: horizontal mm per metre from the export bbox, vertical the same, i.e. no
 exaggeration, checked against the buildings' ``height_m``), so the camera sits at the pano's
-lat/lon, 2.5 m above the terrain, with the pano's heading, pitch and field of view.
+lat/lon, 2.5 m above the terrain, with the pano's heading, pitch and field of view. A pano whose
+position falls inside a building footprint (``--polygons``; OSM outlines and Google positions
+disagree by a few metres) is moved to the nearest point outside it, plus ``CLEAR_M``.
 
 No GL is installed, so this is a small software rasteriser: faces are clipped to the near plane,
 sorted far to near and filled with ``cv2.fillConvexPoly`` (painter's algorithm) at 2x and
@@ -30,9 +32,15 @@ if str(REPO) not in sys.path:
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-from tools.eval.score_export_heights import GRANADA_BBOX, Georef, load_model_meshes  # noqa: E402
+from tools.eval.score_export_heights import (  # noqa: E402
+    GRANADA_BBOX,
+    Georef,
+    load_model_meshes,
+    load_polygons,
+)
 
 EYE_M = 2.5
+CLEAR_M = 1.5   # how far outside a footprint a moved camera stands
 MAX_DIST_M = 3500.0
 NEAR_M = 0.5
 SS = 2   # supersampling
@@ -43,7 +51,8 @@ PART_COLORS = {   # BGR
     "walls": (150, 175, 205), "towers": (150, 175, 205), "roads": (95, 95, 100), "railways": (80, 80, 85),
     "green": (100, 150, 110), "trees": (70, 130, 70), "rivers": (170, 140, 90),
 }
-DEFAULT_NPZ = REPO / "cache" / "city_models" / "1c9548462965890c4a425507287d8ce4b6c8f396.npz"
+DEFAULT_NPZ = REPO / "cache" / "city_models" / "2ee6aaa3538a0aa6a183872e7739a6f56deb5f0c.npz"
+DEFAULT_POLYGONS = "db1dfbff27f1"   # the buildings of that export
 
 
 def camera_basis(heading_deg: float, pitch_deg: float):
@@ -57,7 +66,7 @@ def camera_basis(heading_deg: float, pitch_deg: float):
 class Scene:
     """Model parts in metres (east, north, up) plus the terrain height lookup."""
 
-    def __init__(self, npz: Path, geo: Georef, trees: bool = False):
+    def __init__(self, npz: Path, geo: Georef, trees: bool = False, polygons=None):
         skip = {"__merged__"} | (set() if trees else {"trees"})   # canopy solids swallow street-level cameras
         parts = {n: m for n, m in load_model_meshes(npz).items() if n not in skip}
         self.sx, self.sy, self.sz = geo.wmm / geo.width_m, geo.hmm / geo.height_m, geo.z_mm_per_m
@@ -75,6 +84,27 @@ class Scene:
         tv = parts["terrain"][0] / scale
         self._terrain = LinearNDInterpolator(tv[:, :2], tv[:, 2])
         self._tv = tv
+        self.polys = None   # footprints in metres, for moving a camera out of a building
+        if polygons is not None and len(polygons):
+            import shapely
+            self.polys = shapely.transform(np.asarray(polygons, dtype=object),
+                                           lambda c: c / [self.sx, self.sy])
+            self._ptree = shapely.STRtree(self.polys)
+
+    def outside(self, e: float, n: float) -> tuple[float, float, bool]:
+        """(e, n) unchanged, or moved just outside the footprint it falls in; the flag says which."""
+        if self.polys is None:
+            return e, n, False
+        import shapely
+        from shapely.ops import nearest_points
+        pt, moved, block = shapely.Point(e, n), False, None
+        for _ in range(4):   # the step out can land in a neighbour; take that one in too
+            hit = self._ptree.query(pt, predicate="within")
+            if not len(hit):
+                break
+            block = shapely.union_all(np.concatenate([self.polys[hit], [block]]) if block is not None else self.polys[hit])
+            pt, moved = nearest_points(block.buffer(CLEAR_M).boundary, pt)[0], True
+        return float(pt.x), float(pt.y), moved
 
     def ground(self, e: float, n: float) -> float:
         z = float(self._terrain(e, n))
@@ -102,7 +132,7 @@ def render(scene: Scene, geo: Georef, lat: float, lon: float, heading: float, pi
            fov: float, size: int = 640):
     """(BGR image, skyline rows per column, camera info) of the model seen from the pano."""
     x_mm, y_mm = geo.to_mm(lon, lat)
-    e0, n0 = float(x_mm) / scene.sx, float(y_mm) / scene.sy
+    e0, n0, moved = scene.outside(float(x_mm) / scene.sx, float(y_mm) / scene.sy)
     g = scene.ground(e0, n0)
     eye = np.array([e0, n0, g + EYE_M])
     fwd, right, up = camera_basis(heading, pitch)
@@ -156,7 +186,7 @@ def render(scene: Scene, geo: Georef, lat: float, lon: float, heading: float, pi
     img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
     cover = cv2.resize(mask, (size, size), interpolation=cv2.INTER_AREA) > 127
     sky_row = np.where(cover.any(0), cover.argmax(0), size)
-    return img, sky_row, {"ground_m": round(g, 1), "eye_xy_m": [round(e0), round(n0)], "tris": int(len(pts))}
+    return img, sky_row, {"ground_m": round(g, 1), "eye_xy_m": [round(e0), round(n0)], "moved": moved, "tris": int(len(pts))}
 
 
 def draw_skyline(img: np.ndarray, rows: np.ndarray, color=(0, 0, 255)) -> np.ndarray:
@@ -181,6 +211,8 @@ def compose(pano: np.ndarray, rend: np.ndarray, rows: np.ndarray, title: str) ->
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--npz", type=Path, default=DEFAULT_NPZ)
+    ap.add_argument("--polygons", default=DEFAULT_POLYGONS,
+                    help="city_polygons file or key prefix of the export's buildings; '' = none")
     ap.add_argument("--out", type=Path, default=REPO / "runs" / "panoview" / "granada")
     ap.add_argument("--bbox", type=float, nargs=4, default=GRANADA_BBOX, metavar=("S", "W", "N", "E"))
     ap.add_argument("--trees", action="store_true", help="render the canopy solids too")
@@ -188,7 +220,7 @@ def main() -> None:
     ap.add_argument("--heading-offset", type=float, default=0.0, help="degrees added to the pano heading")
     a = ap.parse_args()
     geo = Georef(tuple(a.bbox))
-    scene = Scene(a.npz, geo, a.trees)
+    scene = Scene(a.npz, geo, a.trees, load_polygons(a.polygons)[0] if a.polygons else None)
     man = json.loads((a.out / "manifest.json").read_text(encoding="utf-8"))
     for n, v in enumerate(man["views"], 1):
         pano_file = a.out / v["file"]
@@ -197,7 +229,8 @@ def main() -> None:
         pano = cv2.imread(str(pano_file))
         rend, rows, info = render(scene, geo, v["lat"], v["lon"], v["heading"] + a.heading_offset,
                                   v["pitch"], v["fov"], size=pano.shape[0])
-        title = f"{n}. {v['name']}  pano {v['date']}  heading {v['heading']:.0f}  ground {info['ground_m']} m"
+        title = f"{n}. {v['name']}  pano {v['date']}  heading {v['heading']:.0f}  ground {info['ground_m']} m" + \
+            ("  (moved out of a footprint)" if info["moved"] else "")
         name = f"view_{n}{'_' + a.tag if a.tag else ''}.png"
         cv2.imwrite(str(a.out / name), compose(pano, rend, rows, title))
         print(name, info)

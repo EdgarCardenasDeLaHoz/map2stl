@@ -7,12 +7,57 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-23 — Google 3D Tiles ground can be a sloped plane per window (`ground="plane"`), opt-in
+- **Problem:** `_ground_from_dsm` takes a per-window p5 of the DSM as flat ground. On a hillside the
+  window's low corner sets the ground, so buildings uphill read tall: about +1.26 m per 1 % of slope.
+  This is the likely cause of Seattle's +3.9 m bias against its LiDAR truth.
+- **Fix:** `Google3DProvider(ground="plane")` fits a plane per window: a least-squares fit, then 4
+  refits on the lowest 15 % of residuals. The windows are tent-blended.
+  - The keep share must stay under the window's ground share. At 30 %, roof cells got into a
+    synthetic scene with 28 % ground and read -0.75 m on every slope.
+- **Synthetic check** (`tests/test_height/test_google_3d.py::test_plane_ground_holds_on_slopes`), mean
+  roof error:
+
+  | Slope | Old p5 | Plane |
+  |---|---|---|
+  | 0 % | 0.0 m | 0.0 m |
+  | 3 % | -3.3 m | 0.0 m |
+  | 10 % | -11 m | 0.0 m |
+
+- **Why opt-in:** the cache stores ground-subtracted heights. Changing the default would re-key and
+  re-download (paid) every cached raster. So `ground` enters the cache key only when it is not the
+  default.
+- **Seattle check (2026-10-24, user-approved, 55 tile fetches):** 402 truth footprints against the
+  3DEP LiDAR survey.
+
+  | Height band | n | p5 median | p5 MAE | Plane median | Plane MAE |
+  |---|---|---|---|---|---|
+  | All | 402 | +4.3 m | 8.8 m | +1.3 m | 3.9 m |
+  | 0–15 m | 228 | +4.7 m | 10.8 m | +2.0 m | 5.1 m |
+  | 15–40 m | 135 | +4.3 m | 6.8 m | +0.8 m | 2.1 m |
+  | 40–100 m | 39 | +1.4 m | 4.5 m | +0.1 m | 3.1 m |
+
+  - The plane is worse by more than 1 m on 48 of the 402.
+  - So the benchmark now uses `ground="plane"` (`benchmark.tiles_ndsm`). The provider default stays
+    `percentile` to keep the cached rasters valid.
+  - Truth records cached before this keep their p5 `tiles_m` until they are refreshed. The plane
+    rasters from this check are cached under the scratch tile bboxes, not `tiles_for`'s, so a
+    Seattle refresh would fetch again.
+
+### 2026-10-23 — Commons photo screen: a rescued photo needs p75 |photo - OSM| <= 40 m; a low-light photo needs 80 % outline coverage
+- **Decision:** `17_photo_pipeline.py::_keep` rescues a gate-failing photo only when also `_abs_dev_p75(towers) <= --rescue-max-p75` (default 40 m). `commons_photos.quality_reject` keeps a low-light photo (sky value < 170) only when `score >= MIN_SKYLINE_QUALITY` (0.11) **and** `coverage >= MIN_LOW_LIGHT_COVERAGE` (0.80). Day photos stay ungated.
+- **Why:** the median OSM deviation let Miami p20 (19.1 m, rejected by the user) through; its p75 is 76 m (p79 too), against 23-33 m on all 10 other rescued Miami photos. On the 9 reviewed low-light photos no score threshold separates usable from bad (usable Chicago p655 scores 0.075, below four bad ones), but coverage does for 8 of 9 (bad <= 0.77, usable >= 0.86; the miss, p655, the score already rejects), and it also rejects p20.
+- **Rejected:** a tighter median cutoff or a higher tower count (p20 sits between usable p191 15.9 m and p264 20.0 m, at 20 towers); a coverage-only clarity rule replacing the score (same verdicts on this set, less conservative).
+- **Supersedes / superseded by:** refines the 2026-10-07 screen entry below; —.
+- **Source:** `skyline-local/benchmark/2026-10-05_2148/miami_skyline_report/photo_results.json`, `2026-10-03_1952/chicago_.../photo_results.json`, `commons_cache/<city>/profiles.json`, the 37-photo verdict table from the 2026-10-07 review. Chicago: drops 11 of 53 rescued, their truth MAE 26.9 m vs 18.1 m kept (no verdicts). Evidence is two bad photos and one reviewer: confirm on the next reviewed screen (p79's rescued fit was never saved).
+
 ### 2026-10-21 — Granada truth is CNIG-first, REDIAM only where CNIG shows no building; survey rows are held out of the ranking
 - **Decision:** `benchmark.REGIONS["granada"]` is `cnig_mdsn`; `benchmark.FALLBACKS["granada"] = "rediam_mdhn"` is read only where CNIG has no value or under `NO_BUILDING_M` (`survey_heights.survey_footprint_heights(fallback=)`, the order `survey_fill.py` uses). Every truth record carries `survey_provider`. `19_refresh_survey_truth.py --rebuild-fallback [--offline-rings]` rebuilt `truth/granada.json`; the old file is `granada.rediam_mdhn.json` beside it. `tools/eval/score_export_heights.py` adds `--exclude-source` (default `survey`): `*_excluding` blocks hold survey-filled rows out, since a CNIG truth is not independent of a CNIG fill.
 - **Why:** REDIAM MDHN suppresses building cells. On the same footprints CNIG p95 is a median +3.5 m above REDIAM (9,794 records); on the old truth every Granada source read +5 m high (all rows +5.4 intended, mesh +2.3).
 - **Rejected:** keeping REDIAM as primary (biased low); per-city calibration of the old truth.
 - **Supersedes / superseded by:** the 2026-10-13 REDIAM-first choice in [survey-lidar.md](survey-lidar.md); —.
 - **Source:** export bbox only. The WCS was unreachable and the CNIG/REDIAM rasters are cached for the export bbox alone, so 9,794 records are CNIG, 165 fell back to REDIAM, and 3,173 (outside the bbox or relation outlines with no cached ring) keep their old REDIAM value (`survey_provider: rediam_mdhn`); rings came from the cached Overpass ways by osm_id, unsimplified. Re-run with network to finish them. Scores (`runs/panoview/granada/score_{before,after}.json`), intended all-rows bias +5.4 -> +2.0 m (before model) and +6.2 -> +2.8 m (after model) against old -> new truth; the CNIG-based truth now shows `osm_levels` +3.2 m high.
+- **Finished 2026-10-23** (network rebuild): 12,805 CNIG, 327 REDIAM records (234 fallbacks, 93 failed reads), 8 without a ring; backup `granada.rediam_mdhn.json` is the original REDIAM truth. Fresh export (`2ee6aaa3…npz`) scored: intended MAE 3.04 m, bias +2.22 m, 66 % within 25 % (6.60 / +6.21 / 26 % on the old truth), without survey rows 3.26 / +2.55 / 63 %; `osm_levels` +2.5 m; mesh 5.9 / -0.5 / 44 % (`runs/panoview/granada/score_2026-10-23_truth-cnig.json`).
 
 ### 2026-10-20 — Survey only raises landmarks, also checks floor counts, and the roof level needs a pitched roof
 - **Decision:** (B1) `survey_fill.py::is_landmark` (building:part rows, outlines with parts, towers, churches and places of worship, castles, any named building with `historic=*` or `tourism=attraction`, and the towers/churches layers) marks rows the survey may only RAISE, never lower. (B2) `_burn_stats` measures once per layer, and an outline over its full footprint. (B3) `osm_levels` rows get the same 3 m check as `osm_tag`; footprints under `SMALL_FOOTPRINT_M2` (30) read the median (`SMALL_STAT_PERCENTILE` 50) instead of p90. `user_override` and `merged` stay untouched. (C) `heights.py::height_from_tags` adds the implicit roof floor only when `roof:shape` is tagged and not `flat` (`has_pitched_roof_shape`); 3.2 m per floor kept. `MODEL_CACHE_VERSION` 7.
@@ -963,11 +1008,15 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
     the rule; looser values were scored for information only.
   - The claim "corroborated >= 0.85 within tol" (F-SKY26 criterion) holds only from 40 m up;
     under 40 m too few readings agree to tell (8 agreeing pairs in 112).
-- **Open:** the other "25 %" call sites still use their own formulas (fusion `fuse_heights`,
-  satellite `readings._agree`, elevated `CREDIT_TOL` and `FLOORS_SAME_SEED_AGREE`); each is
-  tighter on one side under `tiers.agree` (ratio 1.33 -> 1.25) and needs its owner's check with
-  `seed_experiment.py` (fusion, elevated) and `test_satellite_heights.py` plus the 7-city tables
-  (readings). The PDF / HTML-table display lines for `tag_disagrees` are also not wired.
+- **Done 2026-10-23:** the other "25 %" call sites (fusion `fuse_heights` bound and keep,
+  satellite `readings._agree` / `group`, elevated `CREDIT_TOL` in `tower_behind` and
+  `drop_contradicted_floors`) now call `tiers.agree` (ratio 1.33 -> 1.25; a 0 reading never
+  agrees). `READINGS_VERSION` 2. Measured: only the satellite readings could be replayed (no
+  elevated review states exist): Cartagena 56 of 755 footprints change grouping, `ls` rows 5 -> 3
+  (b0539, b0265 at ratios 1.27, 1.28), one tagged row changes; 13 footprints sit in the 1.25-1.33
+  window for the other sites, 12 already withheld (b1436 is not). Tests unchanged (141 pass).
+  Fusion / elevated effect is to be read on the next cache-only region run.
+- **Open:** the PDF / HTML-table display lines for `tag_disagrees` are not wired.
 - **Supersedes / superseded by:** the "within 25 %" of the 2026-10-07 tier entry (25 % of the
   larger). The rename to `corroborated` is the 2026-10-09 entry at the top.
 - **Source:** commit `b04b22f`; scratch `tiers/` (scripts and logs); Cartagena replay

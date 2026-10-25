@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-21_
+_Last updated: 2026-10-23_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -9,9 +9,33 @@ _Last updated: 2026-10-21_
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
 
+## Prague benchmark truth: ČÚZK survey re-read at 0.07–0.33 m on V Tower (found 2026-10-23, open)
+- **Symptom:** the stat-2 refresh (`benchmark.py::refresh_survey_truth`) gives V Tower Pankrác a
+  `survey_m` of 0.07–0.33 m. The stat-1 backup had 107–108 m. The 104.15 m OSM figure itself looks
+  real: 8 overlapping `building:part` polygons share that roof.
+- **Suspect:** the `cuzk_dmp` transform or sampling in `survey_heights.survey_footprint_heights`.
+  It may be reading the DMR (terrain) or a wrong CRS window instead of the DMP.
+- **Also:** truth scoring counts nested `building:part`s as separate buildings. Dedupe them.
+- Diagnosis scratch from the session that found it: the session scratchpad `truthdiag/`.
+
+## SRTM terrain on the Alhambra hill is ±15 m off (found 2026-10-23, open)
+
+- **Symptom:** in F-PANOVIEW view 3 (Plaza de los Aljibes) the Alcazaba towers look half their
+  height. The tower meshes are right; the camera stands about 15 m above their bases.
+- **Measured:** the Granada export's terrain (SRTMGL1, 1000 px) against the IDEE MDT 5 m ground
+  model (WCS `servicios.idee.es/wcs-inspire/mdt`, coverage `Elevacion4258_5`), after removing the
+  datum offset: median |error| 4.4 m, p90 10.9 m, 13 % of vertices over 10 m. The Aljibes and
+  palace area read about +16 m, the Alcazaba spur about -15 m: SRTM's 30 m cells smear the ridge
+  and count the palaces and trees as ground. Ground truth at the points: Aljibes 775 m,
+  Torre del Homenaje 776 m, Torre de la Vela 767 m.
+- **Effect:** buildings on steep ground stand on the wrong base. Their heights above the terrain
+  are right, so `score_export_heights.py` does not see it.
+- **Fix (not started):** a DEM source for Spain from the free IDEE MDT WCS (5 m; 2 m where
+  covered) beside SRTM, or a correction of SRTM toward it. No OpenTopography (COP30) calls.
+
 ## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
 
-- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); 3,173 of 13,132 records outside the cached rasters still carry REDIAM values (`survey_provider`) until a re-run with network. Original text below.
+- **Fix:** truth rebuilt CNIG-first (entry in [building-heights](decisions/building-heights.md)); finished with network 2026-10-23: 12,805 CNIG, 327 REDIAM (234 where CNIG shows no building, 93 failed reads keeping the old value). Original text below.
 
 - `city2stl/skyline/benchmark.py::REGIONS` sends Granada's truth to `rediam_mdhn`. That raster
   suppresses lidar-classified building cells (see `city2stl/height/providers/rediam_mdhn.py`),

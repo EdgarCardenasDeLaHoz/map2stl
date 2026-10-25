@@ -61,3 +61,18 @@ def test_bearing_and_camera_basis():
 def test_is_google_distinguishes_user_spheres():
     assert pano_manifest.is_google({"copyright": "\u00a9 2026 Google"})
     assert not pano_manifest.is_google({"copyright": "\u00a9 Nicola Mastrogiacomo"})
+
+
+def test_scene_outside_moves_a_camera_out_of_footprints():
+    import shapely
+    scene = object.__new__(render_pano_view.Scene)
+    scene.polys = np.array([shapely.box(0, 0, 10, 10), shapely.box(-5, -10, 15, -0.5)], dtype=object)
+    scene._ptree = shapely.STRtree(scene.polys)
+    assert scene.outside(20.0, 20.0) == (20.0, 20.0, False)
+    e, n, moved = scene.outside(5.0, 1.0)   # the first step out lands in the neighbour below
+    assert moved
+    assert not shapely.contains_xy(shapely.union_all(scene.polys), e, n)
+    assert shapely.union_all(scene.polys).distance(shapely.Point(e, n)) == pytest.approx(
+        render_pano_view.CLEAR_M, abs=0.05)
+    scene.polys = None
+    assert scene.outside(5.0, 1.0) == (5.0, 1.0, False)

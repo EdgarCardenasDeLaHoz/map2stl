@@ -102,6 +102,11 @@ Why now (2026-10-04):
     Chicago 657); the 0.1 lead places few; the clarity threshold sits on a thin margin (0.108
     vs 0.110); the rescue gate (OSM dev <= 20 m, >= 12 towers) keeps 2 photos the user called
     bad (Miami p20, p79).
+  - 2026-10-23: both gates tightened ([building-heights](../../decisions/building-heights.md),
+    2026-10-23): a rescued photo needs its p75 |photo - OSM| <= 40 m (drops p20; p79 to confirm
+    on the next screen), a low-light photo needs 80 % outline coverage besides the 0.11 score
+    (8 of 9 reviewed low-light verdicts matched). Open: more low-light verdicts, and labels on
+    the 11 Chicago photos the p75 rule now drops.
 
 ## Phase 2 plan: heights from photos, identify then measure (2026-10-04)
 

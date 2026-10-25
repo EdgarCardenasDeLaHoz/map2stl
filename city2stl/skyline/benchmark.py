@@ -432,7 +432,8 @@ def tiles_ndsm(bbox, resolution_m: float = RESOLUTION_M, provider=None):
     from city2stl.skyline.streetview_io import _load_env_file_if_present
 
     _load_env_file_if_present()  # the key lives in map2stl/.env (GOOGLE_MAPS_API_KEY)
-    provider = provider or Google3DProvider()
+    # plane ground: per-window p5 read Seattle hillside buildings +4.3 m (median); 2026-10-23
+    provider = provider or Google3DProvider(ground="plane")
     if not getattr(provider, "_api_key", None):
         raise TilesUnavailable("no Google Maps API key (GOOGLE_MAPS_API_KEY): 3D Tiles not read")
     if not provider.covers(bbox):

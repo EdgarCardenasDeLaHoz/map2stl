@@ -846,6 +846,21 @@ def render_seed_page(
 # Region index
 # ---------------------------------------------------------------------------
 
+#: F-DET4b: a resolved pano this far from the proposed seed sees another street.
+MISMATCH_SNAP_M = 100.0
+#: Below this median column IoU the matched towers only graze their footprints.
+MISMATCH_OVERLAP = 0.35
+
+
+def _mismatch_cause(snap_m: float | None, overlap: float | None, shift_deg: float) -> str:
+    """Likely cause of a Type 2 (detected but unmatched) pano, from the A7 instruments."""
+    if snap_m is not None and snap_m > MISMATCH_SNAP_M:
+        return "far snap"
+    if overlap is not None and overlap < MISMATCH_OVERLAP:
+        return "bearing" if abs(shift_deg) >= 1.0 else "segmentation"
+    return "OSM gap?"
+
+
 def _is_footprint_first(pr) -> bool:
     """A drone (elevated) seed's pano result: one segment per measured footprint, all with
     ``height_src == "footprint"``, so detected == matched by construction."""
@@ -1433,13 +1448,22 @@ def render_region_index(
                     qlabel, qbg = "drone — weak", "rgba(214,40,40,0.25)"
             corr = (f"{shift:+.0f}&deg;" if abs(shift) >= 1.0
                     else "<span class='small'>&mdash;</span>")
+            snap = getattr(pr, "snap_m", None)
+            snap_cell = (f"{snap:.0f} m" if snap is not None
+                         else "<span class='small'>&mdash;</span>")
+            ov = None if drone else getattr(pr, "footprint_overlap", None)
+            ov_cell = (f"{ov:.2f}" if ov is not None
+                       else "<span class='small'>&mdash;</span>")
+            if qlabel == "weak — mismatch":
+                qlabel += f" ({_mismatch_cause(snap, ov, shift)})"
             slug = (pr.seed_name[5:] if pr.seed_name.startswith("seed_")
                     else pr.seed_name)
             srows.append(
                 f"      <tr><td><a href=\"seed_{html.escape(slug)}.html\">"
                 f"{html.escape(pr.seed_name)}</a></td>"
                 f"<td>{'drone' if drone else 'street'}</td>"
-                f"<td>{corr}</td><td>{nseg}</td><td>{nm}</td>"
+                f"<td>{corr}</td><td>{snap_cell}</td><td>{ov_cell}</td>"
+                f"<td>{nseg}</td><td>{nm}</td>"
                 f"<td>{rate_cell}</td><td>{ncov}</td><td>{used}</td><td>{tag_cell}</td>"
                 f"<td style=\"background:{qbg}\">{qlabel}</td></tr>"
             )
@@ -1452,7 +1476,11 @@ def render_region_index(
 <h2>Pano summary</h2>
 <p class="small">{len(pano_results)} panos &middot; {n_corr} got a bearing
    correction &middot; {n_withmatch} produced matches. <b>Heading</b> =
-   bearing shift applied (&mdash; = anchor already good). <b>Detected</b> =
+   bearing shift applied (&mdash; = anchor already good). <b>Snap</b> = metres from the
+   proposed seed position to the Street View pano it resolved to. <b>Overlap</b> = median
+   column IoU of each matched tower with its footprint's projection (street seeds).
+   A <b>mismatch</b> label names the likely cause (F-DET4): far snap, low overlap
+   (segmentation or bearing), else an OSM gap. <b>Detected</b> =
    towers the splitter found. <b>Matched</b> = towers matched to OSM.
    <b>Match rate</b> = matched / detected (precision; ⚠ = fewer than 10
    segments detected — percentage is not statistically meaningful).
@@ -1465,7 +1493,8 @@ def render_region_index(
    a matched footprint, so no match rate): quality is the tag-within-25 % share
    (good ≥80 %, medium ≥60 %, at least 3 tagged).</p>
 <table>
-  <thead><tr><th>seed</th><th>kind</th><th>heading</th><th>detected</th>
+  <thead><tr><th>seed</th><th>kind</th><th>heading</th><th>snap</th>
+    <th>overlap</th><th>detected</th>
     <th>matched</th><th>match rate</th><th>coverage</th><th>used</th>
     <th>tag within 25 %</th><th>quality</th></tr></thead>
   <tbody>

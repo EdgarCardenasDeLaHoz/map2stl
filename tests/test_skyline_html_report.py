@@ -322,3 +322,38 @@ class TestWriteRegionReport:
         # pano visual layers, not a text table any more).
         assert page.startswith("<!doctype html>")
         assert "5" in page
+
+
+# F-DET A7: Type 2 instruments in the pano summary
+def _type2_pano(**kw):
+    from types import SimpleNamespace
+    base = dict(seed_name="seed_9", n_segments=30, n_matched=5, bearing_shift_deg=0.0,
+                matched_segments=[], snap_m=None, footprint_overlap=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+@pytest.mark.parametrize("kw, cause", [
+    (dict(snap_m=250.0, footprint_overlap=0.9), "far snap"),
+    (dict(snap_m=20.0, footprint_overlap=0.1), "segmentation"),
+    (dict(snap_m=20.0, footprint_overlap=0.1, bearing_shift_deg=12.0), "bearing"),
+    (dict(snap_m=20.0, footprint_overlap=0.8), "OSM gap?"),
+])
+def test_pano_summary_names_the_mismatch_cause(fake_sv, kw, cause):
+    html = render_region_index("cartagena", [fake_sv], pano_results=[_type2_pano(**kw)])
+    assert f"weak — mismatch ({cause})" in html
+    assert "<th>snap</th>" in html and f"{kw['snap_m']:.0f} m" in html
+
+
+def test_matched_footprint_overlap():
+    from city2stl.skyline._pano.detect import matched_footprint_overlap
+    proj = {"x_left_px": 100.0, "x_right_px": 200.0}
+    segs = [
+        {"x_left": 100, "x_right": 200, "matched_projection": proj},   # IoU 1
+        {"x_left": 150, "x_right": 250, "matched_projection": proj},   # IoU 1/3
+        {"x_left": 300, "x_right": 400, "matched_projection": proj},   # IoU 0
+        {"x_left": 900, "x_right": 50, "matched_projection": proj},    # wraps: skipped
+        {"x_left": 0, "x_right": 10, "matched_projection": None},      # unmatched: skipped
+    ]
+    assert matched_footprint_overlap(segs, 1000) == pytest.approx(1 / 3)
+    assert matched_footprint_overlap([], 1000) is None
