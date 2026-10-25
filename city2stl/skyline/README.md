@@ -24,6 +24,7 @@ $env:SKYLINE_CV_SEGFORMER_SIZE = "b1"     # production setting (see Environment 
 
 - Outputs (gitignored, under `city2stl/skyline/runs/region_reports/`):
   - `runs/region_reports/Cartagena_skyline_report/index.html` — the HTML diagnostic report (per-building tables live here).
+  - Reliability in the report: view count (`n_views`) and photo anchor deviation (`anchor_dev_m`). `mean_confidence` and seed disagreement/std stay in `heights.json` as diagnostics (`diagnostic_fields`); they do not track error.
   - `runs/region_reports/Cartagena_skyline_report.pdf` — compact archival PDF (`pano_only_pdf: true` trims tables).
 - Cost: a Cartagena run is a few minutes and ~$0.10 of Street View quota (12 spin views × seeds + screening probes).
 - `scripts/build_landing_page.py` builds the cross-region landing page; `scripts/discover_city_seeds.py`
@@ -48,7 +49,7 @@ run_region_pdf_report(region_name)                      region_pdf.py
   └─ per seed: _seed_multiview_registration              _pano/orchestrator.py
        ├─ capture 12-view spin (every 30°)               _pano/capture.py::_capture_pano_views
        ├─ batched SegFormer prefetch                     _core/segmentation.py::prefetch_label_maps
-       ├─ F-DET1 blob-count early-out                    _pano/orchestrator.py (inline)
+       ├─ F-DET1 building-count early-out                _pano/detect.py::_count_skyline_buildings
        ├─ pano heading (water + vegetation)              _pano/heading.py::_recover_pano_heading
        ├─ joint anchor sweep                             _pano/heading.py::_recover_anchor_offset
        ├─ per-view match (±8° around anchor)             _pano/detect.py::_register_views
@@ -246,7 +247,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 
 ## Caches (under `runs/`, gitignored)
 
-- `runs/seed_resolution_cache.json` — pins each seed URL's snapped (lat, lon, pano_id).
+- `_pano/runs/seed_resolution_cache.json` — pins each seed URL's snapped (lat, lon, pano_id).
   Why: the Static API's location snap drifts between calls. Delete to re-resolve.
 - `runs/image_cache/*.png` — Street View images keyed by request hash (API key excluded).
 - `runs/satellite_footprints_cache/` — ~12 MB per quadkey tile (F-SKY8).
@@ -279,6 +280,11 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
   report's OSM-tagged towers (>= 30 m) mostly read under 30 % of their tag, per tile and over the
   region, the tiles readings are dropped, cached records included (`benchmark.py::flat_mesh`,
   records marked `tiles_flat`). `10_benchmark` passes the tags; no new reads are needed.
+- The app's shipped sources on the same truth (T29): `10_benchmark --sources overture gba merged`
+  reads each per footprint with the truth's statistic (`benchmark.py::source_heights`, cached in
+  `runs/benchmark/sources/<region>.json`, network reads of Overture and GBA) and scores them with
+  coverage, all and untagged, next to the published height and Street View on the same buildings
+  (`benchmark.py::score_sources`, `sources` in `summary.json`, a printed table).
 - Output: `runs/benchmark/<stamp>/summary.json` (MAE, median AE, bias, within 15/25 %, per height
   band, per view and seed count, and how far OSM tags sit from truth) and one printed table.
 - The headline scores the survey-blind height `no_survey_height_m` (F-SKY26 2c; a report from

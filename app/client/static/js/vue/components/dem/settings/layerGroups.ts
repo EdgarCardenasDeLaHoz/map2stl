@@ -26,6 +26,8 @@ export interface Row {
   id?: string;
   /** One plain line under the name; a function re-reads the page. */
   hint?: string | (() => string);
+  /** Small print under the row (a longer explanation than the one-line hint). */
+  foot?: string;
   min?: number; max?: number; step?: number; unit?: string;
   /** Value shown on the right of a slider. */
   fmt?: (v: number) => string;
@@ -258,6 +260,10 @@ export const GROUPS: Record<string, LayerGroups> = {
         hint: () => (val('cityRoofShapes') === 'off' ? 'Only roofs tagged in OSM'
           : 'OSM shapes kept · untagged roofs guessed from lidar and imagery'),
         options: [{ value: 'auto', label: 'Auto' }, { value: 'off', label: 'Off' }] },
+      // F-PLINTH: request field level_ground (export-handlers.js::_cityExtra); on by default.
+      { kind: 'switch', label: 'Level ground under buildings', icon: '▭', color: '#ff9f0a', id: 'cityLevelGround',
+        hint: 'Each building on its own flat terrace',
+        foot: 'Each building stands on a flat terrace at its lowest corner, like a hillside house. Off: buildings sink into the slope.' },
       // On by default, but only effective where survey lidar covers the box.
       { kind: 'switch', label: 'Trees', icon: '🌳', color: '#248a3d', id: 'cityTrees',
         get: () => checked('cityTrees') && surveyTrees() === 'yes',

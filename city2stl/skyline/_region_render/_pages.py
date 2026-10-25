@@ -627,26 +627,27 @@ def _render_heights_page(pdf, building_heights: list[dict],
     lines += ["", f"Seen by a seed: {len(measured)}",
               f"  cross-seed (>=2 seeds): {len(cross_seed)}",
               f"  single-seed only:       {len(single_seed)}", "",
-              "Cross-seed disagreement (all seeds; lower is better):"]
+              "Cross-seed spread (diagnostic only; it does not track error):"]
     if dis.size:
         lines += [f"  median {float(np.median(dis)):5.1f} m   p90 "
                   f"{float(np.percentile(dis, 90)):5.1f} m   max {float(dis.max()):5.1f} m"]
     else:
         lines.append("  (no buildings seen from >= 2 seeds yet)")
     dd = drone_disagreements(measured, drone_seeds(rows))
-    lines.append("Drone seeds only (trusted readings):")
+    lines.append("Drone seeds only (trusted readings; spread is a diagnostic):")
     if dd:
         lines.append(f"  median {float(np.median(dd)):5.1f} m   p90 "
                      f"{float(np.percentile(dd, 90)):5.1f} m   max {dd[-1]:5.1f} m  (n {len(dd)})")
     else:
         lines.append("  (no building read by >= 2 drone seeds)")
     if not pano_only:
-        lines += ["", "Lowest-disagreement cross-seed rows:"]
+        lines += ["", "Cross-seed rows (spread d = diagnostic, views v = reliability signal):"]
         for r in sorted(cross_seed, key=lambda r: (r.get("seed_disagreement_m", 0.0) or 0.0,
                                                    -r.get("n_seeds", 0)))[:18]:
             h = r.get("effective_height_m", r.get("weighted_height_m"))
             lines.append(f"  {str(r.get('name'))[:16]:<16} {float(h or 0):5.0f} m  "
                          f"{TIER_SHORT[row_tier(r)]:<9}"
+                         f"v={int(r.get('n_views') or 0):2d} "
                          f"d={float(r.get('seed_disagreement_m', 0.0) or 0.0):4.0f}")
     ax.text(0.0, 1.0, "\n".join(lines), va="top", ha="left", family="monospace", fontsize=8.5)
     attributions = height_attributions(rows)

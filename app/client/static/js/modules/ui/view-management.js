@@ -110,6 +110,7 @@ window.switchView = function switchView(view) {
         if (sidebar) sidebar.style.display = 'none';
         _ensureDemForExtrude();
     }
+    window.events?.emit(window.EV?.VIEW_CHANGED, view);
 };
 
 // ---------------------------------------------------------------------------

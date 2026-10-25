@@ -421,3 +421,99 @@ def test_refine_caps_panorama_fov():
     hit = sm.refine(prof, towers, sm.Hit(0.0, 0.0, 0.0, 300.0, 0, 0, 1, 0), radius_m=0,
                     fov_span=0.6, projection="cylindrical")
     assert hit.hfov_deg <= sm.MAX_FOV_DEG
+
+
+# ── T18: the accept gate counts only rivals that identify other towers ──────────
+
+def _hit(towers, cam, heading, fov, misfit):
+    lat, lon = towers.to_ll(*cam)
+    return sm.Hit(lat, lon, heading, fov, 2.0, 0.1, misfit, 1000)
+
+
+def test_gate_margin_ignores_near_duplicates_of_the_right_pose():
+    towers = _city()
+    cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
+    prof = _photo(towers, cam, heading, fov)
+    best = _hit(towers, cam, heading, fov, 0.15)
+    dup1 = _hit(towers, (cam[0] + 20.0, cam[1] - 15.0), heading + 0.2, fov, 0.16)
+    dup2 = _hit(towers, (cam[0] - 30.0, cam[1] + 10.0), heading - 0.3, fov * 1.02, 0.17)
+    far = _hit(towers, (0.0, -1500.0), 20.0, fov, 0.45)
+    margin, rival = sm.gate_margin(prof, towers, [best, dup1, dup2, far])
+    assert rival is far and margin == pytest.approx(0.30)       # the raw runner-up gap is 0.01
+    # only duplicates: nothing distinct to lose to
+    assert sm.gate_margin(prof, towers, [best, dup1, dup2]) == (1.0, None)
+
+
+def test_gate_margin_still_fails_a_genuinely_ambiguous_photo():
+    towers = _city()
+    cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
+    prof = _photo(towers, cam, heading, fov)
+    best = _hit(towers, cam, heading, fov, 0.15)
+    rival = _hit(towers, (0.0, -1500.0), 20.0, fov, 0.18)       # other towers, similar misfit
+    assert (sm._tower_set(prof, towers, best, "pinhole", 2.0)
+            != sm._tower_set(prof, towers, rival, "pinhole", 2.0))
+    margin, r = sm.gate_margin(prof, towers, [best, rival])
+    assert r is rival and margin == pytest.approx(0.03) and margin < 0.1
+
+
+# ── T19: camera roll ─────────────────────────────────────────────────────────
+
+def _rolled(prof, roll_deg):
+    """The profile as a camera rolled by ``roll_deg`` records it (exact image rotation)."""
+    w, h = prof.width, prof.height
+    xs = np.arange(w) + 0.5 - w / 2
+    ok = np.isfinite(prof.y_top)
+    X, Y = xs[ok], h / 2 - prof.y_top[ok]
+    r = math.radians(roll_deg)
+    X2, Y2 = X * math.cos(r) - Y * math.sin(r), X * math.sin(r) + Y * math.cos(r)
+    order = np.argsort(X2)
+    X2, Y2 = X2[order], Y2[order]
+    out = np.interp(xs, X2, Y2)
+    gap = np.abs(xs[:, None] - X2[None, :]).min(axis=1) > 3
+    return sm.PhotoProfile(np.where(gap, np.nan, h / 2 - out), w, h)
+
+
+def _start(towers, cam, heading, fov):
+    """A coarse hit 120 m and 8 % off the true pose, as the grid search would leave it."""
+    return _hit(towers, (cam[0] + 120.0, cam[1] - 90.0), heading + 1.0, fov * 1.08, 0.5)
+
+
+def _tilt_slope(prof, towers, cam, heading, fov, roll_deg):
+    """Slope (deg of height error per deg of azimuth) of photo minus model across the frame."""
+    ph, half = sm.photo_angles(prof, fov)
+    ph = sm._unroll(ph, half, roll_deg)
+    model = sm.predicted_outline(towers, cam)
+    k0 = int(round(heading / sm.BIN_DEG)) - half
+    m = model[(k0 + np.arange(len(ph))) % sm.N_BINS]
+    ok = np.isfinite(ph) & (m > 0)
+    az = (np.arange(len(ph)) - half) * sm.BIN_DEG
+    return np.polyfit(az[ok], (ph - m)[ok], 1)[0]
+
+
+@pytest.mark.parametrize("roll", [4.0, -3.0])
+def test_refine_recovers_roll_and_untilts_the_heights(roll):
+    towers = _city()
+    cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
+    prof = _rolled(_photo(towers, cam, heading, fov), roll)
+    start = _start(towers, cam, heading, fov)
+    level = sm.refine(prof, towers, start, radius_m=150, step_m=50, fov_steps=5,
+                      fov_span=0.15, max_roll_deg=0)
+    hit = sm.refine(prof, towers, start, radius_m=150, step_m=50, fov_steps=5, fov_span=0.15)
+    assert level.roll_deg == 0.0
+    assert abs(hit.roll_deg - roll) < 0.5
+    assert hit.misfit < level.misfit
+    # the outline's tilt across the frame: large when read as level, gone at the fitted roll
+    before = abs(_tilt_slope(prof, towers, cam, heading, fov, 0.0))
+    after = abs(_tilt_slope(prof, towers, cam, heading, fov, hit.roll_deg))
+    assert before > 0.04 and after < 0.25 * before
+
+
+def test_level_photo_gives_the_same_pose_with_or_without_roll():
+    towers = _city()
+    cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
+    prof = _photo(towers, cam, heading, fov)
+    start = _start(towers, cam, heading, fov)
+    kw = {"radius_m": 150, "step_m": 50, "fov_steps": 5, "fov_span": 0.15}
+    assert sm.refine(prof, towers, start, **kw) == sm.refine(prof, towers, start,
+                                                             max_roll_deg=0, **kw)
+    assert sm.refine(prof, towers, start, **kw).roll_deg == 0.0

@@ -26,6 +26,8 @@
               @click="click(row.click!)">›</button>
     </div>
 
+    <p v-if="row.foot" class="sr-foot">{{ row.foot }}</p>
+
     <input v-if="row.kind === 'slider'" type="range" class="sr-range" :aria-label="row.label"
            :min="row.min" :max="row.max" :step="row.step" :value="draft ?? value"
            @input="draft = ($event.target as HTMLInputElement).value"
@@ -138,6 +140,7 @@ function setOwn(on: boolean) {
 .sr-t { flex: 1; min-width: 0; }
 .sr-t b { display: block; font-size: 13px; font-weight: 600; color: #f5f5f7; }
 .sr-t span { display: block; font-size: 11.5px; color: #a1a1a6; line-height: 1.3; }
+.sr-foot { margin: 4px 0 0 36px; font-size: 11px; line-height: 1.3; color: #8e8e93; }
 .sr-val, .sr-unit { color: #a1a1a6; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sr-num { width: 62px; flex: none; background: #1c1c1e; color: #f5f5f7; border: 1px solid #48484a; border-radius: 8px; padding: 4px 8px; text-align: right; font-size: 13px; }
 .sr-num:disabled { color: #6e6e73; border-color: #3a3a3c; }

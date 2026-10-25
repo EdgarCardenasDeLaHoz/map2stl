@@ -15,6 +15,20 @@ Measurement: the roof row is the median skyline row over the central ``core`` sh
 tower's columns (its edges are shared with neighbours). Elevation from the row with square
 pixels (vertical focal = horizontal); distance to the footprint's nearest corner.
 
+Stepped tops (T17): the median lands on a lower step of a tower with setbacks (Southeast
+Financial Center read 155 m against 235 m). ``measure_towers`` also records the *peak*
+(``PEAK_PCT``-th percentile row over all the tower's columns: robust to a one-pixel spike) in
+``peak_row`` / ``peak_elev_deg``; the median stays in ``roof_row`` / ``elev_deg`` as the
+diagnostic. ``loo_heights(ms, top="peak")`` reads the peak; ``choose_top`` picks per tower
+between the two across photos: peak only when it lifts the reading by ``PEAK_MIN_GAIN_M`` and
+the photos agree better on it than on the median (a stepped top is the same from every side,
+the lower step seen is not). One photo, or a flat top, keeps the median.
+
+Weighting (T30): ``combine_photo_heights`` merges a building's readings from several photos with
+a weighted median, each weighted 1 / max(photo's anchor deviation, ``DEV_FLOOR_M``) (anchor
+deviation predicts a photo's error, r 0.45; skyline-improvement-plan item 4). Equal deviations
+give the plain median.
+
 Calibration: ``H = h_cam + d * tan(e + tilt)``. Tilt and camera height are unknown for a
 photo, so they are fitted on anchor towers (OSM heights in ``Towers``). ``loo_heights`` fits
 them on all *other* towers for each tower, so no tower's own OSM height sets its estimate,
@@ -71,6 +85,18 @@ class TowerMeasure:
     elev_deg: float          # roof elevation from the image centre row, before tilt
     dist_m: float
     osm_height_m: float
+    peak_row: float | None = None        # roof row of the tallest step (``PEAK_PCT`` percentile)
+    peak_elev_deg: float | None = None
+
+
+#: Peak of a tower's top: this percentile of the skyline rows (small row = high) over all its columns.
+PEAK_PCT = 10.0
+#: ``choose_top`` takes the peak only when it reads at least this much above the median reading.
+PEAK_MIN_GAIN_M = 5.0
+#: Floor on a photo's anchor deviation when weighting (a photo cannot be trusted more than 1/5 m).
+DEV_FLOOR_M = 5.0
+#: Weight of a photo with no anchor deviation (too few towers): as if it deviated this much.
+DEFAULT_DEV_M = 20.0
 
 
 def _focal(prof: PhotoProfile, pose: PhotoPose) -> float:
@@ -105,10 +131,16 @@ def measure_towers(prof: PhotoProfile, towers: Towers, pose: PhotoPose, h_cam: f
             continue
         row = float(np.median(rows))
         elev = math.degrees(math.atan((prof.height / 2.0 - row) / f))
+        allrows = prof.y_top[run]
+        allrows = allrows[np.isfinite(allrows)]
+        peak = float(np.percentile(allrows, PEAK_PCT)) if len(allrows) else row
+        peak = min(peak, row)
+        peak_elev = math.degrees(math.atan((prof.height / 2.0 - peak) / f))
         v = towers.verts[ti]
         d = float(np.min(np.hypot(v[:, 0] - cam[0], v[:, 1] - cam[1])))
         out.append(TowerMeasure(int(ti), towers.names[ti] or f"tower{ti}", int(run[0]),
-                                int(run[-1]), row, elev, d, float(towers.height_m[ti])))
+                                int(run[-1]), row, elev, d, float(towers.height_m[ti]),
+                                peak, peak_elev))
     return out
 
 
@@ -136,20 +168,69 @@ def fit_tilt_height(ms: list[TowerMeasure], anchors_m: np.ndarray,
     return float(r.x[0]), 2.0
 
 
-def height_of(m: TowerMeasure, tilt_deg: float, h_cam: float) -> float:
-    return h_cam + m.dist_m * math.tan(math.radians(m.elev_deg + tilt_deg))
+def height_of(m: TowerMeasure, tilt_deg: float, h_cam: float, top: str = "median") -> float:
+    """Height from the median roof row (``top="median"``) or the tallest step (``"peak"``)."""
+    elev = m.peak_elev_deg if top == "peak" and m.peak_elev_deg is not None else m.elev_deg
+    return h_cam + m.dist_m * math.tan(math.radians(elev + tilt_deg))
 
 
-def loo_heights(ms: list[TowerMeasure], min_anchors: int = 2) -> dict[int, float]:
-    """Height per measured tower with tilt and camera height fitted on the *other* towers."""
+def loo_heights(ms: list[TowerMeasure], min_anchors: int = 2,
+                top: str = "median") -> dict[int, float]:
+    """Height per measured tower with tilt and camera height fitted on the *other* towers.
+
+    The fit always uses the anchors' median rows; ``top`` only picks which roof row of the
+    measured tower is converted (``"median"`` or ``"peak"``, see ``choose_top``)."""
     out = {}
     if len(ms) < min_anchors + 1:
         return out
     for i, m in enumerate(ms):
         rest = ms[:i] + ms[i + 1:]
         tilt, h = fit_tilt_height(rest, np.array([r.osm_height_m for r in rest]))
-        out[m.index] = height_of(m, tilt, h)
+        out[m.index] = height_of(m, tilt, h, top)
     return out
+
+
+def choose_top(median_hs: list[float], peak_hs: list[float],
+               min_gain_m: float = PEAK_MIN_GAIN_M) -> str:
+    """``"peak"`` or ``"median"`` for one tower from its per-photo readings (same photo order).
+
+    Peak only with 2+ photos, when the peak reads at least ``min_gain_m`` above the median
+    (typical of a stepped top) and the photos spread less on the peak than on the median.
+    One photo, a flat top, or photos that disagree on the peak keep the median."""
+    if len(median_hs) < 2 or len(median_hs) != len(peak_hs):
+        return "median"
+    if float(np.median(peak_hs) - np.median(median_hs)) < min_gain_m:
+        return "median"
+    return "peak" if float(np.ptp(peak_hs)) < float(np.ptp(median_hs)) else "median"
+
+
+def photo_weight(dev_m: float | None, floor_m: float = DEV_FLOOR_M,
+                 default_dev_m: float = DEFAULT_DEV_M) -> float:
+    """Weight of a photo's readings: 1 / max(anchor deviation, ``floor_m``); ``None`` counts as
+    ``default_dev_m``."""
+    return 1.0 / max(default_dev_m if dev_m is None else float(dev_m), floor_m)
+
+
+def weighted_median(values: list[float], weights: list[float]) -> float:
+    """Weighted median; equal weights give ``np.median`` (even counts average the middle pair)."""
+    v = np.asarray(values, float)
+    w = np.asarray(weights, float)
+    o = np.argsort(v, kind="stable")
+    v, w = v[o], w[o]
+    cum = np.cumsum(w)
+    half = cum[-1] / 2.0
+    i = int(np.searchsorted(cum, half - 1e-12 * cum[-1], side="left"))
+    if abs(cum[i] - half) <= 1e-9 * cum[-1] and i + 1 < len(v):
+        return float((v[i] + v[i + 1]) / 2.0)
+    return float(v[i])
+
+
+def combine_photo_heights(heights: list[float], devs: list[float | None] | None = None) -> float:
+    """A building's height from its per-photo readings: weighted median, weights from
+    ``photo_weight`` of each photo's anchor deviation (``devs=None``: plain median)."""
+    if devs is None:
+        return float(np.median(heights))
+    return weighted_median(heights, [photo_weight(d) for d in devs])
 
 
 #: A tower reading is trusted only within this ratio of the tower's OSM height. On 2,791

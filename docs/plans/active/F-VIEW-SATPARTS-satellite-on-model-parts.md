@@ -1,6 +1,6 @@
 # F-VIEW-SATPARTS — Satellite image on the finished model's parts
 
-_Proposed 2026-10-14 (user choice from the "more realistic City Model" form). Status: planned.
+_Proposed 2026-10-14 (user choice from the "more realistic City Model" form). Status: implemented 2026-10-23 (T49), not yet checked on a real model in the browser.
 3D view only: the print does not change._
 
 ## Goal
@@ -47,6 +47,17 @@ terrain, so the finished model looks like the place it was made from.
 - **Design step.** The control is the existing *Satellite image* choice; a "roofs from
   satellite" switch, if added, goes in the viewer's settings, mocked up as a PNG first
   (`design-guidelines.md`).
+
+## Done 2026-10-23 (T49)
+
+- [x] Planar UVs: `city-fullmodel.js::satelliteUVs` (from viewer-frame positions and `_full.frame`, which now carries `cols`).
+- [x] One shared `CanvasTexture` (`model-viewer.js::_partsTex`), made in `_applySatelliteTexture`, freed by `_dropPartsTexture` / `_disposeMesh`.
+- [x] Which parts: `takesSatelliteImage` (terrain, roads, railways, trails, green; buildings with the roofs switch; water stays blue).
+- [x] Edge rule (user choice): faces steeper than 60 deg get soil colour (`splitFacesBySlope`, material groups); walls under a photo roof keep the building colour.
+- [x] `_paintFullParts` re-colours in place; `_rebuildColors` respects the mode; no refetch on either toggle.
+- [x] Switch "Satellite image on roofs" in `ModelContainer.vue` (3D view card), `appState.viewerSatRoofs`, off by default.
+- [x] Vitest: `tests/js/citySatParts.test.js`.
+- [ ] Open: screenshot check against the quick-view drape; `renderer.info.memory.textures` count after ten toggles.
 
 ## Target files
 

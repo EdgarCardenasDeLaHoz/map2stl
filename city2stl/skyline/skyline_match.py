@@ -21,6 +21,17 @@ Model, per candidate camera position (grid around the towers):
   always preferred the narrowest FOV (a narrow FOV shrinks every angle in the photo) and far
   positions (flat outlines), 2026-10-04 first probe.
 
+Roll (T19): a handheld photo is rarely level, and a roll of r tilts the outline across the
+frame, raising columns on one side by ``r * tan(azimuth)`` degrees (pinhole; ``r * azimuth``
+in radians for cylindrical). ``refine`` fits it per hit within +-``max_roll_deg`` (5 by
+default): first the level search, then roll alone at the best pose, and only a roll that
+lowers the misfit by a clear margin is kept, so a level photo returns exactly its roll-0
+pose (``Hit.roll_deg`` 0). ``identify`` aligns towers on the unrolled outline.
+
+Accepting a pose (T18): ``gate_margin`` compares the best hit with the best rival that
+identifies a *different set of towers*; rivals that are the same pose within a block (same
+towers) do not count against the winner.
+
 Heights come from OSM tags and levels, never from the benchmark truth, so benchmark scores of
 heights measured in located photos stay independent.
 """
@@ -69,6 +80,7 @@ class Hit:
     rms_deg: float
     misfit: float               # 1 - R^2: 0 perfect, 1 no better than a flat outline
     n_cols: int
+    roll_deg: float = 0.0       # camera roll (+: right side of the frame higher), 0 = level
 
 
 # --------------------------------------------------------------------------- inputs
@@ -207,11 +219,41 @@ def photo_angles(prof: PhotoProfile, hfov_deg: float, projection: str = "pinhole
     return acc, half
 
 
-def _score_all_headings(model: np.ndarray, photo: np.ndarray, half: int):
+def _unroll(photo: np.ndarray, half: int, roll_deg: float, projection: str = "pinhole"):
+    """``photo`` as a level camera would have recorded it, for a camera rolled by ``roll_deg``.
+
+    Each outline point (azimuth ``az``, elevation ``el`` from the image centre) is turned back
+    about the image centre and re-binned. Small-angle, a roll tilts the outline by
+    ``roll * tan(az)`` degrees across the frame; the exact rotation also slides tall towers
+    sideways by about ``roll * el`` (1.4 deg at 4 deg of roll and 20 deg of elevation); a linear
+    correction misread the roll by 0.65 deg on the synthetic test. Roll 0 returns ``photo`` itself.
+    """
+    if not roll_deg:
+        return photo
+    n = len(photo)
+    i = np.flatnonzero(np.isfinite(photo))
+    az = (i - half) * BIN_DEG
+    u = np.radians(az) if projection == "cylindrical" else np.tan(np.radians(np.clip(az, -85, 85)))
+    v = np.tan(np.radians(np.clip(photo[i], -85, 85)))
+    c, s_ = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+    x = u * c + v * s_
+    az2 = np.degrees(x if projection == "cylindrical" else np.arctan(x))
+    el2 = np.degrees(np.arctan(v * c - u * s_))
+    j = np.round(az2 / BIN_DEG).astype(int) + half
+    ok = (j >= 0) & (j < n)
+    out = np.full(n, -np.inf)
+    np.maximum.at(out, j[ok], el2[ok])
+    return np.where(np.isfinite(out), out, np.nan)
+
+
+def _score_all_headings(model: np.ndarray, photo: np.ndarray, half: int,
+                        roll_deg: float = 0.0, projection: str = "pinhole"):
     """RMS (deg) after a constant offset, for every circular shift; and the offsets.
 
-    For shift ``s`` the photo bin ``j`` sits at bearing bin ``s + j - half``.
+    For shift ``s`` the photo bin ``j`` sits at bearing bin ``s + j - half``. ``roll_deg``
+    removes a camera roll from the photo outline first (0 leaves it untouched).
     """
+    photo = _unroll(photo, half, roll_deg, projection)
     w = np.isfinite(photo).astype(float)
     p = np.where(w > 0, photo, 0.0)
     n_w = w.sum()
@@ -280,20 +322,8 @@ def search(prof: PhotoProfile, towers: Towers, radius_m: float = 7000.0, step_m:
     return hits
 
 
-def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0,
-           step_m: float = 50.0, fov_steps: int = 9, fov_span: float = 0.35,
-           projection: str = "pinhole", h_cam: float = 2.0) -> Hit:
-    """Local search around a coarse ``hit``: finer positions and FOVs, every heading.
-
-    Why: the coarse grid (150-300 m, FOV steps of ~20 %) leaves the true pose between cells;
-    near it the misfit drops sharply, while false hits stay flat.
-    """
-    x0, y0 = towers.to_xy(hit.lat, hit.lon)
-    # a panorama's FOV range can pass 360 deg; the photo must fit inside the bearing bins
-    fovs = np.unique(np.clip(hit.hfov_deg * np.exp(np.linspace(-fov_span, fov_span, fov_steps)),
-                             1.0, MAX_FOV_DEG))
-    photos = {float(fv): photo_angles(prof, float(fv), projection) for fv in fovs}
-    g = np.arange(-radius_m, radius_m + 1, step_m)
+def _grid_best(towers, x0, y0, g, photos, h_cam, roll_deg, projection):
+    """Best (misfit, x, y, heading, fov, tilt, n, rms) over positions ``g`` and FOVs, or None."""
     best = None
     for dx in g:
         for dy in g:
@@ -301,7 +331,7 @@ def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0
             if not model.any():
                 continue
             for fv, (ph, half) in photos.items():
-                r = _score_all_headings(model, ph, half)
+                r = _score_all_headings(model, ph, half, roll_deg, projection)
                 if r is None:
                     continue
                 mis, rms, off, n = r
@@ -309,24 +339,95 @@ def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0
                 if best is None or mis[k] < best[0]:
                     best = (float(mis[k]), x0 + dx, y0 + dy, (k + half) * BIN_DEG % 360.0, fv,
                             float(off[k]), int(n), float(rms[k]))
+    return best
+
+
+def _fit_roll(model, ph, half, max_roll_deg, projection, centre=0.0, span=None):
+    """Roll (deg) minimising the misfit at one pose, as ``(roll_deg, best_row)`` or None.
+
+    Passes of 1, 0.25 and 0.05 deg steps (about 30 scorings of one model), each around the
+    previous best; ``centre``/``span`` narrow the first pass. ``best_row`` is
+    ``(misfit, heading, tilt, n, rms)``.
+    """
+    span = max_roll_deg if span is None else span
+    best, width = None, span
+    for step in (1.0, 0.25, 0.05):
+        c = centre if best is None else best[0]
+        grid = np.clip(np.arange(c - width, c + width + 1e-9, step), -max_roll_deg, max_roll_deg)
+        for roll in np.unique(np.round(grid, 6)):
+            r = _score_all_headings(model, ph, half, float(roll), projection)
+            if r is None:
+                return None
+            k = int(np.argmin(r[0]))
+            if best is None or r[0][k] < best[1][0]:
+                best = (float(roll), (float(r[0][k]), (k + half) * BIN_DEG % 360.0,
+                                      float(r[2][k]), int(r[3]), float(r[1][k])))
+        width = step
+    return best
+
+
+#: A fitted roll is kept only when it lowers the misfit by this fraction (and absolute floor).
+ROLL_MIN_GAIN = 0.03
+ROLL_MIN_GAIN_ABS = 0.002
+
+
+def refine(prof: PhotoProfile, towers: Towers, hit: Hit, radius_m: float = 600.0,
+           step_m: float = 50.0, fov_steps: int = 9, fov_span: float = 0.35,
+           projection: str = "pinhole", h_cam: float = 2.0, max_roll_deg: float = 5.0) -> Hit:
+    """Local search around a coarse ``hit``: finer positions and FOVs, every heading, and roll.
+
+    Why: the coarse grid (150-300 m, FOV steps of ~20 %) leaves the true pose between cells;
+    near it the misfit drops sharply, while false hits stay flat.
+    Roll (T19): after the level search, the roll within +-``max_roll_deg`` is fitted at the
+    best pose; if it lowers the misfit by ``ROLL_MIN_GAIN`` (relative) the search repeats with
+    that roll fixed and the roll is refined once more. Otherwise the level result is returned
+    unchanged (``roll_deg`` 0). ``max_roll_deg=0`` skips roll altogether.
+    """
+    x0, y0 = towers.to_xy(hit.lat, hit.lon)
+    # a panorama's FOV range can pass 360 deg; the photo must fit inside the bearing bins
+    fovs = np.unique(np.clip(hit.hfov_deg * np.exp(np.linspace(-fov_span, fov_span, fov_steps)),
+                             1.0, MAX_FOV_DEG))
+    photos = {float(fv): photo_angles(prof, float(fv), projection) for fv in fovs}
+    g = np.arange(-radius_m, radius_m + 1, step_m)
+    best = _grid_best(towers, x0, y0, g, photos, h_cam, 0.0, projection)
     if best is None:
         return hit
+    roll = 0.0
+    if max_roll_deg > 0:
+        ph, half = photos[best[4]]
+        fit = _fit_roll(predicted_outline(towers, (best[1], best[2]), h_cam), ph, half,
+                        max_roll_deg, projection)
+        if fit and fit[1][0] < best[0] * (1 - ROLL_MIN_GAIN) - ROLL_MIN_GAIN_ABS:
+            rolled = _grid_best(towers, x0, y0, g, photos, h_cam, fit[0], projection)
+            if rolled is not None:
+                ph, half = photos[rolled[4]]
+                fit2 = _fit_roll(predicted_outline(towers, (rolled[1], rolled[2]), h_cam), ph,
+                                 half, max_roll_deg, projection, centre=fit[0], span=1.0)
+                if fit2:
+                    mis, hd, off, n, rms = fit2[1]
+                    rolled = (mis, rolled[1], rolled[2], hd, rolled[4], off, n, rms)
+                    fit = fit2
+                if rolled[0] < best[0]:
+                    best, roll = rolled, fit[0]
     mis, x, y, hd, fv, off, n, rms = best
     lat, lon = towers.to_ll(x, y)
-    return Hit(lat, lon, hd, fv, off, rms, mis, n)
+    return Hit(lat, lon, hd, fv, off, rms, mis, n, roll)
 
 
 def locate(prof: PhotoProfile, towers: Towers, top: int = 8, fov_span: float = 0.35,
-           **search_kw) -> list[Hit]:
+           max_roll_deg: float = 5.0, **search_kw) -> list[Hit]:
     """Coarse search, then ``refine`` the best ``top`` hits; best first.
 
     ``fov_span``: how far refinement may move the FOV (log units, +-35 % by default). Narrow
     it when the FOV comes from EXIF: with the FOV free, a slice of skyline fits somewhere,
     and 11 of 12 located photos were placed km off with FOVs of 8-95 deg (2026-10-04).
+    ``max_roll_deg``: roll bound for ``refine`` (0 = level photos only). To accept the best
+    pose use ``gate_margin``, not the raw gap to the next hit.
     """
     projection = search_kw.get("projection", "pinhole")
     coarse = search(prof, towers, top=top, **search_kw)
-    fine = [refine(prof, towers, h, projection=projection, fov_span=fov_span) for h in coarse]
+    fine = [refine(prof, towers, h, projection=projection, fov_span=fov_span,
+                   max_roll_deg=max_roll_deg) for h in coarse]
     return sorted(fine, key=lambda h: h.misfit)
 
 
@@ -353,6 +454,7 @@ def identify(prof: PhotoProfile, towers: Towers, hit: Hit, projection: str = "pi
     x, y = towers.to_xy(hit.lat, hit.lon)
     model, own = predicted_outline(towers, (x, y), h_cam, owners=True)
     ph, half = photo_angles(prof, hit.hfov_deg, projection)
+    ph = _unroll(ph, half, hit.roll_deg, projection)           # outline as a level camera sees it
     k0 = int(round(hit.heading_deg / BIN_DEG)) - half          # model bin of photo bin 0
     S = int(round(search_deg / BIN_DEG))
     L = len(ph)
@@ -385,8 +487,56 @@ def identify(prof: PhotoProfile, towers: Towers, hit: Hit, projection: str = "pi
         if 0 <= col < prof.width:
             cx_m, cy_m = towers.verts[ti].mean(axis=0)
             lat, lon = towers.to_ll(cx_m, cy_m)
-            obs.append(Obs(col, lat, lon, towers.names[ti] or f"tower{ti}"))
+            obs.append(Obs(col, lat, lon, towers.names[ti] or f"tower{ti}",
+                           up_px=_up_px(prof, col)))
     return obs
+
+
+def _up_px(prof: PhotoProfile, col: float) -> float | None:
+    """Pixels the outline sits above the image centre row near column ``col`` (None: no outline)."""
+    c = int(col)
+    y = prof.y_top[max(0, c - 2):c + 3]
+    y = y[np.isfinite(y)]
+    return float(prof.height / 2.0 - np.median(y)) if len(y) else None
+
+
+def _tower_set(prof: PhotoProfile, towers: Towers, hit: Hit, projection: str, h_cam: float):
+    """The towers ``identify`` finds at ``hit``, as a frozenset of rounded centroids."""
+    return frozenset((round(o.lat, 6), round(o.lon, 6))
+                     for o in identify(prof, towers, hit, projection, h_cam))
+
+
+#: Two hits identify "the same towers" when their sets overlap by at least this (Jaccard).
+SAME_TOWERS_JACCARD = 0.75
+#: With no identified towers to compare, a rival counts when it is this far from the winner.
+APART_M = 500.0
+
+
+def gate_margin(prof: PhotoProfile, towers: Towers, hits: list[Hit], projection: str = "pinhole",
+                h_cam: float = 2.0, same_towers: float = SAME_TOWERS_JACCARD):
+    """Acceptance margin of ``hits[0]`` over its best *distinct* rival: ``(margin, rival)``.
+
+    Margin = rival misfit - best misfit. A rival is distinct when ``identify`` gives it a
+    different tower set (Jaccard overlap below ``same_towers``); near-duplicates of the
+    winning pose (a few metres or a degree off, same towers) are skipped, since they are the
+    same answer and would fail every good photo (T18). A genuinely ambiguous photo still
+    fails: the rival that sees other towers fits as well. No distinct rival gives margin 1.0.
+    When the winner identifies no towers, a rival counts if it is > ``APART_M`` away.
+    """
+    if not hits:
+        return 0.0, None
+    best = hits[0]
+    ref = _tower_set(prof, towers, best, projection, h_cam)
+    x0, y0 = towers.to_xy(best.lat, best.lon)
+    for h in hits[1:]:
+        if ref:
+            other = _tower_set(prof, towers, h, projection, h_cam)
+            if len(ref & other) / len(ref | other) >= same_towers:
+                continue
+        elif math.hypot(*np.subtract(towers.to_xy(h.lat, h.lon), (x0, y0))) <= APART_M:
+            continue
+        return h.misfit - best.misfit, h
+    return 1.0, None
 
 
 def locate_and_solve(prof: PhotoProfile, towers: Towers, top: int = 8, f_prior_px=None,
@@ -409,7 +559,7 @@ def locate_and_solve(prof: PhotoProfile, towers: Towers, top: int = 8, f_prior_p
             continue
         try:
             pose = solve_pose(obs, prof.width, projection, f_prior_px=f_prior_px,
-                              search_radius_m=1500.0, grid_step_m=100.0)
+                              roll_deg=h.roll_deg, search_radius_m=1500.0, grid_step_m=100.0)
         except ValueError:
             continue
         out.append((h, pose, obs))

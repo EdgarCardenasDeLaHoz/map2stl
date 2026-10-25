@@ -35,6 +35,10 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     after the survey fill; never overwrites an OSM roof:shape). "off" is
                     the output without the classifier, byte for byte. report.json
                     "roof_shapes" holds the stats (classified, by_shape, reason)
+    level_ground    bool, default true (F-PLINTH): each building stands on a level pad at its
+                    lowest ground (city_model.level_pads), so its top is pad + height and
+                    the wall is true on every side; false: the old seating (top from the
+                    highest ground, buried skirt). report.json "level_ground" counts pads
     landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"height"|"osm", ...}} buildings replaced by
                     an uploaded mesh or a surveyed nDSM solid, or rescaled to a known
                     height (city2stl.landmarks;
@@ -154,7 +158,7 @@ _LEGACY_NAMES = {"mm_per_px": "mm_per_pixel", "fit_height_mm": "model_height",
 
 def normalize_request(data: dict) -> dict:
     """The city defaults (fit height 30 mm) and legacy field names applied."""
-    data = {"model_height": 30.0, **data}
+    data = {"model_height": 30.0, "level_ground": True, **data}
     for old, new in _LEGACY_NAMES.items():
         if old in data:
             data.setdefault(new, data[old])
@@ -297,7 +301,8 @@ def run_city_model(data: dict, task: ExportTask) -> None:
     model = build_on_terrain(field.z_mm, bbox, field.scale, layers,
                              layer_overrides=data.get("layers"),
                              landmark_overrides=landmark_overrides,
-                             trail_context=trail_context, canopy=canopy)
+                             trail_context=trail_context, canopy=canopy,
+                             level_ground=bool(data.get("level_ground", True)))
     report = dict(model.report)
     if osm.get("survey_fill"):
         report["survey_fill"] = osm["survey_fill"]

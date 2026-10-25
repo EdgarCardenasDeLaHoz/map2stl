@@ -77,6 +77,31 @@ def _draw_location_map(ax, bbox: RegionBBox, screened: list[dict], osm_data: dic
         )
     ax.grid(alpha=0.25)
 
+_OVERLAY_SEG_KEYS = ("x_left", "x_right", "top_y", "base_y", "seed_index")
+
+
+def overlay_spec(registration: dict, matched_segments: list[dict] | None) -> dict:
+    """The minimum :func:`_registration_overlay` reads, copied now (T21).
+
+    A view keeps this (a contour, projection x's and five numbers per segment, a few KB)
+    instead of the drawn image copy (~1 MB); ``SeedViewRegistration.image`` redraws it
+    from ``raw_image`` on access. Copied because the segment dicts are mutated later and
+    the redraw must show what was drawn here.
+    """
+    contour = registration.get("contour")
+    return {
+        "contour": None if contour is None else np.array(contour, dtype=np.float32),
+        "projections": [{"x_px": p.get("x_px", 0)} for p in registration.get("projections", [])],
+        "segments": [{k: seg[k] for k in _OVERLAY_SEG_KEYS if k in seg}
+                     for seg in (matched_segments or [])],
+    }
+
+
+def render_overlay(raw: np.ndarray, spec: dict) -> np.ndarray:
+    """Draw an :func:`overlay_spec` onto a copy of ``raw`` (same pixels as the direct call)."""
+    return _registration_overlay(raw, spec, matched_segments=spec["segments"] or None)
+
+
 def _registration_overlay(
     image: np.ndarray,
     registration: dict,
@@ -806,6 +831,8 @@ def _draw_view_minimap(
 __all__ = [
     '_draw_location_map',
     '_registration_overlay',
+    'overlay_spec',
+    'render_overlay',
     '_negative_seed_views',
     '_draw_osm_coastline_overlay',
     '_draw_view_minimap',

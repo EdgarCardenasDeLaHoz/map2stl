@@ -180,6 +180,9 @@
             <option value="off">Off</option>
           </select>
         </label>
+        <label class="composite-toggle-row" title="Each building stands on a flat terrace at its lowest corner. Off: buildings sink into the slope.">
+          <input type="checkbox" id="cityLevelGround" checked aria-label="Level ground under buildings"> ▭ Level ground under buildings
+        </label>
         <label class="composite-toggle-row" title="Lidar tree canopy from the survey; used only where survey lidar covers the box.">
           <input type="checkbox" id="cityTrees" checked aria-label="Trees from survey lidar"> 🌳 Trees (survey lidar)
         </label>

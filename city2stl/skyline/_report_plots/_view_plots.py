@@ -9,6 +9,8 @@ if TYPE_CHECKING:
 import logging
 from pathlib import Path
 
+from ._plot_utils import colormap_u8
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,8 +176,7 @@ def _render_view_depth_png(out_path: Path, sv: SeedViewRegistration) -> bool:
             return False
         norm = (depth_rel - d_min) / (d_max - d_min)
         if cmap is not None:
-            rgba = (cmap(norm) * 255).astype(np.uint8)
-            rgb = rgba[..., :3]
+            rgb = colormap_u8(cmap, norm)
         else:
             rgb = np.stack(
                 [(norm * 255).astype(np.uint8)] * 3, axis=-1)
@@ -230,6 +231,7 @@ def _render_view_reconstruction_png(
             "F-SKY12 reconstruction skipped for seed=%s: %s",
             sv.seed_name, exc)
         return False
+    fig = None
     try:
         depth = predict_pano_depth(np.asarray(raw))
         h, w = depth.shape[:2]
@@ -364,13 +366,15 @@ def _render_view_reconstruction_png(
         ax.grid(True, alpha=0.3)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(out_path, dpi=110, bbox_inches="tight")
-        plt.close(fig)
         return True
     except Exception as exc:
         logger.warning(
             "F-SKY12 reconstruction render failed for seed=%s: %s",
             sv.seed_name, exc)
         return False
+    finally:
+        if fig is not None:
+            plt.close(fig)
 
 def _render_seed_minimap_png(
     out_path: Path,

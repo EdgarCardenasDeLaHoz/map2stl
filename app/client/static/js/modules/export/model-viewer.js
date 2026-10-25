@@ -50,7 +50,10 @@
 
 import { parseBedSize, piecesNeeded } from './print-scale.js';
 import { buildingPrisms, demGroundMm } from './city-quickview.js';
-import { parseModelParts, partColor, staleParts, toViewerFrame } from './city-fullmodel.js';
+import {
+    SOIL_COLOR, parseModelParts, partColor, satelliteUVs, splitFacesBySlope, staleParts,
+    takesSatelliteImage, toViewerFrame,
+} from './city-fullmodel.js';
 import { buildingsWithOverrides, hasOverrides } from '../layers/building-heights.js';
 import {
     MIN_AUTO_PIECE_MM, evenEdges, gridKey, isCustom, jigsawCuts, minPieceMm, moveEdge,
@@ -80,6 +83,7 @@ let needsRender   = true;
 let _normalsActive = false;     // true when MeshNormalMaterial is active
 let _wireframeActive = false;   // Wireframe checkbox, applied to every displayed mesh
 let _satToken = 0;              // latest satellite drape request (_applySatelliteTexture)
+let _partsTex = null;           // the one satellite texture shared by the finished model's parts
 let _resizeObserver = null;     // reference for cleanup on re-init
 let _loopId = 0;                // the render loop that is current; a re-init starts a new one
 // Latest mesh scale info, set by _buildMeshFromPreview, read by _updateSceneOverlays
@@ -997,7 +1001,7 @@ function _scheduleFullModel(data, baseStatus, { keepShown = false, req = _fullMo
     if (!keepShown) _removeCityFull();
     if (!req) { _cancelFullModel(); _removeCityFull(); return; }
     const { scale, xOffset, zOffset } = geometry_scale_for_overlays;
-    _full.frame = { scale, xOffset, zOffset, rows: data.rows, mmPerPx: data.mm_per_pixel ?? 1 };
+    _full.frame = { scale, xOffset, zOffset, cols: data.cols, rows: data.rows, mmPerPx: data.mm_per_pixel ?? 1 };
     _full.status = baseStatus;
     const shown = cityFullGroup?.userData;
     if (shown?.key === req.key) {
@@ -1119,11 +1123,12 @@ function _showCityFull() {
     // _removeCityFull.
     if (terrainMesh && group.getObjectByName('terrain')) terrainMesh.visible = false;
     // What refreshCityLayers compares a layer edit against, and restores on undo.
-    group.userData = { key: _full.key, layers: _full.layers, buffer: _full.buffer, faces };
+    group.userData = { key: _full.key, layers: _full.layers, buffer: _full.buffer, faces, frame: _full.frame };
     cityFullGroup = group;
     modelScene.add(group);
     needsRender = true;
     _setStatusSuffix(_withoutQuickView(_full.status), _fullModelLabel(faces));
+    if (cmap === 'satellite') _applySatelliteTexture();   // the parts show the ramp until the image is in
 }
 
 /**
@@ -1318,24 +1323,83 @@ function _heightColors(positions, cmap) {
     return colors;
 }
 
+/**
+ * Re-colour the finished model's parts for `cmap`, in place (no refetch). Terrain takes
+ * the colour ramp. In Satellite mode, once `_partsTex` exists, the parts
+ * `takesSatelliteImage` names take the shared image on their flat faces and a plain
+ * colour on their steep ones; everything else keeps its flat colour. Called again when
+ * "Satellite image on roofs" flips.
+ */
+function _paintFullParts(cmap) {
+    if (!cityFullGroup) return;
+    const frame = cityFullGroup.userData.frame;
+    const buildingsColor = document.getElementById('layerBuildingsColor')?.value || '#c8b89a';
+    const roofs = !!window.appState?.viewerSatRoofs;
+    const tex = cmap === 'satellite' && frame ? _partsTex : null;
+    if (!tex) _dropPartsTexture();
+    cityFullGroup.traverse(mesh => {
+        if (!mesh.isMesh) return;
+        const g = mesh.geometry;
+        if (!mesh.userData.origIndex) mesh.userData.origIndex = g.index.array;
+        const plain = partColor(mesh.name, buildingsColor);
+        let mats;
+        if (tex && takesSatelliteImage(mesh.name, roofs)) {
+            if (!mesh.userData.split) {
+                mesh.userData.split = splitFacesBySlope(
+                    g.attributes.position.array, mesh.userData.origIndex);
+            }
+            const { flat, steep } = mesh.userData.split;
+            if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(
+                satelliteUVs(g.attributes.position.array, frame), 2));
+            const ordered = new Uint32Array(flat.length + steep.length);
+            ordered.set(flat);
+            ordered.set(steep, flat.length);
+            g.setIndex(new THREE.BufferAttribute(ordered, 1));
+            g.clearGroups();
+            g.addGroup(0, flat.length, 0);
+            g.addGroup(flat.length, steep.length, 1);
+            // Steep faces: soil, or the building's own colour for the walls under a photo roof.
+            mats = [new THREE.MeshStandardMaterial({ map: tex, flatShading: true }),
+                new THREE.MeshStandardMaterial({
+                    color: takesSatelliteImage(mesh.name, false) ? SOIL_COLOR : plain, flatShading: true })];
+        } else {
+            g.setIndex(new THREE.BufferAttribute(mesh.userData.origIndex, 1));   // original order, one group
+            g.clearGroups();
+            mats = new THREE.MeshStandardMaterial({ color: plain, flatShading: true });
+            if (mesh.name === 'terrain') {
+                g.setAttribute('color', new THREE.BufferAttribute(
+                    _heightColors(g.attributes.position.array, cmap), 3));
+                mats.vertexColors = true;
+                mats.color.set(0xffffff);
+            }
+        }
+        _swapMaterial(mesh, mats);
+    });
+    needsRender = true;
+}
+
+/** Replace a mesh's own material(s), freeing the old ones; Normals keeps its stand-in. */
+function _swapMaterial(mesh, mats) {
+    const old = _realMaterial(mesh);
+    if (mesh._savedMaterial) mesh._savedMaterial = mats; else mesh.material = mats;
+    [].concat(old).forEach(m => m.dispose());   // not their map: it is shared
+    _applyViewMode(mesh);
+}
+
+/** Free the parts' shared satellite texture (a no-op when there is none). */
+function _dropPartsTexture() {
+    _partsTex?.dispose();
+    _partsTex = null;
+}
+
 /** Recolor the current mesh with a new colormap (no server round-trip). */
 function _rebuildColors(cmap) {
     _satToken++;                 // a satellite drape still fetching was for the previous choice
-    // The finished model's terrain part is the ground on screen while it is shown,
-    // and it has no satellite UVs, so it takes the colour ramp either way.
-    const fullTerrain = cityFullGroup?.getObjectByName('terrain');
-    if (fullTerrain) {
-        const g = fullTerrain.geometry;
-        g.setAttribute('color', new THREE.BufferAttribute(
-            _heightColors(g.attributes.position.array, cmap), 3));
-        const mat = _realMaterial(fullTerrain);
-        mat.vertexColors = true;
-        mat.color.set(0xffffff);
-        mat.needsUpdate = true;
-        needsRender = true;
-    }
-    if (!terrainMesh) return;
+    // The finished model's parts show the ramp (terrain) and flat colours until the
+    // satellite image is in; with it already loaded they take it at once.
+    _paintFullParts(cmap);
     if (cmap === 'satellite') { _applySatelliteTexture(); return; }
+    if (!terrainMesh) return;
     // The mesh's own material, also while Normals shows its stand-in: after
     // Satellite it has no vertex colours, so turning Normals off would otherwise
     // bring back untextured terrain.
@@ -1350,6 +1414,14 @@ function _rebuildColors(cmap) {
     mat.color.set(0xffffff);
     mat.needsUpdate = true;
     needsRender = true;
+}
+
+/** "Satellite image on roofs" switch (ModelContainer.vue): buildings take the image or not. */
+function setViewerSatRoofs(on) {
+    if (window.appState) window.appState.viewerSatRoofs = !!on;
+    if ((document.getElementById('viewerColormap')?.value ?? 'terrain') === 'satellite') {
+        _paintFullParts('satellite');
+    }
 }
 
 /** Same box as the loaded DEM (the satellite canvas is fetched per box). */
@@ -1367,7 +1439,8 @@ function _sameBbox(a, b) {
  */
 async function _applySatelliteTexture() {
     const mesh = terrainMesh;
-    if (!mesh) return;
+    const group = cityFullGroup;
+    if (!mesh && !group) return;
     const token = ++_satToken;
     const st = window.appState || {};
     // At least the DEM grid's resolution (texture detail is free), at most 2048 px.
@@ -1378,16 +1451,25 @@ async function _applySatelliteTexture() {
         try { await window.loadSatelliteRGBImage?.({ dim: want }); } catch (_) { /* toast shown there */ }
     }
     const canvas = window.appState?.satImgSourceCanvas;
-    // Dropped unless it is still the latest request, for the same mesh (a rebuild
+    // Dropped unless it is still the latest request, for the same meshes (a rebuild
     // re-drapes its own) and with Satellite still chosen: a colormap picked while
     // the image loaded must not be painted over.
-    if (token !== _satToken || mesh !== terrainMesh) return;
+    if (token !== _satToken || mesh !== terrainMesh || group !== cityFullGroup) return;
     if ((document.getElementById('viewerColormap')?.value ?? 'satellite') !== 'satellite') return;
     if (!canvas) {
         window.showToast?.('No satellite image for this region - showing the terrain colormap.', 'warning');
         _rebuildColors('terrain');
         return;
     }
+    if (group) {
+        if (_partsTex?.image !== canvas) {
+            _dropPartsTexture();
+            _partsTex = new THREE.CanvasTexture(canvas);
+            _partsTex.anisotropy = modelRenderer?.capabilities?.getMaxAnisotropy?.() || 1;
+        }
+        _paintFullParts('satellite');
+    }
+    if (!mesh) return;
     const mat = _realMaterial(mesh);
     mat.map?.dispose();
     const tex = new THREE.CanvasTexture(canvas);
@@ -1419,8 +1501,7 @@ function _displayedMeshes() {
 function _disposeMesh(mesh) {
     mesh.geometry?.dispose();
     const real = _realMaterial(mesh);
-    real.map?.dispose();
-    real.dispose();
+    [].concat(real).forEach(m => { m.map?.dispose(); m.dispose(); });
     if (mesh.material !== real) mesh.material.dispose();
 }
 
@@ -1433,16 +1514,17 @@ function _disposeMesh(mesh) {
 function _applyViewMode(mesh) {
     if (_normalsActive && !mesh._savedMaterial) {
         mesh._savedMaterial = mesh.material;
-        mesh.material = new THREE.MeshNormalMaterial({
-            side: mesh.material.side, flatShading: mesh.material.flatShading });
+        const first = [].concat(mesh.material)[0];
+        mesh.material = new THREE.MeshNormalMaterial({ side: first.side, flatShading: first.flatShading });
     } else if (!_normalsActive && mesh._savedMaterial) {
         mesh.material.dispose();
         mesh.material = mesh._savedMaterial;
         delete mesh._savedMaterial;
     }
-    mesh.material.wireframe = _wireframeActive;
-    _realMaterial(mesh).wireframe = _wireframeActive;
-    mesh.material.needsUpdate = true;
+    for (const m of [].concat(mesh.material, _realMaterial(mesh))) {
+        m.wireframe = _wireframeActive;
+        m.needsUpdate = true;
+    }
 }
 
 function setViewerNormals(active) {
@@ -1740,6 +1822,7 @@ window._readBuildParams     = _readBuildParams;
 window.setViewerAutoRotate  = setViewerAutoRotate;
 window.resetViewerCamera    = resetViewerCamera;
 window.rebuildViewerColors  = _rebuildColors;
+window.setViewerSatRoofs    = setViewerSatRoofs;
 window.setViewerNormals     = setViewerNormals;
 window.setViewerWireframe   = setViewerWireframe;
 window.refreshCityLayers    = refreshCityLayers;

@@ -83,3 +83,12 @@ the *highest* ground point, so every building on a slope prints too tall on its 
   comparison against printed plates. Record the new baseline in the same change.
 - **Merged roofs**: `merge_flat_roofs` may merge different buildings than before; compare its
   counts before and after.
+
+## Status (2026-10-23, T50)
+
+- [x] Pad pass before the terrain TIN (`city_model.py::level_pads`, called from `build_on_terrain`).
+- [x] Heights from the pad: no change to `build_layer` / `_roofed` / `merge_flat_roofs` needed (lo == hi on the flattened terrain).
+- [x] Only where it shows: min one print layer, cap 3 mm; clusters take the lowest level.
+- [x] Option: request field `level_ground` (default on) instead of `LayerStyle.seat`; Composite tab switch.
+- [x] `MODEL_CACHE_VERSION` 8; tests `tests/test_city_plinth.py`.
+- [ ] Granada / Albaicin / reference-city measurements (needs cached data); new regression baseline.

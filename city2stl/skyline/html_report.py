@@ -986,10 +986,19 @@ def _tier_summary_html(rows: list[dict], stored: dict | None = None) -> str:
             f'<div class="tierbar">{bar}</div>\n<div class="tchips">{chips}</div>\n{attr_html}')
 
 
+def _anchor_dev_cell(row: dict) -> str:
+    """The row's photo anchor deviation in metres (``anchor_dev_m``), or an em dash when no
+    photo anchored it (every Street View only row)."""
+    v = row.get("anchor_dev_m")
+    return f"{float(v):.1f}" if isinstance(v, (int, float)) else "&mdash;"
+
+
 def _heights_table_html(rows: list[dict]) -> str:
     """Every published height with its tier (methods on hover), an "unverified" mark on
     tag/single/prior rows and a note where a single reading was withheld for the prior.
-    Best tier first, tallest first within a tier; a tier filter above it."""
+    Best tier first, tallest first within a tier; a tier filter above it. Reliability is shown
+    by the signals that track error, the number of views (``n_views``) and the photo anchor
+    deviation (``anchor_dev_m``), never by Street View confidence or seed disagreement."""
     rank = {t: i for i, t in enumerate((*TIERS, "unlabelled"))}
 
     def _h(r):
@@ -1026,6 +1035,8 @@ def _heights_table_html(rows: list[dict]) -> str:
             f'<td>{"<span class=unv>unverified</span>" if is_unverified(r) else ""}</td>'
             f'<td>{html.escape(source_label(r))}</td>'
             f'<td class="num">{int(r.get("n_seeds") or 0)}</td>'
+            f'<td class="num">{int(r.get("n_views") or 0)}</td>'
+            f'<td class="num">{_anchor_dev_cell(r)}</td>'
             f'<td class="note">{html.escape("; ".join(notes))}</td></tr>')
     options = "".join(
         f'<option value="{t}">{html.escape(TIER_LABELS[t])}</option>'
@@ -1037,7 +1048,9 @@ def _heights_table_html(rows: list[dict]) -> str:
     <option value="">all tiers ({len(rows)})</option>{options}</select></p>
 <table id="heights-table">
   <thead><tr><th>Building</th><th>Height (m)</th><th>Tier</th><th></th><th>Source</th>
-    <th>Seeds</th><th>Note</th></tr></thead>
+    <th>Seeds</th><th title="Street View images behind the height: 4+ views average 46 m error against 109 m for one">Views</th>
+    <th title="Photo anchor deviation (m): how far the photo's own fit disagrees with the footprints; larger means less reliable">Anchor dev (m)</th>
+    <th>Note</th></tr></thead>
   <tbody>
 {chr(10).join(body)}
   </tbody>
@@ -1327,7 +1340,8 @@ def render_region_index(
         heights_html = f"""
 <h2>Building heights</h2>
 <p>{len(measured)} buildings seen by a seed — {len(cross)} cross-seed (≥2 seeds), {len(single)} single-seed.
-   Cross-seed disagreement (lower = better):</p>
+   Cross-seed spread (a diagnostic only: it does not track error, so it is not an accuracy or an error bar.
+   Judge a height by its view count and photo anchor deviation in the table below):</p>
 <ul class="small">{''.join(f"<li>{html.escape(x)}</li>" for x in agree_lines)}</ul>
 <details>
 <summary>All {len(all_rows)} published heights, by tier</summary>

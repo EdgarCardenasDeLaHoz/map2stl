@@ -2,6 +2,29 @@
 
 How a DEM plus vector layers becomes one printable solid: the two-stage pipeline, the city model's scale rules, export formats, build speed and caches. Related: [architecture.md](architecture.md), [terrain-dem.md](terrain-dem.md).
 
+### 2026-10-23 — Buildings on slopes stand on level pads cut into the terrain heightfield, option `level_ground` (default on)
+- **Decision:** before the terrain TIN is built, `city2stl/city_model.py::level_pads` flattens the
+  heightfield under every extruded footprint (buildings, churches, towers; not parts on a tower,
+  not landmark-replaced) whose ground drops 0.1 mm (one print layer) to 3 mm (`PAD_MAX_DROP_MM`)
+  to the lowest ground under it. The flattened cells are every DEM cell that corners a bilinear
+  patch touching the footprint (`_patch_corner_cells`), so `Terrain.sample` is exactly level under
+  the whole footprint (the terrace reaches up to one cell past the wall). `build_layer`,
+  `_roofed` and `merge_flat_roofs` are unchanged: with lo == hi on the flattened terrain the old
+  rule (top = highest ground + height) already gives pad + height, and flat roofs on one terrace
+  merge. Pads sharing cells form a cluster at its lowest level; a building the cluster would sink
+  deeper than 3 mm is released to the old seating and clusters are formed again. Roads and green
+  sample the same terrain, so they follow the terrace. Request field `level_ground` (default true
+  in the city export, false in `build_on_terrain` for other callers); `MODEL_CACHE_VERSION` 8,
+  the flag is also in the model key.
+- **Why:** OSM height is measured from the lowest touching ground, so adding it to the highest
+  ground printed a building up to the slope drop too tall on its downhill side (40 % at Granada).
+  User approved the terrace look (mockups 2026-10-23-satparts-plinth, 03 and 04).
+- **Rejected:** boolean cut of a pit in the finished terrain solid — draped layers would float
+  over the hole; a fixed 0.4 mm footprint buffer — on a 1 mm grid the bilinear samples at the wall
+  would still mix unflattened cells and the wall would be short.
+- **Supersedes / superseded by:** refines the 2026-09-26 "features seated on the DEM" rule for slopes (kept when the option is off).
+- **Source:** [../plans/active/F-PLINTH-building-plinths-on-slopes.md](../plans/active/F-PLINTH-building-plinths-on-slopes.md)
+
 ### 2026-10-17 — The lidar tree canopy is an opt-in `trees` layer, built only where a vegetation survey covers the box
 - **Decision:** `city2stl/canopy.py` rebuilds the study's canopy: nDSM from the first
   vegetation-capable provider (`TREE_PROVIDERS`: REDIAM MDHN, IGN LiDAR HD, ČÚZK DMP, USGS 3DEP;

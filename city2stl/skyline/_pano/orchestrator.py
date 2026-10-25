@@ -9,7 +9,6 @@ from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from city2stl.resources import free_gpu_cache
@@ -33,6 +32,7 @@ from ..streetview_io import _meta_location, _streetview_image, _streetview_metad
 from .capture import _capture_pano_views
 from .detect import (
     _build_and_detect_pano,
+    _count_skyline_buildings,
     _register_views,
     _smooth_matches_across_views,
     _smooth_pano_matches_against_views,
@@ -99,7 +99,7 @@ def _seed_multiview_registration(
     agree on a single camera position.
 
     F-CLEAN8: this function is now a thin orchestrator. The five named
-    helpers implement each phase:
+    helpers implement each phase (``web_image_cache`` is consumed: an entry is dropped once its seed is done):
       _capture_pano_views        — Pass 1: fetch + pitch-correct spin views
       _recover_pano_heading      — F-SKY11.1 pano-coastline heading recovery
       _recover_anchor_offset     — joint IoU optimization across all views
@@ -273,7 +273,12 @@ def _seed_multiview_registration(
     # seed's nominal location, because snapping is what causes the collision.
     _seen_pano_ids: set[str] = set()
 
+    _web_done: str | None = None
     for seed, seed_elev, is_photosphere in resolved:
+        # T21: a web seed's image is read only by its own seed; free it once that seed is done
+        if _web_done is not None and web_image_cache is not None:
+            web_image_cache.pop(_web_done, None)
+        _web_done = seed.name
         # A seed's views are fresh arrays, so the previous seed's label maps, masks and anchored
         # images in the SegFormer cache can never hit again: free them (0.3-0.7 GB, 2026-10-05).
         clear_neural_cache()
@@ -374,32 +379,33 @@ def _seed_multiview_registration(
         if not _is_auto:
             _user_seed_covs.append(_best_cov)
 
-        # F-DET1: blob-count early-out.
-        # Count cv2 connected building-mask components across the best 3 views
-        # (SegFormer already batched above = cache hits, ~1 ms each).
-        # If total blobs < threshold, the camera almost certainly isn't facing
-        # a skyline — skip the entire 30–60 s recovery+anchor+register chain.
-        _FDET1_MIN_BLOBS = 6
+        # F-DET1: building-count early-out.
+        # Count buildings (pieces of the building mask's top edge, cut at
+        # height steps; ``_count_skyline_buildings``) across the best 3 views
+        # (SegFormer already batched above = cache hits, ~1 ms each). If the
+        # total is below the threshold, the camera almost certainly isn't
+        # facing a skyline — skip the 30–60 s recovery+anchor+register chain.
+        # Counting connected components alone (before T26) read a continuous
+        # city as one blob and dropped good far-skyline seeds.
+        _FDET1_MIN_BUILDINGS = 6
         _top3_views = sorted(
             cached_views_for_seed,
             key=lambda _cv: _cv.get("sv_score", 0.0),
             reverse=True,
         )[:3]
-        _total_blobs = 0
+        _total_buildings = 0
         for _cv3 in _top3_views:
             _, _bm3 = _neural_sky_and_building_masks(_cv3["image"])
-            if _bm3 is not None and _bm3.any():
-                _n_labels, _ = cv2.connectedComponents(
-                    (_bm3 > 0).astype(np.uint8))
-                _total_blobs += max(0, _n_labels - 1)  # 0 is background
-        logger.info(f"[F-DET1] {seed.name}: building blobs (top-3 views) = {_total_blobs}")
-        if _total_blobs < _FDET1_MIN_BLOBS:
+            if _bm3 is not None:
+                _total_buildings += _count_skyline_buildings(_bm3)
+        logger.info(f"[F-DET1] {seed.name}: buildings (top-3 views) = {_total_buildings}")
+        if _total_buildings < _FDET1_MIN_BUILDINGS:
             logger.warning(f"[F-DET1] {seed.name}: EARLY-OUT — "
-                           f"{_total_blobs} blobs < {_FDET1_MIN_BLOBS}; "
+                           f"{_total_buildings} buildings < {_FDET1_MIN_BUILDINGS}; "
                            "no skyline detected, kept as bad example")
             view_rows.extend(_negative_seed_views(
                 seed, cached_views_for_seed,
-                reason=f"low building detection ({_total_blobs} blobs)"))
+                reason=f"low building detection ({_total_buildings} buildings)"))
             continue
 
         # Retrieve the effective pitch from the helper's output.
@@ -502,6 +508,8 @@ def _seed_multiview_registration(
     # floor-period reading, and the spread of the OSM-independent
     # inferred height. Confirms the facade-striation signal is live and
     # gives a feel for its reliability before it feeds the aggregate.
+    if web_image_cache is not None:
+        web_image_cache.clear()                 # T21: every web seed is done
     if _F_SKY1_ENABLED and all_estimates:
         fp = [e for e in all_estimates
               if getattr(e, "floor_period_px", None) is not None]
