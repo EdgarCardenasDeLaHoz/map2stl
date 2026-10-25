@@ -27,8 +27,22 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 - **Why opt-in:** the cache stores ground-subtracted heights. Changing the default would re-key and
   re-download (paid) every cached raster. So `ground` enters the cache key only when it is not the
   default.
-- **Open:** verify on Seattle. That needs about 55 tile re-fetches against the 1k-roots free tier,
-  and is waiting for the user's OK. If it holds, make the benchmark use `ground="plane"`.
+- **Seattle check (2026-10-24, user-approved, 55 tile fetches):** 402 truth footprints against the
+  3DEP LiDAR survey.
+
+  | Height band | n | p5 median | p5 MAE | Plane median | Plane MAE |
+  |---|---|---|---|---|---|
+  | All | 402 | +4.3 m | 8.8 m | +1.3 m | 3.9 m |
+  | 0–15 m | 228 | +4.7 m | 10.8 m | +2.0 m | 5.1 m |
+  | 15–40 m | 135 | +4.3 m | 6.8 m | +0.8 m | 2.1 m |
+  | 40–100 m | 39 | +1.4 m | 4.5 m | +0.1 m | 3.1 m |
+
+  - The plane is worse by more than 1 m on 48 of the 402.
+  - So the benchmark now uses `ground="plane"` (`benchmark.tiles_ndsm`). The provider default stays
+    `percentile` to keep the cached rasters valid.
+  - Truth records cached before this keep their p5 `tiles_m` until they are refreshed. The plane
+    rasters from this check are cached under the scratch tile bboxes, not `tiles_for`'s, so a
+    Seattle refresh would fetch again.
 
 ### 2026-10-23 — Commons photo screen: a rescued photo needs p75 |photo - OSM| <= 40 m; a low-light photo needs 80 % outline coverage
 - **Decision:** `17_photo_pipeline.py::_keep` rescues a gate-failing photo only when also `_abs_dev_p75(towers) <= --rescue-max-p75` (default 40 m). `commons_photos.quality_reject` keeps a low-light photo (sky value < 170) only when `score >= MIN_SKYLINE_QUALITY` (0.11) **and** `coverage >= MIN_LOW_LIGHT_COVERAGE` (0.80). Day photos stay ungated.
