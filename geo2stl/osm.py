@@ -282,6 +282,28 @@ def use_overpass_endpoint(ox, endpoint: str, query_timeout_s: float) -> None:
     ox.settings.overpass_settings = f"[out:json][timeout:{int(query_timeout_s)}]{{maxsize}}"
 
 
+def configure_osmnx(ox=None, query_timeout_s: float = 180) -> str | None:
+    """Point osmnx at the first healthy mirror (:func:`use_overpass_endpoint`).
+
+    For one-shot osmnx callers (``city2stl/osm_raster.py``, the align tool, ML and
+    eval scripts) that do not run :func:`city2stl.fetch.fetch_osm_data`'s mirror
+    loop. Mirror health is remembered for a while, so calling it before every query
+    is cheap. Returns the endpoint, or None when osmnx is missing or no mirror
+    answered (osmnx then keeps its own default, with the host pin installed).
+    """
+    if ox is None:
+        try:
+            import osmnx as ox
+        except ImportError:
+            return None
+    install_dns_pin(ox)
+    endpoints = healthy_overpass_endpoints() or unconfirmed_overpass_endpoints()
+    if not endpoints:
+        return None
+    use_overpass_endpoint(ox, endpoints[0], query_timeout_s)
+    return endpoints[0]
+
+
 # ---------------------------------------------------------------------------
 # Raw Overpass QL (no osmnx)
 # ---------------------------------------------------------------------------

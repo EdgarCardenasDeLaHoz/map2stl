@@ -49,12 +49,12 @@ import argparse
 import json
 import math
 import re
-import socket
 import sys
 
 import numpy as np
 import paths  # noqa: E402
 
+from geo2stl import osm as _osm  # noqa: E402
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
 
 HERE = paths.HERE
@@ -528,101 +528,36 @@ _OSMNX_TUNED = [False]
 
 def tune_osmnx(probe_timeout_s: float = 30.0, verbose: bool = True,
                force: bool = False) -> str | None:
-    """Make osmnx able to reach Overpass from this machine.
+    """Make osmnx able to reach Overpass from this machine (once per process unless *force*).
 
-    The building heightmap comes from `city2stl.osm_raster`, which fetches
-    through osmnx, and osmnx here fails with a connect or read timeout while a
-    plain POST of the same query returns in under two seconds.  That was put
-    down to the network for weeks.  It is not the network.
+    The building heightmap comes through osmnx (`city2stl.osm_raster`), and osmnx's
+    defaults failed here in two ways that looked like the network:
 
-    osmnx ships with `settings.overpass_rate_limit = True`, which makes it ask
-    the endpoint's `/api/status` for a free slot before every query and sleep
-    until one appears.  It is that status request that hangs from here, not the
-    query, so the failure looks like an unreachable host while the interpreter
-    endpoint beside it answers normally.  Measured on one 0.01-degree building
-    query: 90 s read timeout with the rate limiter on, 2.3 s with it off, same
-    endpoint and same bbox, 253 features returned.
+    - `overpass_rate_limit` polls `/api/status` before every query and that request
+      hangs (90 s read timeout with it on, 2.3 s off, same endpoint and bbox);
+    - its IPv4-only host pin kept every later request on the unhealthy machine.
 
-    Turning the limiter off hands the pacing back to us.  That is fine for the
-    caller this exists for -- a full export fires one building query per city
-    with a minute of meshing between them -- but anything that loops harder
-    should space its own calls, the way `_overpass_wait` does for this module's
-    own requests.
-
-    The endpoint is then chosen by probing each mirror with a query small
-    enough to answer instantly and taking the first that responds; osmnx wants
-    the base URL without the trailing `/interpreter` that `OVERPASS_URLS`
-    carries, so the suffix is stripped.  Returns the chosen base URL, or None
-    if osmnx is not installed or no mirror answered, in which case osmnx keeps
-    its own default and the caller is no worse off than before.
-
-    It runs once per process unless `force` is set, which is what a retry after
-    a failed fetch wants: the mirror chosen at startup may be the one that has
-    just gone away.
+    `geo2stl.osm.configure_osmnx` takes the first healthy mirror, bounds the timeouts
+    and swaps the pin for one that keeps the address that connects. The limiter stays
+    off for the official instance too: a full export fires one building query per city
+    with a minute of meshing between them, so it needs no pacing. *force* is for a retry
+    after a failed fetch, when the mirror chosen at startup may be the one that went
+    away. Returns the endpoint, or None when osmnx is missing or no mirror answered.
     """
     if _OSMNX_TUNED[0] and not force:
         return None
     _OSMNX_TUNED[0] = True
-
-    import requests
     try:
         import osmnx as ox
     except ImportError:
         return None
-
+    base = _osm.configure_osmnx(ox, query_timeout_s=120)
     ox.settings.overpass_rate_limit = False
-    ox.settings.requests_timeout = 120
     ox.settings.doh_url_template = None
-
-    # osmnx's _config_dns resolves the endpoint's hostname once and then
-    # replaces socket.getaddrinfo for the whole process so that name always
-    # returns that one address.  It does this on purpose -- overpass-api.de
-    # round-robins between gall and lambert, and osmnx wants its slot check and
-    # its query to reach the same machine -- but the cost here outweighs it.
-    # If the pinned machine is the unhealthy one, every later request in the
-    # process connect-times-out, including this module's own direct POSTs,
-    # which never go through osmnx at all.  That is what made one failed
-    # building fetch take a city's whole water overlay down with it, and why a
-    # fresh process could reach the same host seconds later.
-    #
-    # Neutralising it costs only the slot-check affinity, and the slot check is
-    # already off above.
-    try:
-        from osmnx import _http as ox_http
-        ox_http._config_dns = lambda url: None
-        socket.getaddrinfo = ox_http._original_getaddrinfo
-    except Exception:  # a future osmnx may not have either name
-        pass
-
-    # The probe is paced like any other request from this module, and a 429 counts
-    # as an answer.  It has to: the probe shares its quota with the solve that is
-    # about to run, so the likeliest reason a healthy mirror refuses this query is
-    # that our own last query is still holding a slot.  Rejecting a mirror for
-    # being busy would leave osmnx pointed at whatever its default is, which is
-    # the outcome the probe exists to avoid.  Only a server error or no answer at
-    # all rules a mirror out.
-    probe = "[out:json][timeout:10];node(50.0,14.4,50.001,14.401);out count;"
-    for url in OVERPASS_URLS:
-        try:
-            _overpass_wait()
-            response = requests.post(
-                url, data={"data": probe}, timeout=(15, probe_timeout_s),
-                headers={"User-Agent": OVERPASS_USER_AGENT},
-            )
-            if response.status_code >= 500:
-                continue
-        except Exception:
-            continue
-        base = url[: -len("/interpreter")] if url.endswith("/interpreter") else url
-        ox.settings.overpass_url = base
-        if verbose:
-            print(f"osmnx: rate limiter off, endpoint {base}", flush=True)
-        return base
-
     if verbose:
-        print("osmnx: rate limiter off, endpoint left at its default "
-              "(no mirror answered the probe)", flush=True)
-    return None
+        print(f"osmnx: rate limiter off, endpoint {base or 'left at its default'}",
+              flush=True)
+    return base
 
 
 def seed_center(region: str) -> tuple[float, float]:

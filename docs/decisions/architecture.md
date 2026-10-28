@@ -2,6 +2,21 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-28 — Every Overpass caller goes through geo2stl/osm.py
+- **Decision:**
+  - New `map2stl/geo2stl/osm.py::configure_osmnx`. It picks the first healthy mirror, then applies `use_overpass_endpoint`: bounded timeouts, the rate limiter only on overpass-api.de, and the host pin.
+  - Its callers are `city2stl/osm_raster.py::_ox`, `tools/align_tool/locate.py::tune_osmnx` (which still turns the limiter off for every mirror), `tools/ml/data/collect_osm_tiles.py` and `tools/eval/eval_roof_tags.py`.
+  - `city2stl/registration/osm_water.py::OVERPASS_URLS` is now `OVERPASS_INTERPRETER_URLS`, which adds maps.mail.ru.
+  - The raw-QL callers already used `overpass_query`.
+- **Why:**
+  - osm_raster kept osmnx's default mirror with no health check.
+  - The two tools used bare osmnx.
+  - `tune_osmnx` had its own probe and turned the host pin off entirely, where `install_dns_pin` keeps an address that connects.
+  - There was a second hand-kept mirror list.
+- **Rejected:** moving `city2stl/fetch.py`'s layer loop into geo2stl. It owns cancellation and per-layer retry for the app and has no second user.
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 2.
+
 ### 2026-10-28 — Background jobs share one runner, app/server/core/jobs.py
 - **Decision:**
   - `map2stl/app/server/core/jobs.py::Job` holds the lifecycle every job shares: id, params, status, progress, message, error, result, timestamps, cancel event, worker thread. `map2stl/app/server/core/jobs.py::JobRegistry` holds start / join-identical / get / cancel and the TTL sweep, and runs each job in a thread named `<kind>-<id>`.

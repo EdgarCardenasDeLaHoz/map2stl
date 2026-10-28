@@ -31,13 +31,9 @@ SELECTORS = {
     "way": '[waterway~"^(river|riverbank|canal|dock)$"]',
 }
 
-OVERPASS_URLS = (
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-)
-# overpass.osm.jp is deliberately absent: it serves a certificate that does not name the
-# host, so every request to it fails verification and only costs the backoff.
+# The one mirror list (geo2stl.osm). overpass.osm.jp stays out of it: its certificate
+# does not name the host, so every request to it fails verification.
+OVERPASS_URLS = _osm.OVERPASS_INTERPRETER_URLS
 OVERPASS_TIMEOUT_S = 180
 OVERPASS_ATTEMPTS = 6
 OVERPASS_MIN_GAP_S = 6.0

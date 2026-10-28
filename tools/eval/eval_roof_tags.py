@@ -80,6 +80,8 @@ def _evaluate_city(city: str, bbox: tuple, verbose: bool = False) -> CityResult:
         result.error = "osmnx not installed"
         return result
 
+    from geo2stl.osm import configure_osmnx
+    configure_osmnx(ox)
     north, south, east, west = bbox
     ox_bbox = (west, south, east, north)
 

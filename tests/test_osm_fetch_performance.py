@@ -146,3 +146,24 @@ def test_unconfirmed_endpoints_put_reachable_mirrors_first(monkeypatch):
     assert osm.unconfirmed_overpass_endpoints() == [*rest, a]
     monkeypatch.setattr(osm, "_FAILED_AT", {rest[0]: osm.time.monotonic()})
     assert osm.unconfirmed_overpass_endpoints() == [*rest[1:], a, rest[0]]
+
+
+def test_configure_osmnx_takes_the_first_healthy_mirror(monkeypatch):
+    class _Settings:
+        overpass_url = "default"
+
+    class _FakeOx:
+        settings = _Settings()
+
+    mirrors = list(osm.OVERPASS_ENDPOINTS)
+    monkeypatch.setattr(osm, "healthy_overpass_endpoints", lambda: mirrors[1:])
+    assert osm.configure_osmnx(_FakeOx, query_timeout_s=90) == mirrors[1]
+    assert _FakeOx.settings.overpass_url == mirrors[1]
+    assert _FakeOx.settings.requests_timeout == (osm.CONNECT_TIMEOUT_S, 90)
+    assert _FakeOx.settings.overpass_rate_limit is False
+
+    monkeypatch.setattr(osm, "healthy_overpass_endpoints", lambda: [])
+    monkeypatch.setattr(osm, "unconfirmed_overpass_endpoints", lambda: [])
+    _FakeOx.settings.overpass_url = "default"
+    assert osm.configure_osmnx(_FakeOx) is None
+    assert _FakeOx.settings.overpass_url == "default"

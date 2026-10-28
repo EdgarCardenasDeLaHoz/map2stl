@@ -41,6 +41,8 @@ def _fetch_buildings_via_osmnx(
     with `height_m` filled from `height`, `building:levels`, or default 10 m."""
     import osmnx as ox
 
+    from geo2stl.osm import configure_osmnx
+    configure_osmnx(ox)
     ox_bbox = (west, south, east, north)
     gdf = ox.features_from_bbox(ox_bbox, tags={"building": True})
     gdf = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])].reset_index(drop=True)
