@@ -97,10 +97,10 @@ def write_array_cache(namespace: str, key: str,
     try:
         save_dict = {k: (np.asarray(v) if keep_dtype else np.asarray(v).astype(np.float32))
                      for k, v in arrays.items()}
-        _gc._atomic_write(npz_path, lambda f: _savez_fast(f, save_dict))
+        _gc.atomic_write(npz_path, lambda f: _savez_fast(f, save_dict))
         meta = dict(metadata or {})
         meta["_cached_at"] = time.time()
-        _gc._atomic_write(json_path, lambda f: f.write(json.dumps(meta).encode()))
+        _gc.atomic_write(json_path, lambda f: f.write(json.dumps(meta).encode()))
         logger.debug(f"Array cache written: {namespace}/{key} "
                      f"({npz_path.stat().st_size // 1024} KB)")
     except Exception as e:

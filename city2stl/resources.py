@@ -89,16 +89,15 @@ def _try_gpu_lock() -> bool:
     global _gpu_lock_fd
     if _gpu_lock_fd is not None or os.environ.get("MAP2STL_GPU_LOCK", "").lower() == "off":
         return True
+    from geo2stl.cache import try_lock_fd  # lazy: geo2stl.cache imports numpy (see scratch_guard)
     GPU_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(GPU_LOCK_PATH, os.O_RDWR | os.O_CREAT)
     try:
-        if os.name == "nt":
-            import msvcrt
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+        locked = try_lock_fd(fd)
+    except BaseException:
+        os.close(fd)
+        raise
+    if not locked:
         os.close(fd)
         return False
     _gpu_lock_fd = fd
@@ -110,13 +109,8 @@ def release_gpu_lock() -> None:
     global _gpu_lock_fd
     if _gpu_lock_fd is None:
         return
-    try:
-        if os.name == "nt":
-            import msvcrt
-            os.lseek(_gpu_lock_fd, 0, os.SEEK_SET)
-            msvcrt.locking(_gpu_lock_fd, msvcrt.LK_UNLCK, 1)
-    except OSError:
-        pass
+    from geo2stl.cache import unlock_fd
+    unlock_fd(_gpu_lock_fd)
     os.close(_gpu_lock_fd)
     _gpu_lock_fd = None
 

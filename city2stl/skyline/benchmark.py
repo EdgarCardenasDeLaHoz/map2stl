@@ -38,6 +38,10 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.cache import (  # noqa: F401 - file_lock re-exported (bm.file_lock)
+    atomic_write_json,
+    file_lock,
+)
 from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
 
 from .local_dirs import local_dir
@@ -481,70 +485,10 @@ def load_truth_cache(region: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
 
 
-class file_lock:  # noqa: N801 - used as a context manager, like open()
-    """An exclusive lock on ``<path>.lock`` across processes, for a read-merge-write of a cache
-    file (two survey readers of one region). Blocks, polling every 0.1 s, up to ``timeout_s``."""
-
-    def __init__(self, path: Path, timeout_s: float = 120.0):
-        self.path = Path(f"{path}.lock")
-        self.timeout_s = timeout_s
-        self.fd = None
-
-    def __enter__(self):
-        import os
-        import time
-
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT)
-        t0 = time.monotonic()
-        while True:
-            try:
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return self
-            except OSError as exc:
-                if time.monotonic() - t0 > self.timeout_s:
-                    os.close(self.fd)
-                    raise TimeoutError(f"{self.path} still locked after "
-                                       f"{self.timeout_s:.0f} s") from exc
-                time.sleep(0.1)
-
-    def __exit__(self, *exc):
-        import os
-
-        try:
-            if os.name == "nt":
-                import msvcrt
-                os.lseek(self.fd, 0, os.SEEK_SET)
-                msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-        os.close(self.fd)
-        return False
-
-
-def write_json_atomic(path: Path, obj, attempts: int = 10) -> None:
+def write_json_atomic(path: Path, obj) -> None:
     """Write ``obj`` as JSON to ``path`` through a temporary file and a rename, so a reader in
     another process never sees half a file (retried while Windows holds the target open)."""
-    import os
-    import time
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(obj, indent=1, sort_keys=True), encoding="utf-8")
-    for i in range(attempts):
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:
-            if i == attempts - 1:
-                raise
-            time.sleep(0.2 * (i + 1))
+    atomic_write_json(path, obj, indent=1, sort_keys=True)
 
 
 def save_truth_cache(region: str, truth: dict) -> None:

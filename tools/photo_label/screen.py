@@ -19,7 +19,6 @@ not catch. A result is cached beside the photo as ``<stem>_screen.json`` and nev
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 GROUND_CLASSES = (3, 6, 11, 13, 12, 52)   # ADE20K (0-based): floor, road, sidewalk, earth, person, path
@@ -56,9 +55,8 @@ def _ensure_label_map(rgb):
 
 
 def _write(path: Path, res: dict) -> None:
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(res), encoding="utf-8")
-    os.replace(tmp, path)
+    from geo2stl.cache import atomic_write_json
+    atomic_write_json(path, res)
 
 
 def screen_photo(path: Path, labels: bool = True) -> dict | None:

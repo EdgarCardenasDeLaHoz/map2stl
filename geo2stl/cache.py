@@ -148,21 +148,92 @@ def _is_cloud_placeholder(path: Path) -> bool:
         return False
 
 
-def _atomic_write(path: Path, write) -> None:
+def atomic_write(path: str | os.PathLike, write, attempts: int = 10) -> None:
     """Call ``write(fileobj)`` on a temp file beside *path*, then rename it over *path*.
 
     A reader never sees a half-written entry: two requests for the same bbox (or
     tile) can fetch concurrently, and a crash mid-write used to leave a truncated
-    .npz that failed every later read.
+    .npz that failed every later read. The rename is retried while Windows holds
+    the target open (a reader in another process).
     """
+    path = Path(path)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         with open(tmp, "wb") as f:
             write(f)
-        os.replace(tmp, path)
+        for i in range(attempts):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if i == attempts - 1:
+                    raise
+                time.sleep(0.2 * (i + 1))
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def atomic_write_json(path: str | os.PathLike, obj: Any, **dump_kw) -> None:
+    """Write ``obj`` as UTF-8 JSON through :func:`atomic_write`, creating the folder."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    blob = json.dumps(obj, **dump_kw).encode("utf-8")
+    atomic_write(path, lambda f: f.write(blob))
+
+
+def try_lock_fd(fd: int) -> bool:
+    """Take an exclusive, non-blocking OS lock on byte 0 of ``fd``; False if held elsewhere."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def unlock_fd(fd: int) -> None:
+    """Release :func:`try_lock_fd` (closing ``fd`` also releases it on POSIX)."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+class file_lock:  # noqa: N801 - used as a context manager, like open()
+    """An exclusive lock on ``<path>.lock`` across processes, for a read-merge-write of
+    a shared file. Blocks, polling every 0.1 s, up to ``timeout_s`` (then TimeoutError)."""
+
+    def __init__(self, path: str | os.PathLike, timeout_s: float = 120.0):
+        self.path = Path(f"{path}.lock")
+        self.timeout_s = timeout_s
+        self.fd: int | None = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fd = os.open(self.path, os.O_RDWR | os.O_CREAT)
+        t0 = time.monotonic()
+        while not try_lock_fd(self.fd):
+            if time.monotonic() - t0 > self.timeout_s:
+                os.close(self.fd)
+                raise TimeoutError(f"{self.path} still locked after {self.timeout_s:.0f} s")
+            time.sleep(0.1)
+        return self
+
+    def __exit__(self, *exc):
+        unlock_fd(self.fd)
+        os.close(self.fd)
+        return False
 
 
 def write_array_cache(namespace: str, key: str,
@@ -182,10 +253,10 @@ def write_array_cache(namespace: str, key: str,
         # Downcast to float32 to keep files small
         save_dict = {k: (np.asarray(v) if keep_dtype else np.asarray(v).astype(np.float32))
                      for k, v in arrays.items()}
-        _atomic_write(npz_path, lambda f: np.savez_compressed(f, **save_dict))
+        atomic_write(npz_path, lambda f: np.savez_compressed(f, **save_dict))
         meta = dict(metadata or {})
         meta["_cached_at"] = time.time()
-        _atomic_write(json_path, lambda f: f.write(json.dumps(meta).encode()))
+        atomic_write(json_path, lambda f: f.write(json.dumps(meta).encode()))
         logger.debug(f"Array cache written: {namespace}/{key} "
                      f"({npz_path.stat().st_size // 1024} KB)")
     except Exception as e:
@@ -255,7 +326,7 @@ def write_osm_cache(key: str, data: dict, params: dict | None = None) -> None:
     try:
         compressed = gzip.compress(json.dumps(
             data).encode("utf-8"), compresslevel=6)
-        _atomic_write(path, lambda f: f.write(compressed))
+        atomic_write(path, lambda f: f.write(compressed))
         logger.debug(
             f"OSM cache written: {key} ({len(compressed) // 1024} KB gz)")
         if params is not None:
@@ -272,7 +343,7 @@ def write_osm_cache_params(key: str, params: dict) -> None:
     """Record which bbox and simplification an OSM cache entry holds (sidecar)."""
     blob = json.dumps({k: v for k, v in params.items() if k != "key"}).encode()
     try:
-        _atomic_write(_osm_dir() / f"{key}.params.json", lambda f: f.write(blob))
+        atomic_write(_osm_dir() / f"{key}.params.json", lambda f: f.write(blob))
     except OSError as e:
         logger.warning(f"write_osm_cache_params failed ({key}): {e}")
 
@@ -334,7 +405,7 @@ def write_json_cache(namespace: str, key: str, data: Any) -> None:
     path = _array_dir(namespace) / f"{key}.json.gz"
     try:
         blob = gzip.compress(json.dumps(data).encode("utf-8"), compresslevel=6)
-        _atomic_write(path, lambda f: f.write(blob))
+        atomic_write(path, lambda f: f.write(blob))
     except Exception as e:
         logger.warning(f"write_json_cache failed ({namespace}/{key}): {e}")
 

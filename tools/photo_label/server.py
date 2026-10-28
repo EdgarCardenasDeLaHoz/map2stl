@@ -98,6 +98,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from city2stl.skyline.camera_solver import M_PER_DEG_LAT, Obs, solve_pose  # noqa: E402
+from geo2stl.cache import atomic_write, atomic_write_json  # noqa: E402
 
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
@@ -512,10 +513,7 @@ def _set_flag(cfg: Config, rel: str, bad: bool, reason: str = "", keep: bool = F
         elif not bad:
             flags.pop(rel, None)
         fp = flags_path(cfg)
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        tmp = fp.with_suffix(".tmp")
-        tmp.write_text(json.dumps(flags, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, fp)
+        atomic_write_json(fp, flags, indent=2, ensure_ascii=False)
         return len(flags)
 
 
@@ -1380,9 +1378,7 @@ def _compute_depth(key: tuple[str, str], photo: Path, rgb) -> None:
         from city2stl.skyline.depth_estimation import _depth_anything_raw
         d = np.asarray(_depth_anything_raw(rgb, device="cuda"), dtype=np.float32)
         f = depth_path(photo)
-        tmp = f.with_name(f.stem + ".tmp.npy")
-        np.save(tmp, d)
-        os.replace(tmp, f)
+        atomic_write(f, lambda fh: np.save(fh, d))
     except Exception as exc:  # noqa: BLE001 - reported to the page
         traceback.print_exc()
         err = f"{type(exc).__name__}: {exc}"
@@ -1596,9 +1592,7 @@ def tile_cache_put(cache_dir: Path, rel: str, body: bytes, ctype: str, max_age: 
     binp.parent.mkdir(parents=True, exist_ok=True)
     exp = (time.time() if now is None else now) + max_age
     for p, data in ((binp, body), (metap, json.dumps({"ctype": ctype, "expires": exp}).encode())):
-        tmp = p.with_name(p.name + f".{threading.get_ident()}.tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, p)
+        atomic_write(p, lambda f, data=data: f.write(data))
     with _tile_lock:
         _tile_writes += 1
         sweep = _tile_writes % TILES_CACHE_SWEEP_EVERY == 0

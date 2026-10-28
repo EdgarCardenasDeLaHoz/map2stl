@@ -2,6 +2,20 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-28 — Atomic writes and cross-process locks live in geo2stl/cache.py
+- **Decision:**
+  - `map2stl/geo2stl/cache.py` holds `atomic_write` (a temp file beside the target, then `os.replace`, retried while Windows holds the target open), `atomic_write_json`, `file_lock` (a blocking lock on `<path>.lock`) and `try_lock_fd` / `unlock_fd`.
+  - Their users:
+    - the geo2stl caches and `app/server/core/cache.py`;
+    - the skyline benchmark: `bm.file_lock` and `bm.write_json_atomic` are now names for these helpers;
+    - satellite readings and the imagery tile cache;
+    - `city2stl/resources.py`'s GPU lock;
+    - the photo-label server and screen.
+- **Why:** there were seven hand-rolled temp-and-rename writes and three msvcrt/fcntl lock copies. Only the benchmark copy retried a rename that Windows refused, and two copies used a fixed `.tmp` name that two writers would share.
+- **Kept:** `city2stl/skyline/_pano/stage_cache.py::write_entry` keeps its own write. It fsyncs before the rename, and when Windows refuses the rename it keeps the existing entry, which holds the same bytes, instead of raising.
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 6.
+
 ### 2026-10-28 — numpy2stl.raster.burn_polygons is the one rasteriser; the wrappers stay
 - **Decision:** no new rasteriser. F-UNIFY Phase 1 step 5 closes with no code change.
   - `city2stl/rasterize.py::rasterize_city_data`, `app/server/routers/composite.py::_rasterize_buildings`, `city2stl/osm_raster.py::_rasterize_buildings`, `city2stl/registration/osm_water.py::_rasterize` and `tools/ml/data/collect_osm_tiles.py::_rasterize_buildings` already burn through `numpy2stl.raster.burn_polygons`.

@@ -187,13 +187,11 @@ def _read_cached_tile(path: Path):
 
 def _write_cached_tile(path: Path, data: bytes) -> None:
     """Store a tile's raw bytes at *path* atomically (best effort)."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
+        _geo_cache.atomic_write(path, lambda f: f.write(data))
     except Exception:  # noqa: BLE001 - cache write is best effort
-        tmp.unlink(missing_ok=True)
+        pass
 
 
 def fetch_tile(

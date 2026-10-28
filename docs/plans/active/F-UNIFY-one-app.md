@@ -1,7 +1,7 @@
 # F-UNIFY: one app, one architecture, panorama heights in reconstruction
 
 _Approved 2026-10-24 (user; mockups approved 2026-10-26). Status: Phase 0 done 2026-10-28, Phase 1
-in progress (steps 1-5 done). Proposal: [F-UNIFY](../../proposals.md). Mockups: `Code/claude/mockups/2026-10-24-unify/`._
+in progress (steps 1-6 done). Proposal: [F-UNIFY](../../proposals.md). Mockups: `Code/claude/mockups/2026-10-24-unify/`._
 
 ## Goal
 
@@ -63,7 +63,7 @@ and the registration tools feed building heights into the city model automatical
      - `osm_raster._rasterize_buildings`;
      - `routers/composite._rasterize_city`;
      - align_tool's `plate_vectors.polygons_to_heightmap`.
-6. **Atomic writes and locks.** One `atomic_write_json` / `file_lock` in `geo2stl/cache.py`;
+6. **Atomic writes and locks.** **Done 2026-10-28.** One `atomic_write_json` / `file_lock` in `geo2stl/cache.py`;
    `skyline/benchmark` uses it.
 7. **Dead code out.**
    - The `shadow_height` provider (deprecated 2026-08-28) and `city2stl/roads.py` (legacy).

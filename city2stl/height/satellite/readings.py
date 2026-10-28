@@ -39,6 +39,8 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.cache import atomic_write_json
+
 from .weights import MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
 
 #: Two readings agree within this share (the benchmark's 25 % yardstick).
@@ -209,9 +211,7 @@ def save(path: str | os.PathLike, readings: dict, meta: dict, where: dict | None
     for fid in sorted(readings):
         body[fid] = dict((where or {}).get(fid) or {},
                          readings=[r.to_json() for r in readings[fid]])
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(body, indent=0), encoding="utf-8")
-    os.replace(tmp, p)
+    atomic_write_json(p, body, indent=0)
 
 
 def load(path: str | os.PathLike, calibrate: bool = True) -> tuple[dict, dict]:
