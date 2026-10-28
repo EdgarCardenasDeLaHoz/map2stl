@@ -49,7 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
-from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
+from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_SPHERE, m_per_deg_lon
 
 logger = logging.getLogger(__name__)
 
@@ -1066,7 +1066,7 @@ def water_mask_lakes(water: np.ndarray, base: np.ndarray, north: float, south: f
 
 def _bbox_area_km2(north: float, south: float, east: float, west: float) -> float:
     lat = np.radians((north + south) / 2)
-    return abs(north - south) * 110.574 * abs(east - west) * 111.32 * float(np.cos(lat))
+    return abs(north - south) * (M_PER_DEG_LAT / 1000) * abs(east - west) * (M_PER_DEG_SPHERE / 1000) * float(np.cos(lat))
 
 
 def make_lakes_source(fetch_features, water_mask=None):

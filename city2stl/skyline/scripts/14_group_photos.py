@@ -25,6 +25,7 @@ import numpy as np
 
 from city2stl.skyline import photo_groups as pg
 from city2stl.skyline.local_dirs import local_dir  # noqa: E402
+from geo2stl.geo import M_PER_DEG_SPHERE  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 _P: dict = {}
@@ -74,8 +75,8 @@ def main() -> int:
 
     # the check: camera distance vs misfit for located pairs
     def dist(a, b):
-        return math.hypot((a["lat"] - b["lat"]) * 111320,
-                          (a["lon"] - b["lon"]) * 111320 * math.cos(math.radians(a["lat"])))
+        return math.hypot((a["lat"] - b["lat"]) * M_PER_DEG_SPHERE,
+                          (a["lon"] - b["lon"]) * M_PER_DEG_SPHERE * math.cos(math.radians(a["lat"])))
 
     loc = [(mis, dist(by[a], by[b])) for a, b, mis, *_ in pairs
            if by[a]["lat"] is not None and by[b]["lat"] is not None]

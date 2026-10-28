@@ -31,6 +31,7 @@ from pathlib import Path
 import requests
 
 from geo2stl.cache import image_dir
+from geo2stl.geo import M_PER_DEG_SPHERE
 
 logger = logging.getLogger(__name__)
 
@@ -241,8 +242,8 @@ def describe_files(session: requests.Session, titles: list[str]) -> list[Commons
 
 def _km_outside(lat: float, lon: float, bbox_nsew) -> float:
     n, s, e, w = bbox_nsew
-    dlat = max(s - lat, 0.0, lat - n) * 111.32
-    dlon = max(w - lon, 0.0, lon - e) * 111.32 * math.cos(math.radians(lat))
+    dlat = max(s - lat, 0.0, lat - n) * (M_PER_DEG_SPHERE / 1000)
+    dlon = max(w - lon, 0.0, lon - e) * (M_PER_DEG_SPHERE / 1000) * math.cos(math.radians(lat))
     return math.hypot(dlat, dlon)
 
 

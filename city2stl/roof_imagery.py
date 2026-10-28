@@ -38,6 +38,8 @@ import numpy as np
 import shapely
 from shapely.geometry import Polygon
 
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon
+
 logger = logging.getLogger(__name__)
 
 #: Bump when a stored measurement changes meaning (every row misses and is measured again).
@@ -444,7 +446,7 @@ def footprint_area_m2(geometry: dict) -> float:
         return 0.0
     k = math.cos(math.radians(float(a[:, 1].mean())))
     x, y = a[:, 0] * k, a[:, 1]
-    return abs(0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))) * 111_320.0 ** 2
+    return abs(0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))) * M_PER_DEG_SPHERE ** 2
 
 
 class Site:
@@ -525,8 +527,8 @@ def lidar_check(ndsm, geometry: dict, hole_ll) -> tuple[bool, float | None]:
     if ext.is_empty or hole.is_empty:
         return False, None
     lat = ext.centroid.y
-    dlon = 0.5 / (111_320.0 * math.cos(math.radians(lat)))
-    dlat = 0.5 / 111_320.0
+    dlon = 0.5 / float(m_per_deg_lon(lat))
+    dlat = 0.5 / M_PER_DEG_SPHERE
 
     def cells(poly):
         x0, y0, x1, y1 = poly.bounds

@@ -39,6 +39,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon
+
 if TYPE_CHECKING:
     from .region_types import SeedViewRegistration
 
@@ -162,8 +164,8 @@ def _segments_table_html(primary_sv, pano_result, published_by_id: dict | None =
         m = s["matched_projection"]
         d = float(m.get("distance_m") or m.get("forward_m") or 0.0)
         b = float(s.get("true_bearing_deg") or 0.0)
-        lat = lat0 + d * math.cos(math.radians(b)) / 111320.0
-        lon = lon0 + d * math.sin(math.radians(b)) / (111320.0 * math.cos(math.radians(lat0)))
+        lat = lat0 + d * math.cos(math.radians(b)) / M_PER_DEG_SPHERE
+        lon = lon0 + d * math.sin(math.radians(b)) / float(m_per_deg_lon(lat0))
         h = s.get("height_m")
         name = str(m.get("name") or "")
         fid = str(m.get("feature_id") or "")

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-M_PER_DEG_LAT = 111_320.0
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
 
 
 @dataclass(frozen=True)

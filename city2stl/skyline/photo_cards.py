@@ -23,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon
+
 from . import photo_heights as ph
 
 #: Width of the saved photo overlay, px (the page shows it at most ~730 px wide).
@@ -44,7 +46,7 @@ def label_color(n: int, row: dict | None = None) -> tuple[int, int, int]:
 
 def background_polygons(features: list[dict], towers) -> tuple[list[np.ndarray], np.ndarray]:
     """Every OSM building ring in the tower table's metre frame, and their centroids."""
-    kx = 111_320.0 * math.cos(math.radians(towers.lat0))
+    kx = float(m_per_deg_lon(towers.lat0))
     polys = []
     for f in features:
         g = f.get("geometry") or {}
@@ -57,7 +59,7 @@ def background_polygons(features: list[dict], towers) -> tuple[list[np.ndarray],
         for ring in rings:
             a = np.asarray(ring, float)[:, :2]
             polys.append(np.column_stack([(a[:, 0] - towers.lon0) * kx,
-                                          (a[:, 1] - towers.lat0) * 111_320.0]))
+                                          (a[:, 1] - towers.lat0) * M_PER_DEG_SPHERE]))
     cent = np.array([p.mean(axis=0) for p in polys]) if polys else np.zeros((0, 2))
     return polys, cent
 

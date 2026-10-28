@@ -30,14 +30,14 @@ import cv2
 import numpy as np
 from scipy import ndimage
 
-from geo2stl.geo import M_PER_DEG_LAT, M_PER_DEG_LON_EQ, m_per_deg_lon
+from geo2stl.geo import EARTH_RADIUS_M, M_PER_DEG_LAT, M_PER_DEG_LON_EQ, m_per_deg_lon
 
 ProjectionType = Literal['none', 'cosine', 'mercator',
                          'equidistant', 'lambert', 'sinusoidal',
                          'miller', 'gall', 'laea', 'lcc']
 
 # Earth's radius in meters
-EARTH_RADIUS = 6_371_000
+EARTH_RADIUS = EARTH_RADIUS_M
 
 
 def _clip_nan_borders(arr: np.ndarray, nan_mask: np.ndarray) -> np.ndarray:

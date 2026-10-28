@@ -79,6 +79,7 @@ from city2stl.skyline import photo_groups as pg  # noqa: E402
 from city2stl.skyline import photo_heights as ph  # noqa: E402
 from city2stl.skyline import skyline_match as sm  # noqa: E402
 from city2stl.skyline.local_dirs import local_dir  # noqa: E402
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 log = logging.getLogger("photo_pipeline")
@@ -325,8 +326,8 @@ def _job(job: dict) -> dict:
                                  fov_span=span, h_cam=h, fov_steps=steps, projection=projection)
                 if hit is None or cand.misfit < hit.misfit:
                     h_best, hit = h, cand
-        moved = math.hypot((hit.lat - pr["lat"]) * 111320,
-                           (hit.lon - pr["lon"]) * 111320 * math.cos(math.radians(pr["lat"])))
+        moved = math.hypot((hit.lat - pr["lat"]) * M_PER_DEG_SPHERE,
+                           (hit.lon - pr["lon"]) * M_PER_DEG_SPHERE * math.cos(math.radians(pr["lat"])))
         kept = hit.misfit <= job["max_misfit"] and cover >= job["min_coverage"]
         pose = ph.PhotoPose(hit.lat, hit.lon, hit.heading_deg, hit.hfov_deg,
                             projection=projection)
@@ -669,7 +670,8 @@ def finish(args, results: list[dict], meta: dict, osm: dict) -> dict:
             b = sv_key.get(r["key"])
             if b is None and len(cent):
                 c = np.mean(np.array(rings[r["tower"]])[:, ::-1], axis=0)
-                dd = np.hypot((cent[:, 0] - c[0]) * 111320, (cent[:, 1] - c[1]) * 100000)
+                dd = np.hypot((cent[:, 0] - c[0]) * M_PER_DEG_SPHERE,
+                            (cent[:, 1] - c[1]) * m_per_deg_lon(c[0]))
                 j = int(np.argmin(dd))
                 b = sv_b[j] if dd[j] < 30 else None
             if b is not None:

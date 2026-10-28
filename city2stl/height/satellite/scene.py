@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import EARTH_CIRCUMFERENCE_M
+
 log = logging.getLogger(__name__)
 
 Z = 18
@@ -43,7 +45,7 @@ MAX_CONCURRENT = 4
 
 def mpp(lat: float, z: int = Z) -> float:
     """Metres per pixel of web-mercator zoom ``z`` at latitude ``lat``."""
-    return 40075016.686 * math.cos(math.radians(lat)) / (256 * 2 ** z)
+    return EARTH_CIRCUMFERENCE_M * math.cos(math.radians(lat)) / (256 * 2 ** z)
 
 
 def uv(az: float) -> np.ndarray:

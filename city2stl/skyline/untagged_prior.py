@@ -34,12 +34,13 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG
+
 TRAIN_CSV = Path(__file__).resolve().parent / "data" / "untagged_prior_train.csv"
 TAGGED_SOURCES = ("osm_tag", "osm_levels")
 RADII_M = (150.0, 400.0)
 FEATURES = ["log_area", "log_perim", "compact", "n_vertices",
             "tag_median_150", "tag_median_400"]
-M_PER_DEG = 111_320.0
 
 
 def features(lat, lon, area_m2, perimeter_m, n_vertices, tag_m, source) -> np.ndarray:

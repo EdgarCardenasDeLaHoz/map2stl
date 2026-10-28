@@ -30,6 +30,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
 from ._core.segmentation import _ADE20K_VEGETATION_CLASSES, _ADE20K_WATER_CLASSES
 from ._core.tiers import agree as _agree
 
@@ -37,7 +39,6 @@ BEARING_BIN_DEG = 0.1
 N_BEARINGS = int(round(360 / BEARING_BIN_DEG))
 #: Rays longer than this count as open sea (no land in reach).
 MAX_SHORE_M = 6000.0
-M_PER_DEG_LAT = 111_320.0
 
 
 @dataclass

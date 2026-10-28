@@ -2,6 +2,40 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-28 — numpy2stl.raster.burn_polygons is the one rasteriser; the wrappers stay
+- **Decision:** no new rasteriser. F-UNIFY Phase 1 step 5 closes with no code change.
+  - `city2stl/rasterize.py::rasterize_city_data`, `app/server/routers/composite.py::_rasterize_buildings`, `city2stl/osm_raster.py::_rasterize_buildings`, `city2stl/registration/osm_water.py::_rasterize` and `tools/ml/data/collect_osm_tiles.py::_rasterize_buildings` already burn through `numpy2stl.raster.burn_polygons`.
+  - What differs between them is policy, not the burn. Missing heights become 10 m on `None` or on `0`, or the feature is skipped. `osm_raster` supersamples 4x and keeps cells with 30 % coverage as NaN-backed means. Registration uses `all_touched` and row 0 = south.
+- **Why:** a shared `burn_height_grid` would wrap a single `burn_polygons(..., mode="max")` call and still need every policy as a parameter. That is one more layer and no fewer lines.
+- **Left as is:** `tools/align_tool/plate_vectors.py::polygons_to_heightmap` fills with `cv2.fillPoly` on rounded vertices, so its edges differ from the cell-centre rule, and it has no test. Moving it onto `burn_polygons` changes plate pixels. It needs a golden test and a registration check first (`docs/issues.md`).
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 5.
+
+### 2026-10-28 — The three OSM water modules stay separate: they do different jobs
+- **Decision:** no merge. F-UNIFY Phase 1 step 4 closes with no code change.
+  - `map2stl/geo2stl/water_layers.py` turns lake and river features (fetched by `city2stl/fetch.py`) into DEM depth grids. It fetches nothing and has no coastline logic; its only sea is the DEM-based `ocean_mask`.
+  - `map2stl/city2stl/skyline/osm_water.py` picks coastline and water features out of an already fetched layer and samples keypoints for pano heading scores, in lon/lat.
+  - `map2stl/city2stl/registration/osm_water.py::osm_water` is the only one that fetches (through `geo2stl.osm.overpass_query`). It fills the sea side of the coastline and rasterises water for plate registration.
+- **Why:** the plan assumed one builder existed three times. A survey found no shared fetch, closure or sea-side code to fold together. The tag sets also differ on purpose (reservoirs for lakes, `place=sea` for skyline, wetlands and docks for registration), so unifying them would change every output.
+- **Rejected:** moving the registration coastline fill into geo2stl. Its users (`registration`, `street_place`, align_tool `locate`) all sit in city2stl and tools, so the move would add a layer hop and no second user. Its `_rasterize` is folded into the one rasteriser in step 5.
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 4.
+
+### 2026-10-28 — The leftover geo constants import from geo2stl.geo, with no numeric change
+- **Decision:**
+  - `map2stl/geo2stl/geo.py` also holds `M_PER_DEG_SPHERE` (111 320 m for latitude, the older convention), `EARTH_RADIUS_M` (6 371 000 m) and `EARTH_CIRCUMFERENCE_M`. `geo2stl/projections.py::EARTH_RADIUS` and `geo2stl/imagery.py` take them from there.
+  - About 30 skyline, height, photo-label and tools files that re-declared or inlined these numbers import them instead. Where a file kept a local name (`M_PER_DEG_LAT = 111_320.0` in skyline), it now imports `M_PER_DEG_SPHERE as M_PER_DEG_LAT`, so the rest of the file is unchanged.
+  - `map2stl/geo2stl/geo.py::lonlat_to_local_m` (moved from `skyline/_core/projection.py`, which imports it) is the one local metric projection.
+  - One bug fix: `city2stl/skyline/scripts/17_photo_pipeline.py` measured longitude with a flat 100 000 m per degree; it now uses `m_per_deg_lon(lat)`.
+- **Why:** each copy could drift on its own, and a reader could not tell a deliberate 111 320 latitude from a mistake. Naming the convention keeps every output identical while showing which modules still use it.
+- **Rejected:**
+  - A shared `BBox` type: `RegionBBox`, `BboxQueryParams` and `schemas.BoundingBox` already agree on north/south/east/west, and a common base would only add an import.
+  - A shared tile/quadkey helper: quadkeys exist only in `satellite_footprints.py`.
+  - Moving these modules to 110 574 m in the same commit. Skyline scores, survey fills and plate registrations were tuned with 111 320 (about 0.7 % apart); that is a separate change with a before/after benchmark.
+- **Kept:** `city2stl/osm_raster.py::_M_PER_DEG` (its comment ties it to registration tuning), the WGS84 ellipsoid maths (6 378 137 m), `geo2stl/opentopo.py`'s 6 371.0088 km, and the edge-convention pixel helpers (`composite._make_geo_to_px`, `plate_height_truth.lonlat_to_px`), which are not a swap for `GeoGrid`.
+- **Supersedes / superseded by:** extends the 2026-09-26 entry below.
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 3.
+
 ### 2026-10-28 — Every Overpass caller goes through geo2stl/osm.py
 - **Decision:**
   - New `map2stl/geo2stl/osm.py::configure_osmnx`. It picks the first healthy mirror, then applies `use_overpass_endpoint`: bounded timeouts, the rate limiter only on overpass-api.de, and the host pin.

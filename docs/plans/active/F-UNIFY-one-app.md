@@ -1,7 +1,7 @@
 # F-UNIFY: one app, one architecture, panorama heights in reconstruction
 
 _Approved 2026-10-24 (user; mockups approved 2026-10-26). Status: Phase 0 done 2026-10-28, Phase 1
-in progress. Proposal: [F-UNIFY](../../proposals.md). Mockups: `Code/claude/mockups/2026-10-24-unify/`._
+in progress (steps 1-5 done). Proposal: [F-UNIFY](../../proposals.md). Mockups: `Code/claude/mockups/2026-10-24-unify/`._
 
 ## Goal
 
@@ -46,18 +46,18 @@ and the registration tools feed building heights into the city model automatical
      - `osm_raster.py`, `skyline/benchmark.py`, `19_refresh_survey_truth.py`;
      - `geo2stl/landmarks.py`, `trails.py`;
      - `tools/align_tool/locate.py`, `tools/photo_label`.
-3. **Geo primitives in one place** (`geo2stl/geo.py`).
+3. **Geo primitives in one place** (`geo2stl/geo.py`) **Done 2026-10-28**: constants, `lonlat_to_local_m`; BBox and quadkey kept as they are (decision `architecture.md`).
    - `M_PER_DEG_*` is re-declared or inlined in about 55 places; replace them all.
    - One local metric projection (`skyline/_core/projection.lonlat_to_local_m` moves down).
    - One lon/lat→pixel helper and one tile/quadkey helper.
    - One `BBox` type, shared by the skyline `RegionBBox`, the app validation and align_tool tuples.
-4. **One OSM water/coast builder.** Today it exists three times:
+4. **One OSM water/coast builder.** **Closed 2026-10-28, no change**: the three do different jobs (decision `architecture.md`). Original note:
    - `skyline/osm_water.py`;
    - `registration/osm_water.py`;
    - `geo2stl/water_layers.py`.
 
    Keep the `geo2stl` one and make the other two use it.
-5. **One rasteriser.**
+5. **One rasteriser.** **Closed 2026-10-28, no change**: everything already burns through `burn_polygons`; the wrappers differ only in policy (decision `architecture.md`).
    - `city2stl/rasterize.rasterize_city_data` is the home.
    - Fold in:
      - `osm_raster._rasterize_buildings`;

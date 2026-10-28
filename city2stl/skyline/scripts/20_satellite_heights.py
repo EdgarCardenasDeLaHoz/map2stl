@@ -62,6 +62,7 @@ from city2stl.height.satellite import measure as sm  # noqa: E402
 from city2stl.height.satellite import readings as sr  # noqa: E402
 from city2stl.height.satellite import scene as ss  # noqa: E402
 from geo2stl.cache import image_dir  # noqa: E402
+from geo2stl.geo import M_PER_DEG_SPHERE  # noqa: E402
 
 log = logging.getLogger("satellite_heights")
 RUNS = Path(__file__).resolve().parents[1] / "runs"
@@ -473,8 +474,8 @@ def load_hints(path: Path, fps=(), region: str | None = None) -> dict:
 
 
 def _dist_m(f, lat, lon) -> float:
-    return float(np.hypot((f["lat"] - lat) * 111320.0,
-                          (f["lon"] - lon) * 111320.0 * np.cos(np.radians(lat))))
+    return float(np.hypot((f["lat"] - lat) * M_PER_DEG_SPHERE,
+                          (f["lon"] - lon) * M_PER_DEG_SPHERE * np.cos(np.radians(lat))))
 
 
 def set_hints(fps, hints: dict) -> None:

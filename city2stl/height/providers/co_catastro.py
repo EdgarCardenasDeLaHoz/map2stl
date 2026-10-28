@@ -53,6 +53,8 @@ from pathlib import Path
 import numpy as np
 import requests
 
+from geo2stl.geo import M_PER_DEG_SPHERE
+
 from ._cache import make_cache_key, register_ttl
 
 logger = logging.getLogger(__name__)
@@ -493,7 +495,7 @@ PART_MIN_COVER = 0.05
 
 
 def _local_xy(lat0: float):
-    k = 111320.0
+    k = M_PER_DEG_SPHERE
     c = math.cos(math.radians(lat0))
 
     def f(x, y, z=None):

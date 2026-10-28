@@ -38,6 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
 MODEL_VERSION = 1
 GRID_PX = 1000              # longest side of the resampled terrain grid
 MM_PER_PX = 1.0             # print scale the model is built at (reference-city export default)
@@ -47,7 +49,6 @@ GROUND_SAMPLES = 8          # per side: the browser samples the mesh here for th
 WGS84_A = 6378137.0
 WGS84_F = 1 / 298.257223563
 WGS84_E2 = WGS84_F * (2 - WGS84_F)
-M_PER_DEG_LAT = 111_320.0
 
 # glTF base colours per city layer (RGBA 0..255); anything else gets DEFAULT_COLOR.
 LAYER_COLORS = {

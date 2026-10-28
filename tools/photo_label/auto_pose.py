@@ -25,8 +25,9 @@ import math
 import numpy as np
 from scipy.ndimage import map_coordinates
 
-M_PER_DEG_LAT = 111_320.0
-EARTH_R = 6_371_000.0
+from geo2stl.geo import EARTH_RADIUS_M as EARTH_R
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
 REFRACTION_K = 0.13
 CANOPY_M = 10.0             # buildings and trees stand on the bare-earth DEM, added to every ray sample
 OPEN_RANGE_M = 3000.0

@@ -31,6 +31,7 @@ from pathlib import Path
 
 from city2stl.height.satellite import readings as sr
 from city2stl.height.satellite.weights import sigma_log
+from geo2stl.geo import M_PER_DEG_SPHERE
 
 from . import footprint_detect as fd
 from ._core.tiers import reading as tier_reading
@@ -54,7 +55,7 @@ def readings_path(region: str) -> Path:
 
 
 def _dist_m(lat1, lon1, lat2, lon2) -> float:
-    k = 111320.0
+    k = M_PER_DEG_SPHERE
     return math.hypot((lat1 - lat2) * k, (lon1 - lon2) * k * math.cos(math.radians(lat1)))
 
 

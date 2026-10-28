@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 
 from city2stl.heights import height_from_tags
+from geo2stl.geo import EARTH_RADIUS_M
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("height_report")
@@ -107,7 +108,7 @@ def _polygon_area_m2(coords: list) -> float:
     n = len(coords)
     if n < 3:
         return 0.0
-    R = 6_371_000.0
+    R = EARTH_RADIUS_M
     area = 0.0
     for i in range(n):
         j = (i + 1) % n

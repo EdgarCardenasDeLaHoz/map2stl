@@ -12,17 +12,10 @@ import numpy as np
 # failure). Defined here so those branches log instead of crashing.
 logger = logging.getLogger(__name__)
 
-from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon  # noqa: E402
+from geo2stl.geo import M_PER_DEG_LAT, lonlat_to_local_m, m_per_deg_lon  # noqa: E402
 
 from .types import BuildingRecord, Viewpoint  # noqa: E402
 
-
-def lonlat_to_local_m(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
-    meters_per_deg_lat = M_PER_DEG_LAT
-    meters_per_deg_lon = m_per_deg_lon(lat0)
-    dx = (lon - lon0) * meters_per_deg_lon
-    dy = (lat - lat0) * meters_per_deg_lat
-    return dx, dy
 
 def _focal_length_px(viewpoint: Viewpoint) -> float:
     return 0.5 * viewpoint.image_width / math.tan(math.radians(viewpoint.fov) * 0.5)

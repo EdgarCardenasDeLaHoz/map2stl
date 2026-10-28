@@ -27,6 +27,8 @@ import pickle
 import time
 from pathlib import Path
 
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon
+
 ROOT = Path(__file__).resolve().parents[2]
 OSM = ROOT / "cache" / "osm" / "403ac47a87f615e9dc9c0e89de8f03c0.json.gz"
 NDSM = ROOT / "cache" / "survey_cnig_mdsn" / "89bffb95629c73dae358e6f62bf7d16b"
@@ -68,8 +70,8 @@ def _local(ring_ll):
     import numpy as np
     a = np.asarray(ring_ll, float)
     lat0 = a[:, 1].mean()
-    return np.column_stack([(a[:, 0] - a[0, 0]) * 111_320.0 * math.cos(math.radians(lat0)),
-                            (a[:, 1] - a[0, 1]) * 111_320.0]), lat0
+    return np.column_stack([(a[:, 0] - a[0, 0]) * M_PER_DEG_SPHERE * math.cos(math.radians(lat0)),
+                            (a[:, 1] - a[0, 1]) * M_PER_DEG_SPHERE]), lat0
 
 
 def footprint_cells(nd, geom, erode_m=1.0):
@@ -84,9 +86,9 @@ def footprint_cells(nd, geom, erode_m=1.0):
     poly = Polygon(xy).buffer(-erode_m)
     if poly.is_empty or poly.geom_type != "Polygon":
         return None
-    kx = 111_320.0 * math.cos(math.radians(lat0))
+    kx = float(m_per_deg_lon(lat0))
     lons = np.array([ring[0][0] + x / kx for x in (poly.bounds[0], poly.bounds[2])])
-    lats = np.array([ring[0][1] + y / 111_320.0 for y in (poly.bounds[1], poly.bounds[3])])
+    lats = np.array([ring[0][1] + y / M_PER_DEG_SPHERE for y in (poly.bounds[1], poly.bounds[3])])
     c0, c1 = sorted(int((lo - tf.c) // tf.a) for lo in lons)
     r0, r1 = sorted(int((la - tf.f) // tf.e) for la in lats)
     c0, c1, r0, r1 = max(c0, 0), min(c1 + 1, arr.shape[1]), max(r0, 0), min(r1 + 1, arr.shape[0])
@@ -95,7 +97,7 @@ def footprint_cells(nd, geom, erode_m=1.0):
     cc, rr = np.meshgrid(np.arange(c0, c1), np.arange(r0, r1))
     lon = tf.c + (cc.ravel() + 0.5) * tf.a
     lat = tf.f + (rr.ravel() + 0.5) * tf.e
-    x, y = (lon - ring[0][0]) * kx, (lat - ring[0][1]) * 111_320.0
+    x, y = (lon - ring[0][0]) * kx, (lat - ring[0][1]) * M_PER_DEG_SPHERE
     ok = shapely.contains_xy(poly, x, y)
     z = arr[rr.ravel()[ok], cc.ravel()[ok]]
     return x[ok], y[ok], z
@@ -141,7 +143,7 @@ def truth_patches(nd, geom, a_min=12.0, width_min=2.5):
     x, y, z = got
     arr, tf = nd
     ring = geom["coordinates"][0]
-    kx = 111_320.0 * math.cos(math.radians(_local(ring)[1]))
+    kx = float(m_per_deg_lon(_local(ring)[1]))
     cell = abs(tf.a) * kx * 1.02          # a hair over a cell so neighbours fuse
     low = z < 2.0
     if low.sum() == 0:
@@ -159,7 +161,7 @@ def truth_patches(nd, geom, a_min=12.0, width_min=2.5):
 
 
 def to_local(ring_ll, ref, kx):
-    return [((x - ref[0]) * kx, (y - ref[1]) * 111_320.0) for x, y in ring_ll]
+    return [((x - ref[0]) * kx, (y - ref[1]) * M_PER_DEG_SPHERE) for x, y in ring_ll]
 
 
 # --------------------------------------------------------------------------- measure
@@ -198,7 +200,7 @@ def measure_all(out, limit=0):
         tp = truth_patches(nd, {"coordinates": [g["coordinates"][0]]})
         rec["truth_n"] = None if tp is None else len(tp)
         if tp is not None and r is not None:
-            ref, kx = (g["coordinates"][0][0], 111_320.0 * math.cos(math.radians(_local(g["coordinates"][0])[1])))
+            ref, kx = (g["coordinates"][0][0], float(m_per_deg_lon(_local(g["coordinates"][0])[1])))
             from shapely.geometry import Polygon
             cands = [Polygon(to_local(h["ring_ll"], ref, kx)) for h in r.get("holes", [])]
             rec["truth_hit"] = [any(c.intersection(t[0]).area >= 0.3 * t[0].area for c in cands) for t in tp]
@@ -206,7 +208,7 @@ def measure_all(out, limit=0):
         if osm_h and r is not None:
             from shapely.geometry import Polygon
             ref = g["coordinates"][0][0]
-            kx = 111_320.0 * math.cos(math.radians(_local(g["coordinates"][0])[1]))
+            kx = float(m_per_deg_lon(_local(g["coordinates"][0])[1]))
             cands = [Polygon(to_local(h["ring_ll"], ref, kx)) for h in r.get("holes", [])]
             hit = []
             for hole in osm_h:

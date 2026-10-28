@@ -6,6 +6,11 @@ spherical-cos approximation used throughout the project:
 * ``M_PER_DEG_LAT = 110 574 m`` (one degree of latitude, taken as constant);
 * ``m_per_deg_lon(lat) = 111 320 m * cos(lat)`` (``M_PER_DEG_LON_EQ`` at the equator).
 
+``M_PER_DEG_SPHERE`` (111 320 m for latitude too) is the older convention that the
+skyline, survey, OSM-raster and photo-label maths were tuned and scored with. Those
+modules import it rather than re-declaring it, so their outputs do not move (moving
+them to 110 574 m is a separate, measured change: docs/decisions/architecture.md).
+
 A bbox is a dict with ``north``, ``south``, ``east``, ``west`` in degrees. Sizes
 are measured at the bbox mid-latitude.
 """
@@ -20,11 +25,25 @@ import numpy as np
 
 M_PER_DEG_LAT: float = 110_574.0
 M_PER_DEG_LON_EQ: float = 111_320.0
+#: One degree on the equatorial sphere, used for latitude by the modules named above.
+M_PER_DEG_SPHERE: float = M_PER_DEG_LON_EQ
+#: Mean Earth radius (spherical maths: haversine, great circles).
+EARTH_RADIUS_M: float = 6_371_000.0
+#: WGS84 equatorial circumference (web-mercator tile scale).
+EARTH_CIRCUMFERENCE_M: float = 40_075_016.686
 
 
 def m_per_deg_lon(lat_deg):
     """Metres per degree of longitude at ``lat_deg`` (scalar or array)."""
     return M_PER_DEG_LON_EQ * np.cos(np.radians(lat_deg))
+
+
+def lonlat_to_local_m(lon, lat, lon0, lat0):
+    """East/north metres of ``(lon, lat)`` from ``(lon0, lat0)``, equirectangular.
+
+    Longitude is scaled at ``lat0``; good to a few metres over a city.
+    """
+    return (lon - lon0) * m_per_deg_lon(lat0), (lat - lat0) * M_PER_DEG_LAT
 
 
 def bbox_size_m(bbox: dict) -> tuple[float, float]:

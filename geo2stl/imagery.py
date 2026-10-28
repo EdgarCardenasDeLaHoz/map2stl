@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 from geo2stl import cache as _geo_cache
-from geo2stl.geo import bbox_size_m
+from geo2stl.geo import EARTH_CIRCUMFERENCE_M, bbox_size_m
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,6 @@ MAX_ZOOM = 18
 MAX_TILES_PER_DIM = 64
 #: Web Mercator latitude limit.
 MAX_LAT = 85.05
-#: Equatorial circumference (m); ground size of zoom 0.
-EARTH_CIRCUMFERENCE_M = 40_075_016.686
 USER_AGENT = "map2stl/1.0"
 #: Provider name of ``ESRI_TILE_URL``: the folder its tiles are cached under.
 TILE_PROVIDER = "esri"

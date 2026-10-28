@@ -65,6 +65,8 @@ import shapely
 from rasterio.transform import Affine
 from shapely.geometry import Polygon
 
+from geo2stl.geo import M_PER_DEG_SPHERE
+
 logger = logging.getLogger(__name__)
 
 Mesh = tuple[np.ndarray, np.ndarray]
@@ -170,7 +172,7 @@ def list_landmarks(features: list[dict], tallest_n: int = 10) -> list[dict]:
         heights = [h for h in (_height(m) for m in members) if h is not None]
         lon0, lat0, lon1, lat1 = g.bounds
         c = g.centroid
-        m_lat = 111_320.0
+        m_lat = M_PER_DEG_SPHERE
         m_lon = m_lat * math.cos(math.radians(c.y))
         entries.append({
             "osm_id": p.get("osm_id") or None,
@@ -310,7 +312,7 @@ def load_mesh(path: str | Path):
 def _footprint_bbox(features: list[dict], margin_m: float) -> tuple[float, float, float, float]:
     geoms = [shapely.geometry.shape(f["geometry"]) for f in features if f.get("geometry")]
     w, s, e, n = shapely.total_bounds(np.asarray(geoms, dtype=object))
-    dlat = margin_m / 111_320.0
+    dlat = margin_m / M_PER_DEG_SPHERE
     dlon = dlat / max(math.cos(math.radians((n + s) / 2)), 1e-6)
     return n + dlat, s - dlat, e + dlon, w - dlon
 

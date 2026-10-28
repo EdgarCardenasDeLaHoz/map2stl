@@ -43,7 +43,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-M_PER_DEG_LAT = 111_320.0
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
 BIN_DEG = 0.1
 N_BINS = int(round(360 / BIN_DEG))
 #: Widest view a photo outline may span (a 360-degree panorama would wrap onto itself).

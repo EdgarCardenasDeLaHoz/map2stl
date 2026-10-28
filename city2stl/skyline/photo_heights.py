@@ -63,6 +63,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE, m_per_deg_lon
+
 from .skyline_match import BIN_DEG, N_BINS, PhotoProfile, Towers, predicted_outline
 
 
@@ -338,10 +340,10 @@ def untagged_table(features: list[dict], min_area_m2: float = 150.0,
         lon0 = float(np.mean([r[0][:, 0].mean() for r in rows]))
     else:
         lat0 = lon0 = 0.0
-    kx = 111_320.0 * math.cos(math.radians(lat0))
+    kx = float(m_per_deg_lon(lat0))
     verts, names, rings, keys = [], [], [], []
     for ring, name, ll, key in rows:
-        v = np.column_stack([(ring[:, 0] - lon0) * kx, (ring[:, 1] - lat0) * 111_320.0])
+        v = np.column_stack([(ring[:, 0] - lon0) * kx, (ring[:, 1] - lat0) * M_PER_DEG_SPHERE])
         x, y = v[:, 0], v[:, 1]
         if 0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) < min_area_m2:
             continue

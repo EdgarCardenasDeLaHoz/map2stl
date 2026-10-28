@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-23_
+_Last updated: 2026-10-28_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,11 @@ _Last updated: 2026-10-23_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## Align tool plate heightmap fills with its own pixel rule, untested (found 2026-10-28, open)
+- **Symptom:** `tools/align_tool/plate_vectors.py::polygons_to_heightmap` burns footprints with `cv2.fillPoly` on rounded vertices. Everything else uses `numpy2stl.raster.burn_polygons` and its cell-centre rule, so plate footprint edges can sit up to a pixel off the app's.
+- **Fix:** add a golden-pixel test, switch to `burn_polygons` (`bounds=(W,S,E,N)`, then `flipud`, since the plate grid has row 0 = south), and re-check one plate registration score.
+- Decision: `decisions/architecture.md` 2026-10-28 "burn_polygons is the one rasteriser".
 
 ## Prague benchmark truth: ČÚZK survey re-read at 0.07–0.33 m on V Tower (found 2026-10-23, open)
 - **Symptom:** the stat-2 refresh (`benchmark.py::refresh_survey_truth`) gives V Tower Pankrác a

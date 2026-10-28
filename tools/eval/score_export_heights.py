@@ -39,6 +39,8 @@ if str(REPO) not in sys.path:
 import numpy as np  # noqa: E402
 import shapely  # noqa: E402
 
+from geo2stl.geo import M_PER_DEG_LON_EQ  # noqa: E402
+
 TRUTH_DEFAULT = REPO / "city2stl" / "skyline" / "runs" / "benchmark" / "truth" / "granada.json"
 #: Granada export bbox (south, west, north, east) of the 999 x 721 mm model, fitted on 4.5k
 #: buildings by osm_id (OSM node centroids vs model-mm polygon centroids; 0.4 mm median error).
@@ -54,7 +56,7 @@ class Georef:
         self.s, self.w, self.n, self.e = bbox
         self.wmm, self.hmm = mm
         lat0 = np.radians((self.s + self.n) / 2)
-        self.width_m = (self.e - self.w) * 111320.0 * np.cos(lat0)
+        self.width_m = (self.e - self.w) * M_PER_DEG_LON_EQ * np.cos(lat0)
         self.height_m = (self.n - self.s) * 110950.0
 
     @property

@@ -32,6 +32,7 @@ import numpy as np
 from rasterio.transform import Affine
 
 from geo2stl.cache import make_cache_key, read_array_cache, write_array_cache
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
 
 from ._cache import register_ttl
 
@@ -40,8 +41,6 @@ logger = logging.getLogger(__name__)
 #: Largest grid side a survey request may produce. A landmark footprint at 0.5 m
 #: is a few hundred cells; this guards against a whole-city request by mistake.
 MAX_GRID_SIDE = 4096
-#: Metres per degree of latitude (mean).
-M_PER_DEG_LAT = 111_320.0
 
 NdsmResult = tuple[np.ndarray, Affine]
 

@@ -38,11 +38,12 @@ from pathlib import Path
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
 from .local_dirs import local_dir
 
 logger = logging.getLogger(__name__)
 
-M_PER_DEG_LAT = 111_320.0
 #: Inward buffer before sampling a footprint, metres.
 ERODE_M = 1.0
 #: Roof statistic: percentile of the nDSM cells inside the footprint. The headline truth

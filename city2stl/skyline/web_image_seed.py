@@ -32,6 +32,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import requests
 
+from geo2stl.geo import M_PER_DEG_SPHERE
+
 if TYPE_CHECKING:
     from .region_types import SkylinePoint
 
@@ -306,8 +308,8 @@ def _outside_m(lat: float, lon: float, bbox_nsew: tuple[float, float, float, flo
     import math
 
     n, s, e, w = bbox_nsew
-    dy = max(0.0, lat - n, s - lat) * 111_320.0
-    dx = max(0.0, lon - e, w - lon) * 111_320.0 * math.cos(math.radians(lat))
+    dy = max(0.0, lat - n, s - lat) * M_PER_DEG_SPHERE
+    dx = max(0.0, lon - e, w - lon) * M_PER_DEG_SPHERE * math.cos(math.radians(lat))
     return math.hypot(dx, dy)
 
 

@@ -76,6 +76,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from geo2stl.geo import M_PER_DEG_SPHERE as _M_PER_DEG
+
 logger = logging.getLogger(__name__)
 
 SOURCE = "survey"
@@ -100,7 +102,6 @@ SMALL_FOOTPRINT_M2 = 30.0
 SMALL_STAT_PERCENTILE = 50.0
 #: A line (city wall) is measured on this strip either side of it.
 LINE_HALF_WIDTH_M = 1.5
-_M_PER_DEG = 111_320.0
 
 
 @dataclass(frozen=True)

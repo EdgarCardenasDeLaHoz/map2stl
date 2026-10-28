@@ -21,8 +21,9 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import QuantileRegressor
 
+from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG
+
 DATA = Path(__file__).resolve().parents[2] / "docs/research/ml-blind-2026-10-05/buildings.csv"
-M_PER_DEG = 111_320.0
 
 
 def neighbour_features(df: pd.DataFrame, radii=(150.0, 400.0)) -> pd.DataFrame:

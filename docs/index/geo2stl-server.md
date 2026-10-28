@@ -4,7 +4,7 @@ Locator for geo2stl (DEM, imagery, projections, water, trails) and the server-si
 
 ### geo2stl — DEM, imagery, projections, water, trails
 
-- Metres per degree (the one home), bbox size, `GeoGrid` lon/lat ↔ pixel: `map2stl/geo2stl/geo.py::GeoGrid` (`m_per_deg_lon`, `bbox_size_m`, `bbox_diagonal_km`)
+- Metres per degree (the one home), bbox size, `GeoGrid` lon/lat ↔ pixel: `map2stl/geo2stl/geo.py::GeoGrid` (`m_per_deg_lon`, `bbox_size_m`, `bbox_diagonal_km`; `M_PER_DEG_SPHERE`, `EARTH_RADIUS_M`, `EARTH_CIRCUMFERENCE_M`)
 - DEM for a bbox from any source (local / h5 → SRTMGL3 fallback / OpenTopography): `map2stl/geo2stl/dem.py::fetch_dem` (`fetch_local_dem`, `fetch_h5_dem`; `shared_dim=` cuts an OpenTopography grid from `shared_base_grid` and reads ESA water at one scale for every projection); h5 tiles missing from the store filled from GEBCO / OpenTopography, else a coverage note `map2stl/geo2stl/dem.py::_fetch_h5_with_fallback` (`_h5_fill_source`)
 - Depth scale + water subtraction on every DEM source; water mask (ESA, else the sea from the DEM, with a `source_note`): `map2stl/geo2stl/dem.py::apply_water_and_depth` (`water_fraction_for_dem`, `WATER_NOTE_SEA_ONLY`, `_ee_scale_floor`) — [why](../decisions/terrain-dem.md)
 - Source native resolution, real samples, default source: `map2stl/geo2stl/dem.py::dem_sampling` (`native_resolution_m`, `default_dem_source`)
