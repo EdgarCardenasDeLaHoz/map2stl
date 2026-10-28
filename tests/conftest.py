@@ -15,6 +15,11 @@ import pytest
 for _var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_var, "1")
 
+# OneDrive conflict copies ("test_x-DESKTOP-K0K0EAO.py") are not test modules: the name is not
+# importable, and a cloud-only copy cannot even be read while sync is paused, which turned into
+# a collection error for the whole run.
+collect_ignore_glob = ["*-DESKTOP-*", "*-LAPTOP-*"]
+
 # Enable test mode before importing the app
 os.environ["MAP2STL_TEST_MODE"] = "1"
 

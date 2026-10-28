@@ -76,6 +76,11 @@ async def _lifespan(app):
         except Exception as e:
             logger.warning(
                 f"Startup cache maintenance failed (non-fatal): {e}")
+        try:
+            from app.server.core.onedrive_check import log_onedrive_problems
+            log_onedrive_problems(Path(__file__).resolve().parents[2])
+        except Exception as e:
+            logger.warning(f"Startup OneDrive check failed (non-fatal): {e}")
     loop.run_in_executor(None, _startup_cache_maintenance)
     yield  # server runs here
 
