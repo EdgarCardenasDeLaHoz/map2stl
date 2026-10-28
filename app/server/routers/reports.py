@@ -62,6 +62,7 @@ _ROOTS: dict[str, Path] = {
     "region": _SKYLINE_RUNS / "region_reports",
     "height": _MAP2STL / "output" / "height_reports",
     "trace": _SKYLINE_RUNS / "height_traces",
+    "benchmark": _SKYLINE_RUNS / "benchmark",
 }
 
 _REPORT_DIR_SUFFIX = "_skyline_report"

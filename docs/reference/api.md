@@ -246,6 +246,22 @@ Registration roots (`app/server/routers/reports.py::_REG_ROOTS`, read-only; over
 
 The page shows them under a **Registration** tab and in the sidebar.
 
+## Benchmark Routes (`app/server/routers/benchmark.py`)
+
+Backs the Benchmark page (Tools menu). Logic in `app/server/core/benchmark_scores.py`; scoring
+is `city2stl/skyline/scripts/10_benchmark.py::score_report`. Score history is kept in
+`runs/benchmark/scores/` (`MAP2STL_BENCHMARK_SCORES_DIR` moves it).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/benchmark/regions` | Regions with name, truth label, building count and final-heights MAE of the newest score |
+| GET | `/api/benchmark/regions/{id}` | Current and previous score, `delta_mae_m`, per-tier rows, history, the `heights_from` choices |
+| GET | `/api/benchmark/regions/{id}/gap?heights_from=` | How many truth buildings are not cached and the 3D Tiles fetch estimate |
+| POST | `/api/benchmark/score` | Job `{region, heights_from, allow_paid_fetches=false}`; returns `{task_id, ...}`, poll `GET /api/jobs/{id}`. Cached truth only unless `allow_paid_fetches`; with no cached truth it ends in `error` with the fetch count |
+| GET | `/api/benchmark/usage` | `{value, cap: 1000}` 3D Tiles root requests this month; `value` is null while there is no counter |
+
+Report files are served under `/reports/files/benchmark/...`.
+
 ## Usage log (`app/server/routers/usage.py`)
 
 Local-only record of how the app is used (F-USAGE), written by

@@ -131,6 +131,22 @@ the header, as pages in the same app shell, with the same header, region pill an
 - **GPU.** Runs queue behind `city2stl.resources`' GPU lock, and the job card shows "waiting
   for GPU".
 
+### Phase 4 progress
+
+- **Part 1 done: Tools menu + Benchmark page.**
+  - Header **Tools** button with four items; only Benchmark opens (`activeView = 'benchmark'`),
+    the other three are disabled with a "Coming soon" tooltip until their pages land.
+  - Benchmark page: region list, three headline cards, per-tier table, "Score again" card
+    (Heights from, Truth, Allow paid fetches off by default, job progress, Open report).
+  - Cached truth only by default. With no cached truth and fetches off, the job fails with the
+    fetch count. Partial cache: scores what is cached and notes the gap.
+  - Not built: "Add current region" (the library has no add-region function); the "3D Tiles
+    this month" bar stays hidden because nothing counts 3D Tiles root requests yet
+    (`GET /api/benchmark/usage` returns `value: null`); the purple "3D Tiles (plane ground)"
+    row (cached scores carry no per-source breakdown).
+  - Page-scoped light theme only; the app shell and header stay dark.
+- Part 2 (open): Heights, Photo solve, Plate align pages.
+
 ## Phase 5: panorama heights in reconstruction
 
 - `panorama_heights.find_reports(bbox)`: auto-discover the skyline reports whose region covers

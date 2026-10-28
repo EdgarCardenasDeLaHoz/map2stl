@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from app.server.core.cache import prune_all_caches
 from app.server.core.dem_store import DemGone
 from app.server.routers.auth import router as _auth_router
+from app.server.routers.benchmark import router as _benchmark_router
 from app.server.routers.cache import router as _cache_router
 from app.server.routers.cities import router as _cities_router
 from app.server.routers.composite import router as _composite_router
@@ -348,6 +349,7 @@ app.include_router(_registration_router)
 app.include_router(_geocode_router)
 app.include_router(_usage_router)
 app.include_router(_jobs_router)
+app.include_router(_benchmark_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
     "diagnostics, layers, reports, guides, registration")

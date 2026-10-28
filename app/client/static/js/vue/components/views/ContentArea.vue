@@ -13,10 +13,14 @@
 
     <!-- 3D Model generation view -->
     <ModelContainer />
+
+    <!-- Benchmark page (Tools menu) -->
+    <BenchmarkPage />
   </div>
 </template>
 <script setup lang="ts">
 import MapContainer   from './MapContainer.vue';
 import DemContainer   from './DemContainer.vue';
 import ModelContainer from './ModelContainer.vue';
+import BenchmarkPage  from './BenchmarkPage.vue';
 </script>

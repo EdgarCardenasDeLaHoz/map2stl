@@ -857,6 +857,7 @@ def _errors(pred: np.ndarray, truth: np.ndarray) -> dict:
         "mae_m": round(float(np.mean(np.abs(err))), 2),
         "median_ae_m": round(float(np.median(np.abs(err))), 2),
         "bias_m": round(float(np.mean(err)), 2),
+        "within_3m": round(float(np.mean(np.abs(err) <= 3.0)), 3),
         "within_15pct": round(float(np.mean(rel <= 0.15)), 3),
         "within_25pct": round(float(np.mean(rel <= 0.25)), 3),
     }

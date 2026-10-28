@@ -24,6 +24,22 @@
     </div>
 
     <div class="header-actions">
+      <!-- Tools: the power tools live here, out of the Beginner view (design guidelines §1).
+           Only Benchmark is built so far; the rest say "coming soon". -->
+      <div class="tools-menu">
+        <button type="button" id="toolsMenuBtn" class="tools-btn" :class="{ on: store.activeView === 'benchmark' }"
+                aria-haspopup="menu" :aria-expanded="toolsOpen" title="Tools"
+                @click.stop="toolsOpen = !toolsOpen; helpOpen = false">Tools <span aria-hidden="true">▾</span></button>
+        <div v-if="toolsOpen" class="help-dropdown tools-dropdown" role="menu" @click.stop>
+          <button v-for="t in TOOLS" :key="t.label" type="button" role="menuitem" class="help-item"
+                  :class="{ soon: !t.view, on: t.view && store.activeView === t.view }"
+                  :aria-disabled="!t.view" :title="t.view ? undefined : 'Coming soon'"
+                  @click="openTool(t)">
+            <span class="help-text"><span class="help-n">{{ t.label }}</span><span class="help-d">{{ t.hint }}</span></span>
+            <span v-if="!t.view" class="soon-tag">Soon</span>
+          </button>
+        </div>
+      </div>
       <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
            whether they have. No Save button: design guidelines §1.5. -->
       <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
@@ -31,7 +47,7 @@
            2026-10-02). Page settings live in each page's right-hand panel. -->
       <div class="help-menu">
         <button type="button" id="helpMenuBtn" class="gear-btn" aria-label="Account and help" title="Account and help"
-                aria-haspopup="menu" :aria-expanded="helpOpen" @click.stop="helpOpen = !helpOpen">?</button>
+                aria-haspopup="menu" :aria-expanded="helpOpen" @click.stop="helpOpen = !helpOpen; toolsOpen = false">?</button>
         <div v-if="helpOpen" class="help-dropdown" role="menu" @click.stop>
           <component :is="h.href ? 'a' : 'button'" v-for="h in HELP" :key="h.label" role="menuitem"
                      class="help-item" :href="h.href" :target="h.href ? '_blank' : undefined"
@@ -239,9 +255,22 @@ const helpOpen = ref(false);
 const ui = useUiModeStore();
 // Screenshot and SOP scripts show every section of a page (or all pages) without clicking.
 (window as any).setUiTools = (on: boolean, page?: 'edit' | 'extrude') => ui.setAll(on, page);
-function closeHelp() { helpOpen.value = false; }
+const toolsOpen = ref(false);
+function closeHelp() { helpOpen.value = false; toolsOpen.value = false; }
 onMounted(() => document.addEventListener('click', closeHelp));
 onBeforeUnmount(() => document.removeEventListener('click', closeHelp));
+// Tools menu (F-UNIFY Phase 4). `view` is the page it opens; no view = not built yet.
+const TOOLS: { label: string; hint: string; view?: string }[] = [
+  { label: 'Street View heights', hint: 'Measure heights from panoramas for this region' },
+  { label: 'Photo solve', hint: 'Place your own photo and read heights from it' },
+  { label: 'Plate align', hint: 'Line a printed plate up with the map' },
+  { label: 'Benchmark', hint: 'Score heights against LiDAR / 3D Tiles', view: 'benchmark' },
+];
+function openTool(t: { view?: string }) {
+  if (!t.view) return;            // "coming soon": the menu stays open, nothing happens
+  toolsOpen.value = false;
+  (window as any).switchView?.(t.view);
+}
 const HELP = [
   { icon: '🔑', label: 'Keys & data folders', hint: 'Earth Engine, OpenTopography, local elevation tiles', action: () => openKeys() },
   { icon: '🩺', label: 'Diagnostics', hint: 'Server, keys, elevation sources, cache', action: () => openDiag() },
@@ -531,7 +560,19 @@ async function saveTilePath() {
   background: #1c1c1e; color: var(--text-muted); font-size: 16px;
 }
 .gear-btn:hover { background: #2c2c2e; color: #f5f5f7; }
-.help-menu { position: relative; }
+.help-menu, .tools-menu { position: relative; }
+.tools-btn {
+  height: 32px; padding: 0 12px; border-radius: 8px; border: 0; cursor: pointer;
+  background: #1c1c1e; color: #f5f5f7; font-size: 13px; white-space: nowrap;
+}
+.tools-btn:hover { background: #2c2c2e; }
+.tools-btn.on { outline: 2px solid #0a84ff; }
+.tools-btn:focus-visible { outline: 2px solid #0a84ff; }
+.tools-dropdown { width: 310px; }
+.help-item.soon { opacity: 0.55; cursor: default; }
+.help-item.soon:hover { background: none; }
+.help-item.on { background: #2c2c2e; }
+.soon-tag { margin-left: auto; font-size: 10px; color: var(--text-muted); border: 1px solid #3a3a3c; border-radius: 999px; padding: 1px 7px; }
 #helpMenuBtn { font-weight: 700; font-size: 15px; }
 .help-dropdown {
   position: absolute; right: 0; top: 40px; z-index: 9000; width: 300px; padding: 6px;
