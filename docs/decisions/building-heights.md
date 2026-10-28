@@ -50,6 +50,56 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 - **Rejected:** a tighter median cutoff or a higher tower count (p20 sits between usable p191 15.9 m and p264 20.0 m, at 20 towers); a coverage-only clarity rule replacing the score (same verdicts on this set, less conservative).
 - **Supersedes / superseded by:** refines the 2026-10-07 screen entry below; —.
 - **Source:** `skyline-local/benchmark/2026-10-05_2148/miami_skyline_report/photo_results.json`, `2026-10-03_1952/chicago_.../photo_results.json`, `commons_cache/<city>/profiles.json`, the 37-photo verdict table from the 2026-10-07 review. Chicago: drops 11 of 53 rescued, their truth MAE 26.9 m vs 18.1 m kept (no verdicts). Evidence is two bad photos and one reviewer: confirm on the next reviewed screen (p79's rescued fit was never saved).
+### 2026-10-25 — Auto register sweeps heading and FOV when the start guess fails, and keeps its render viewer across photos
+- **Decision:** when the best start guess gives fewer than 25 inliers (and is not a Street View pano), `index.html::autoRegister` renders 8 headings 45° apart at a 60° FOV, keeps the heading with the most inliers (or depth-lifted matches), tries it at 40° and 25°, and iterates from the winner. The 35 mm focal length from EXIF, when present, narrows the solver's f range. The offscreen render viewer and its tiles stay alive until the region changes; renders are serialised by a lock.
+- **Why:** on the first Commons batch the La Popa guess pointed ~140° away (the skyline search had aligned the sea horizon), zoomed photos were rendered too wide to match, and the viewer was rebuilt per photo, so every first render was coarse and hit the 90 s tile cap. The Google-depth tab could also dispose the viewer mid-render and hang it. Only 4 of 59 Cartagena Commons photos carry a 35 mm focal length, so the FOV sweep is still needed.
+- **Also:** the viewpoint named in a photo's title ("from La Popa") is searched on its own and pinned as the first guess. Among ~100 footprint viewpoints its skyline score lost: for "Castillo San Felipe … from La Popa" the top guess sat at 11 m in Bocagrande, 4 km away.
+- **Result (rerun 2026-10-25):** 0 of 9 Cartagena Commons photos registered, with or without the sweep. From the pinned La Popa start, aimed at the castle at a 10° FOV, the render shows the right scene, but Google's Cartagena tiles are draped imagery with sparse box buildings, not a photogrammetry mesh: 78 SIFT matches, 0 inliers. The fixes stay; Cartagena needs another source of correspondences.
+- **Rejected:** sweeping every photo — the sweep costs 8–10 renders; it runs only when the guess fails.
+- **Supersedes / superseded by:** —
+- **Source:** `tools/photo_label/index.html::sweepHeadings`, `tools/photo_label/server.py::photo_focal_35mm`, `tools/photo_label/server.py::api_register_candidates`
+
+### 2026-10-25 — Photos are auto-flagged when street level or a stitched panorama
+- **Decision:** the photo-label server flags a photo as bad on its own when (a) SegFormer ground classes (floor, road, sidewalk, earth, person, path) cover >= 25% of it (street level) or (b) width / height >= 3.5 (stitched panorama). Result cached as `<stem>_screen.json`; a photo with a cache file is never re-flagged, so a manual unflag sticks. No CUDA: SegFormer runs for at most 10 photos, otherwise the aspect rule only.
+- **Why:** measured on 74 Cartagena photos against 20 hand flags: all 15 Street View frames have ground share 0.34-0.51, every kept photo <= 0.15; flagged panoramas have aspect 4.06-4.75, the widest kept photo 2.33. The two rules reproduce 18 of the 20 manual flags with zero false positives.
+- **Rejected:** building share threshold — SegFormer labels a distant city as mountain / earth (two good La Popa views read 0.002 and 0.007 building share). Brightness — the user kept five darker night shots.
+- **Supersedes / superseded by:** —
+- **Source:** `tools/photo_label/screen.py`, `tools/photo_label/server.py::api_photos_screen`
+
+### 2026-10-24 — Auto register uses a measured geoid per region, and Street View panos stand on Google's ground
+- **Decision:** `regions.json` carries `geoid_m` per region (Granada 50, Cartagena -6.2, the
+  Google mesh's sea surface in the bay). With it set, `register.py::register_step` keeps that
+  geoid (`fit_geoid=False`) instead of estimating one per render. A pano seed's camera height is
+  the lowest Google mesh point within 8 m of the car plus 2.5 m (`index.html::meshGround`), not
+  the DEM. Footprints are drawn on one canvas and only those near the view are on the map
+  (`index.html::fpWindow`); a pano seed takes the image file's real size, not `site.json`'s.
+- **Why:** every Cartagena pano failed ("only 0 matches have a depth"): the renders stood on
+  Granada's +50 m geoid. The per-render estimate cannot replace a known value at street level:
+  on one pano it read +36 m from a render at 0 and -11 m from a render at 50. The 30 m DEM read
+  20.3 m at the San Felipe pano where Google's ground is about 16 m orthometric, and a single
+  mesh sample there hit a tree at 14 m ellipsoidal (ring minimum 9.9 m). 41k SVG footprints cost
+  about 0.5 s per zoom.
+- **Rejected:** estimating the geoid from every depth cell (`geoid_from_render`) as the only
+  source: kept for regions without `geoid_m`, but unstable on low, horizontal views.
+- **Supersedes / superseded by:** —
+- **Source:** F-PHOTOVIEW session 2026-10-24.
+
+### 2026-10-24 — The photo-label tool keeps Google 3D mesh tiles in a local disk cache
+- **Decision:** `tools/photo_label/server.py` stores the binary Google 3D tiles it proxies under
+  `runs/photo_label_tiles/` (git-ignored). The cache follows Google's response headers: a
+  `no-store` tile is not kept, and a stored tile expires after its `max-age`. It is capped at
+  2 GB, and the oldest tiles go first. Tileset JSON is always fetched live, because it carries the
+  session token. The API key is never written into the cache.
+- **Why:** the depth view and Auto register render the same viewpoints repeatedly. The user
+  approved caching on 2026-10-24 ("we can save if its part of cacheing and stays in the tool").
+  The cache serves only this local tool. That stays within the research-use scope of the
+  2026-09-27 entry below.
+- **Rejected:**
+  - Browser memory only: every reload refetches every tile.
+  - Caching the tileset JSON: its session token goes stale.
+  - Keeping tiles past their `max-age`: that goes beyond what Google's headers allow.
+- **Supersedes / superseded by:** —
+- **Source:** [F-PHOTOVIEW](../plans/active/F-PHOTOVIEW-elevated-photo-heights.md)
 
 ### 2026-10-23 — T41: the untagged-building fallback is the geometry prior, with a 12 m constant behind it; scored leave-one-city-out on cached truth
 - **Decision:** `city2stl/skyline/_core/height.py::untagged_fallback` hands `withhold_untagged_street_view` the T38 geometry model (`city2stl/skyline/untagged_prior.py::fallback_for`, trained on `city2stl/skyline/data/untagged_prior_train.csv`, 872 confirmed untagged buildings in 8 cities). `SKYLINE_UNTAGGED_FALLBACK=constant`, a missing training file or no scikit-learn gives `UNTAGGED_FALLBACK_M` (12 m, was 10 m). One switch, the existing T28 path.

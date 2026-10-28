@@ -1,6 +1,6 @@
 # Roadmap — map2stl
 
-_Last updated: 2026-10-23._ The one place for "what's next".
+_Last updated: 2026-10-27._ The one place for "what's next".
 
 - One line per open item, grouped by area; the plan link holds the detail.
 - Bugs and debt live in [../issues.md](../issues.md); unreviewed ideas in [../proposals.md](../proposals.md).
@@ -40,6 +40,9 @@ _Last updated: 2026-10-23._ The one place for "what's next".
 | [F-PISTES](active/F-PISTES-ski-runs-on-the-print.md) | approved 2026-10-18 | piste line width, then trails on by default where pistes exist |
 | [F-ROOFLIDAR](active/F-ROOFLIDAR-roof-shape-from-survey.md) | approved 2026-10-18 | probe a buildings-bearing 1 m Granada nDSM (REDIAM MDS − MDT), then score the plane-fit reader on Granada's tagged roofs against the GBM's 0.783 balanced accuracy before wiring |
 | [F-ROOFIMG](active/F-ROOFIMG-roof-detail-from-imagery.md) | built 2026-10-20 | ridge direction shipped (imagery 0.75 vs long axis 0.58 on the confident subset); hip and courtyards measured, gated off; retry courtyards with finer lidar |
+| [F-PHOTOVIEW](active/F-PHOTOVIEW-elevated-photo-heights.md) | approved 2026-10-23 | landmark labels on the three photos, then the single-photo adapter and the roof fit; Commons categories for Granada after |
+| [F-PHOTOPANO](active/F-PHOTOPANO-pano-seeds-in-photo-tool.md) | approved 2026-10-26 | import the skyline seeds' frames, stitched panoramas and poses into the photo tool; mask, heading and heights from the pipeline |
+| [F-PHOTOCARVE](active/F-PHOTOCARVE-multi-photo-landmark-carving.md) | approved 2026-10-26 | model matcher (`register_model.py`), tested on the Cartagena Street View frames; then Commons photos and carving |
 | [F-KEYS](active/F-KEYS-keys-and-folders-panel.md) | approved 2026-10-14; PNG mockups still need approval | approve the mockups, then a manual spike of the loopback Google sign-in on this PC |
 | [F-DATADIR](active/F-DATADIR-portable-data-dir.md) | approved 2026-10-14 | `DATA_DIR` in `app/paths.py`, then route the writers through it; runs before F-KEYS on the same PC |
 | [F-DESKTOP](active/F-DESKTOP-standalone-app.md) | approved 2026-10-14 | `[project.scripts]` plus `app/cli.py`, then a `numpy2stl` wheel; needs F-DATADIR first |
@@ -164,6 +167,25 @@ _Last updated: 2026-10-23._ The one place for "what's next".
   - port v2's degenerate-grid guard
 
   [F-FE1](active/F-FE1-vue-consolidation.md)
+- **Model beside Google 3D** (user, 2026-10-24): draw an exported city model (STL or glTF) over
+  the live Google Photorealistic 3D Tiles in a Cesium view, with an opacity slider and a
+  model/Google/both switch, so wrong heights and roofs show by eye. Start in the photo-label
+  tool's 3D mode, which already has Cesium and the server-side key proxy; move it into the app
+  later if it earns its place. Place the model with the region's terrain origin and the geoid
+  offset (about +50 m at Granada). Terms: nothing from the tiles is saved or measured (no
+  renders, meshes or heights on disk); REDIAM lidar stays the height reference.
+  - *Built 2026-10-24 (photo-label tool):* "Model" controls in 3D mode (load, Model/Google/Both,
+    opacity, dz nudge, re-measure geoid). The server builds the model with
+    `city2stl/city_model.py::build_city_model` (true scale, no exaggeration, `cache=False`) from the
+    app's cached OSM payload over the tool's DEM, inverts mm to lon/lat/orthometric height exactly
+    and serves a glb in east-north-up metres (`tools/photo_label/model_glb.py`, routes
+    `/api/model/info`, `/api/model.glb`, cache `runs/photo_label_model/`). The browser lifts it by
+    a geoid offset measured live from the Google mesh (20th percentile of mesh minus DEM at 64
+    ground points), never stored. Granada: 733k faces, 15.1 MB, 44 s first build.
+  - *Left:* not yet checked by eye in the browser; no water carve, roof-shape classification of
+    untagged roofs, landmark overrides or canopy (it is not the exported file); the DEM is the
+    tool's 1-arcsec GeoTIFF, not the app's DEM pipeline; loading a real exported STL/3MF is not
+    supported; moving it into the app.
 - **Region rotation** (user, 2026-10-02: after the new-region flow, as its own plan): a rotate
   handle on the box and `rotation_deg` on the region; every layer (terrain, water, satellite,
   hydrology, composite carve, OSM city geometry) fetched over the north-up envelope, rotated and

@@ -1,0 +1,94 @@
+{
+  "granada": {
+    "label": "Granada",
+    "geoid_m": 50.0,
+    "osm": "cache/5d947d851a9f2b205205e503611a5df310e7e87e.json",
+    "dem": "cache/opentopo/d6eb6dd762c161a4afb3471521b53e14.tif",
+    "photos": {
+      "": "runs/photo",
+      "panoview": "runs/panoview/granada/images"
+    },
+    "view": {
+      "lat": 37.176,
+      "lon": -3.594,
+      "ground_m": 650
+    },
+    "landmarks": [
+      {
+        "name": "Mirador San Nicolás",
+        "aliases": [
+          "san nicolas",
+          "san nicolás",
+          "mirador"
+        ],
+        "lat": 37.181,
+        "lon": -3.5926
+      },
+      {
+        "name": "Alhambra",
+        "aliases": [
+          "alhambra"
+        ],
+        "lat": 37.1761,
+        "lon": -3.5881
+      }
+    ]
+  },
+  "cartagena": {
+    "label": "Cartagena",
+    "geoid_m": -6.2,
+    "osm": "runs/cartagena/01_osm/buildings.geojson",
+    "dem": "cache/opentopo/efc0c25e213e077907a31505162ff69f.tif",
+    "photos": {
+      "seeds": "runs/cartagena/03_seeds",
+      "commons": "runs/cartagena/photos"
+    },
+    "landmarks": [
+      {
+        "name": "La Popa",
+        "aliases": [
+          "popa",
+          "cerro de la popa",
+          "la popa"
+        ],
+        "lat": 10.4202,
+        "lon": -75.5258
+      },
+      {
+        "name": "Castillo San Felipe",
+        "aliases": [
+          "san felipe",
+          "castillo"
+        ],
+        "lat": 10.4227,
+        "lon": -75.5394
+      },
+      {
+        "name": "Torre del Reloj",
+        "aliases": [
+          "torre del reloj",
+          "clock tower"
+        ],
+        "lat": 10.4226,
+        "lon": -75.5486
+      },
+      {
+        "name": "Catedral",
+        "aliases": [
+          "catedral",
+          "cathedral"
+        ],
+        "lat": 10.4246,
+        "lon": -75.5509
+      },
+      {
+        "name": "Bocagrande",
+        "aliases": [
+          "bocagrande"
+        ],
+        "lat": 10.399,
+        "lon": -75.556
+      }
+    ]
+  }
+}

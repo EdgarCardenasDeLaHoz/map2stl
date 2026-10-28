@@ -133,6 +133,7 @@ Rows live in one page per area (each opens with a scope line). Pick the area, op
 | Frontend, guides and reports pages, Python SDK (function index: [reference/frontend-modules.md](reference/frontend-modules.md)) | [index/frontend-sdk.md](index/frontend-sdk.md) |
 | numpy2stl meshes, registration, plates, align tool | [index/numpy2stl-registration.md](index/numpy2stl-registration.md) |
 | Skyline (street-view building heights) | [index/skyline.md](index/skyline.md) |
+| Photo-label tool: photo pairing, camera solve, Google 3D registration, our model over Google 3D | [index/photo-label.md](index/photo-label.md) |
 | Entry points, scripts, tests, tooling | [index/entry-points.md](index/entry-points.md) |
 
 Most-used direct pointers

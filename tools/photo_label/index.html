@@ -1,0 +1,1618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Photo labeller</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root { --bg:#f5f5f7; --fg:#1c1c1e; --card:#fff; --line:#d1d1d6; --accent:#0a84ff; --mut:#6e6e73; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1c1e; --fg:#f2f2f7; --card:#2c2c2e; --line:#48484a; --mut:#98989d; } }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px system-ui, sans-serif; }
+  #app { display:flex; flex-direction:column; height:100%; }
+  #bar { display:flex; gap:8px; align-items:center; padding:6px 10px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  #bar select, #bar button { font:inherit; padding:4px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  #bar button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #bar button:disabled { opacity:.45; }
+  #status { color:var(--mut); margin-left:auto; }
+  #main { flex:1; display:flex; min-height:0; }
+  #photoCol { flex:55; min-width:0; display:flex; flex-direction:column; }
+  #dTabs { display:flex; gap:2px; padding:3px 6px; background:var(--card); border-bottom:1px solid var(--line); }
+  #dTabs button { font:inherit; padding:2px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--fg); }
+  #dTabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #photoWrap { flex:1; position:relative; min-width:0; background:#111; }
+  #dLeg { position:absolute; left:8px; bottom:8px; display:none; color:#fff; font-size:11px; text-shadow:0 0 3px #000; pointer-events:none; }
+  #dLeg canvas { display:block; width:160px; height:10px; border:1px solid #fff8; }
+  #dLeg div { display:flex; justify-content:space-between; width:160px; }
+  #dCorner { position:absolute; right:8px; top:8px; display:none; color:#fff; font-size:12px; background:#000a; padding:2px 8px; border-radius:6px; pointer-events:none; }
+  #oCtl { position:absolute; left:8px; top:8px; display:none; gap:8px; flex-wrap:wrap; }
+  .seg { display:inline-flex; border:1px solid #fff6; border-radius:8px; overflow:hidden; background:#000a; }
+  .seg button { font:inherit; font-size:12px; padding:2px 10px; border:0; background:transparent; color:#fff; cursor:pointer; }
+  .seg button.on { background:var(--accent); }
+  #oLeg { position:absolute; left:8px; bottom:8px; display:none; color:#fff; font-size:11px; background:#000a; padding:4px 8px; border-radius:6px; pointer-events:none; }
+  #oLeg .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin:0 4px 0 8px; vertical-align:-1px; border:1px solid #fff6; }
+  #oLeg .sw:first-child { margin-left:0; }
+  #oLeg .ring { position:relative; width:52px; height:52px; margin:8px 12px; }
+  #oLeg .ring i { position:absolute; inset:0; border-radius:50%; background:conic-gradient(hsl(0 85% 55%),hsl(90 85% 55%),hsl(180 85% 55%),hsl(270 85% 55%),hsl(360 85% 55%)); -webkit-mask:radial-gradient(circle,transparent 14px,#000 15px); mask:radial-gradient(circle,transparent 14px,#000 15px); }
+  #oLeg .ring b { position:absolute; font-weight:600; }
+  #dCompute { position:absolute; left:50%; top:55%; transform:translateX(-50%); display:none; font:inherit; padding:4px 14px; }
+  #photo { width:100%; height:100%; display:block; cursor:crosshair; }
+  #mapWrap { flex:45; min-width:0; position:relative; }
+  #map, #cesium { position:absolute; inset:0; }
+  #cesium { background:#000; }
+  .hid { visibility:hidden; pointer-events:none; }
+  .num { width:64px; }
+  #bar .only3d { display:none; }
+  body.mode3d #bar .only3d { display:inline-flex; gap:4px; align-items:center; }
+  #cesium .cesium-viewer-bottom { z-index:5; }
+  #result { padding:4px 10px; background:var(--card); border-top:1px solid var(--line); min-height:24px; font-variant-numeric:tabular-nums; }
+  #pairs { max-height:24vh; overflow:auto; background:var(--card); border-top:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:2px 8px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+  tr.sel { background:rgba(10,132,255,.15); }
+  td input { font:inherit; width:160px; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; }
+  .dot { display:inline-block; width:14px; height:14px; border-radius:50%; vertical-align:middle; }
+  .pin { width:22px; height:22px; border-radius:50%; color:#fff; font:bold 12px/22px system-ui; text-align:center; border:2px solid #fff; box-shadow:0 0 3px #000; }
+  .pin.pend { outline:2px dashed #fff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar">
+    <select id="region" title="Region: photos, footprints, DEM and model all follow it"></select>
+    <select id="photoSel" title="Photo"></select>
+    <button id="flagBtn" title="Mark this photo as unusable (wrong place, no buildings, blurred). It leaves the list; Undo brings it back">Flag bad</button>
+    <button id="solveBtn" class="primary" disabled>Solve</button>
+    <button id="autoBtn" title="Match the photo against renders of the Google 3D mesh and solve the camera (needs 3D tiles)">Auto register</button>
+    <button id="saveBtn">Save</button>
+    <button id="baseBtn">Map: satellite</button>
+    <button id="fitBtn">Fit photo</button>
+    <label title="Outline the OSM buildings in view, projected with the solved camera"><input id="bldChk" type="checkbox" checked> Buildings</label>
+    <label title="On the map: camera field of view, a sight ray to each pair (cyan for auto pairs) and the buildings outlined on the photo"><input id="rayChk" type="checkbox" checked> Map lines</label>
+    <label title="On the map: our best guesses of where the photo was taken and what it looks at (numbered, with the view as a wedge). Click one to use it; drag the large one to search from a new spot"><input id="guessChk" type="checkbox" checked> Guesses</label>
+    <label title="List flagged photos too (marked ⚑); Flag bad becomes Unflag for them"><input id="flagChk" type="checkbox"> Show flagged</label>
+    <button id="modeBtn"title="Switch the map pane between the 2D map and Google Photorealistic 3D Tiles">Map: 2D</button>
+    <span class="only3d">
+      <button id="camViewBtn" disabled title="Fly the 3D camera to the solved photo position">View from camera</button>
+      <label title="Camera height above the surface under it, metres">+<input id="camUp" class="num" type="number" value="15" step="5"> m</label>
+      <label title="Camera pitch, degrees (negative looks down)">pitch <input id="camPitch" class="num" type="number" value="0" step="1"></label>
+    </span>
+    <span class="only3d" title="Our city model (buildings on terrain, as the export builds them) at its true place and scale over the Google mesh">
+      <button id="mdlBtn" title="Load our city model for this region (built on the server the first time, about 2 minutes)">Model</button>
+      <select id="mdlShow" title="What to show" disabled>
+        <option value="both">Both</option><option value="model">Model</option><option value="google">Google</option>
+      </select>
+      <input id="mdlAlpha" type="range" min="0" max="1" step="0.05" value="0.6" title="Model opacity" disabled>
+      <label title="Height nudge added to the measured geoid offset, metres">dz <input id="mdlDz" class="num" type="number" value="0" step="1" disabled> m</label>
+      <button id="mdlGeoid" disabled title="Measure the geoid offset again: low percentile of (Google mesh height - DEM height) at ground points in the model box, in the browser only">geoid ?</button>
+    </span>
+    <span id="status">Click the photo, then the map (or the reverse). Esc cancels, Delete removes the selected pair.</span>
+  </div>
+  <div id="main">
+    <div id="photoCol">
+      <div id="dTabs"><button data-t="photo">Photo</button><button data-t="pd">Photo depth</button><button data-t="gd">Google depth</button><button data-t="df">Difference</button><button data-t="or">Orientation</button></div>
+      <div id="photoWrap"><canvas id="photo"></canvas>
+        <div id="dLeg"><canvas width="160" height="10"></canvas><div><span></span><span></span><span></span></div></div>
+        <div id="oCtl"><div class="seg" id="oSrc"><button data-v="photo">Photo</button><button data-v="google">Google</button></div><div class="seg" id="oView"><button data-v="surf">Surfaces</button><button data-v="wall">Wall facing</button><button data-v="pitch">Roof pitch</button></div></div>
+        <div id="oLeg"></div>
+        <div id="dCorner"></div><button id="dCompute">Compute depth</button></div>
+    </div>
+    <div id="mapWrap"><div id="map"></div><div id="cesium" class="hid"></div></div>
+  </div>
+  <div id="result"></div>
+  <div id="pairs"><table><thead><tr><th>#</th><th>Label</th><th>x, y (px)</th><th>lat, lon, height</th><th>Residual</th><th>Height</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const COLORS = ["#e6194b","#3cb44b","#ffb400","#4363d8","#f58231","#911eb4","#00b7c3","#f032e6","#9a6324","#800000","#808000","#000075"];
+const $ = id => document.getElementById(id);
+const st = { auto: [], photos: [], photo: null, img: null, pairs: [], pending: null, sel: null, nextN: 1,
+             solve: null, bld: [], hoverId: null, hiId: null, view: { s: 1, ox: 0, oy: 0 }, mapMarkers: new Map(), footprints: null };
+// ---------- depth view state (tabs: photo | pd photo depth | gd Google depth | df difference) ----------
+const GD_GRID_W = 200, D_NEAR = 30, D_FAR = 3000, D_DIFF = 0.5;
+const dv = { tab: "photo", seq: 0, ver: 0, p: null, gc: new Map(), loading: false, gbusy: false, gerr: null, timer: 0, layer: null, chrome: "", src: "photo", view: "surf" };
+const DV_TABS = ["photo", "pd", "gd", "df", "or"];
+try {
+  const t = localStorage.getItem("photoLabelTab"); if (DV_TABS.includes(t)) dv.tab = t;
+  const s = localStorage.getItem("photoLabelOrSrc"); if (s === "photo" || s === "google") dv.src = s;
+  const v = localStorage.getItem("photoLabelOrView"); if (["surf", "wall", "pitch"].includes(v)) dv.view = v;
+} catch (_) { /* storage can be blocked */ }
+function turbo(t) {          // polynomial fit of the turbo map, t in 0..1 -> [r,g,b] 0..255
+  const c = x => Math.round(255 * Math.min(1, Math.max(0, x)));
+  return [c(0.13572138 + t * (4.61539260 + t * (-42.66032258 + t * (132.13108234 + t * (-152.94239396 + t * 59.28637943))))),
+          c(0.09140261 + t * (2.19418839 + t * (4.84296658 + t * (-14.18503333 + t * (4.27729857 + t * 2.82956604))))),
+          c(0.10667330 + t * (12.64194608 + t * (-60.58204836 + t * (110.36276771 + t * (-89.90310912 + t * 27.34824973)))))];
+}
+const TURBO = Array.from({ length: 256 }, (_, i) => turbo(i / 255));
+// metres -> colour: log distance D_NEAR..D_FAR, near = warm
+const distT = m => 1 - Math.min(1, Math.max(0, Math.log(m / D_NEAR) / Math.log(D_FAR / D_NEAR)));
+const distRgb = m => TURBO[Math.round(distT(m) * 255)];
+function divRgb(d) {         // relative difference, clamped to +-D_DIFF: blue (photo nearer) - white - red (photo farther)
+  const t = Math.min(1, Math.max(-1, d / D_DIFF)), a = Math.abs(t), end = t < 0 ? [33, 102, 172] : [178, 24, 43];
+  return end.map(e => Math.round(255 + (e - 255) * a));
+}
+const colorOf = n => COLORS[(n - 1) % COLORS.length];
+const status = t => { $("status").textContent = t; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- map ----------
+// Which region the page shows; every fetch carries it (the Google tile proxy does not need it).
+let curRegion = "", regionSeq = 0;
+const api = p => p + (p.includes("?") ? "&" : "?") + "region=" + encodeURIComponent(curRegion);
+// The view comes from the region (/api/config), so the map has none until a region is loaded.
+const map = L.map("map", { zoomControl: true });
+const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { attribution: "Esri", maxZoom: 19 }).addTo(map);
+const osmTiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap", maxZoom: 19 });
+let satOn = true;
+$("baseBtn").onclick = () => {
+  satOn = !satOn;
+  if (satOn) { map.removeLayer(osmTiles); sat.addTo(map); } else { map.removeLayer(sat); osmTiles.addTo(map); }
+  $("baseBtn").textContent = "Map: " + (satOn ? "satellite" : "OSM");
+};
+const camLayer = L.layerGroup().addTo(map);
+const fpLayers = new Map();            // footprint id -> Leaflet layer
+let fpHi = null;                       // footprint id highlighted on the map
+const fpStyle = f => f.properties.name
+  ? { color: "#ffd60a", weight: 2, fillOpacity: .15 } : { color: "#fff", weight: 0.8, fillOpacity: 0.03 };
+const rayLayer = L.layerGroup().addTo(map);  // "Map lines": fov wedge and sight rays
+let fpInView = new Set();              // footprint ids recoloured to match the photo's outlines
+const fpBase = f => fpInView.has(f.properties.id)
+  ? { color: `hsl(${hue(f.properties.id)},85%,55%)`, weight: 2, fillOpacity: .25 } : fpStyle(f);
+// Map counterpart of the photo overlay, drawn from the solved camera; the checkbox hides all of it.
+function drawMapLines() {
+  rayLayer.clearLayers();
+  const old = fpInView; fpInView = new Set();
+  for (const id of old) { const l = fpLayers.get(id); if (l && id !== fpHi) l.setStyle(fpStyle(l.feature)); }
+  const q = camPose;
+  if (!q || !$("rayChk").checked) return;
+  const pt = b => { const d = 1500, kx = 111320 * Math.cos(q.lat * Math.PI / 180), a = b * Math.PI / 180;
+    return [q.lat + d * Math.cos(a) / 111320, q.lon + d * Math.sin(a) / kx]; };
+  const h = q.heading_deg, hf = q.hfov_deg / 2;
+  L.polygon([[q.lat, q.lon], pt(h - hf), pt(h), pt(h + hf)], { color: "#0a84ff", weight: 1, fillOpacity: .15, interactive: false }).addTo(rayLayer);
+  for (const p of st.auto)
+    L.polyline([[q.lat, q.lon], [p.lat, p.lon]], { color: "#00e5ff", weight: 1, opacity: .6, interactive: false }).addTo(rayLayer);
+  for (const p of st.pairs) if (p.lat != null)
+    L.polyline([[q.lat, q.lon], [p.lat, p.lon]], { color: colorOf(p.n), weight: 2, interactive: false }).addTo(rayLayer);
+  for (const b of st.bld) {
+    const l = fpLayers.get(b.id); if (!l) continue;
+    fpInView.add(b.id); if (b.id !== fpHi) l.setStyle(fpBase(l.feature));
+  }
+}
+function mapHighlight(id) {
+  if (fpHi != null && fpLayers.has(fpHi)) fpLayers.get(fpHi).setStyle(fpBase(fpLayers.get(fpHi).feature));
+  fpHi = id;
+  const l = id == null ? null : fpLayers.get(id);
+  if (l) { l.setStyle({ color: "#ff453a", weight: 3, fillOpacity: .35 }); l.bringToFront(); }
+}
+
+let fpGroup = null;                     // the footprints near the view, on the map
+let fpAll = [];                         // every footprint layer, with its bounds: [layer, bounds]
+// One canvas for every footprint: as SVG each of a region's 40k buildings is a DOM node.
+const fpRenderer = L.canvas({ padding: 0.2, tolerance: 3 });
+async function loadFootprints(seq) {
+  const fc = await fetch(api("/api/footprints")).then(r => r.json());
+  if (seq !== regionSeq) return;
+  st.footprints = fc;
+  const g = L.geoJSON(fc, {
+    style: fpStyle,
+    onEachFeature: (f, layer) => {
+      fpLayers.set(f.properties.id, layer);
+      if (f.properties.name) layer.bindTooltip(f.properties.name, { sticky: true });
+      layer.on("click", () => { if (st.bld.length) { st.hiId = f.properties.id; draw(); } });
+    },
+    interactive: true,
+    renderer: fpRenderer,
+  });
+  fpAll = g.getLayers().map(l => [l, l.getBounds()]);
+  fpGroup = L.layerGroup().addTo(map);
+  fpBounds = fc.features.length ? g.getBounds() : null;
+  homeMap();
+  fpWindow();
+  status(fc.features.length + " footprints loaded.");
+}
+// Leaflet re-projects every layer on the map at each zoom, so only the footprints within a third
+// a screen of the view are on it (Cartagena: 41k outlines made each zoom take ~0.5 s against
+// ~30 ms without them). Below FP_MIN_ZOOM none are, unless the region is small.
+const FP_MIN_ZOOM = 15;
+function fpWindow() {
+  if (!fpGroup) return;
+  const all = fpAll.length < 3000, on = all || map.getZoom() >= FP_MIN_ZOOM;
+  const box = map.getBounds().pad(0.3);
+  for (const [l, b] of fpAll) {
+    const want = on && (all || box.intersects(b)), has = fpGroup.hasLayer(l);
+    if (want && !has) fpGroup.addLayer(l); else if (!want && has) fpGroup.removeLayer(l);
+  }
+}
+map.on("moveend", fpWindow);
+// The 2D map's home: the region's start view, else the footprints' extent.
+function homeMap() {
+  if (startView) map.setView([startView.lat, startView.lon], 15);
+  else if (fpBounds) map.fitBounds(fpBounds);
+}
+
+function nameAt(lat, lon) {
+  if (!st.footprints) return null;
+  for (const f of st.footprints.features) {
+    const nm = f.properties.name; if (!nm) continue;
+    const ring = f.geometry.coordinates[0]; let c = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) c = !c;
+    }
+    if (c) return nm;
+  }
+  return null;
+}
+
+function pinIcon(n, pend) {
+  return L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+    html: `<div class="pin${pend ? " pend" : ""}" style="background:${colorOf(n)}">${n}</div>` });
+}
+function setMapMarker(p) {
+  const old = st.mapMarkers.get(p.n); if (old) map.removeLayer(old);
+  setCesMarker(p);
+  if (p.lat == null) return;
+  const m = L.marker([p.lat, p.lon], { icon: pinIcon(p.n, p === st.pending), draggable: true }).addTo(map);
+  // A dragged 2D marker no longer sits at the 3D pick, so its height is dropped.
+  m.on("dragend", () => { const ll = m.getLatLng(); p.lat = ll.lat; p.lon = ll.lng; p.h = null; p.hGround = null; setCesMarker(p); invalidate(); renderRows(); });
+  m.on("click", () => select(p.n));
+  st.mapMarkers.set(p.n, m);
+}
+function dropMarker(n) {
+  const m = st.mapMarkers.get(n); if (m) { map.removeLayer(m); st.mapMarkers.delete(n); }
+  dropCesMarker(n);
+}
+// A click on the 2D map (h = null) or on the 3D surface (h = ellipsoidal height, m).
+function mapClick(ll, h = null) {
+  if (!st.img) return;
+  let p = st.pending;
+  if (p && p.lat == null) {
+    p.lat = ll.lat; p.lon = ll.lng; p.h = h; p.hGround = null; finish(p);
+  } else if (!p) {
+    p = { n: st.nextN++, label: "", x: null, y: null, lat: ll.lat, lon: ll.lng, h };
+    st.pending = p; setMapMarker(p); status("Now click the matching point on the photo.");
+  }
+  draw();
+}
+map.on("click", e => mapClick(e.latlng));
+
+function finish(p) {
+  st.pending = null;
+  if (!p.label) p.label = nameAt(p.lat, p.lon) || ("P" + p.n);
+  st.pairs.push(p); st.sel = p.n; setMapMarker(p); invalidate(); renderRows(); draw();
+  status("Pair " + p.n + " added.");
+}
+
+// ---------- 3D view (Cesium + Google Photorealistic 3D Tiles through the /tiles3d proxy) ----------
+
+// <pinhole-math>
+// Camera maths shared by the page and tests/test_photo_label_register.py (run under node).
+// pinholeProject == city2stl.skyline.photo_view.PinholeCamera.project_ll; cesiumView/cesiumBasis map
+// a PinholeCamera onto Cesium's heading/pitch/roll/fov and back, so a render matches the photo's pixels.
+const M_PER_DEG_LAT = 111320;
+function pinholeAxes(c) {                 // [right, up, fwd] in east, north, up
+  const h = c.heading_deg * Math.PI / 180, p = c.pitch_deg * Math.PI / 180, r = (c.roll_deg || 0) * Math.PI / 180;
+  const fwd = [Math.sin(h) * Math.cos(p), Math.cos(h) * Math.cos(p), Math.sin(p)];
+  const r0 = [Math.cos(h), -Math.sin(h), 0];
+  const u0 = [r0[1] * fwd[2] - r0[2] * fwd[1], r0[2] * fwd[0] - r0[0] * fwd[2], r0[0] * fwd[1] - r0[1] * fwd[0]];
+  const right = r0.map((v, i) => Math.cos(r) * v + Math.sin(r) * u0[i]);
+  const up = r0.map((v, i) => -Math.sin(r) * v + Math.cos(r) * u0[i]);
+  return [right, up, fwd];
+}
+function pinholeProject(c, lat, lon, h) {
+  const kx = M_PER_DEG_LAT * Math.cos(c.lat * Math.PI / 180);
+  const d = [(lon - c.lon) * kx, (lat - c.lat) * M_PER_DEG_LAT, h - c.elev_m];
+  const [right, up, fwd] = pinholeAxes(c), dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const z = dot(d, fwd);
+  if (z <= 1e-9) return { x: NaN, y: NaN, z };
+  return { x: c.width / 2 + c.f_px * dot(d, right) / z, y: c.height / 2 - c.f_px * dot(d, up) / z, z };
+}
+// Cesium orientation of a pinhole camera drawn at rw x rh pixels (rw/cam.width scales f).
+// Cesium roll is the opposite sign of the pinhole roll; frustum.fov is the horizontal angle when aspect >= 1.
+function cesiumView(c, rw, rh) {
+  const f = c.f_px * rw / c.width, fovy = 2 * Math.atan(rh / 2 / f), hfov = 2 * Math.atan(rw / 2 / f);
+  return { heading: c.heading_deg * Math.PI / 180, pitch: c.pitch_deg * Math.PI / 180, roll: -(c.roll_deg || 0) * Math.PI / 180,
+           fovy, hfov, fov: rw / rh >= 1 ? hfov : fovy, aspect: rw / rh };
+}
+// Cesium's camera basis in east, north, up for a heading/pitch/roll (Camera.setView3D): the orientation
+// quaternion is Rz(-(heading - 90 deg)) Ry(-pitch) Rx(roll); direction is its first column, up its third.
+function cesiumBasis(heading, pitch, roll) {
+  const mul = (a, b) => a.map((_, i) => [0, 1, 2].map(j => a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j]));
+  const rx = a => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]];
+  const ry = a => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]];
+  const rz = a => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]];
+  const m = mul(mul(rz(-(heading - Math.PI / 2)), ry(-pitch)), rx(roll));
+  const fwd = [m[0][0], m[1][0], m[2][0]], up = [m[0][2], m[1][2], m[2][2]];
+  const right = [fwd[1] * up[2] - fwd[2] * up[1], fwd[2] * up[0] - fwd[0] * up[2], fwd[0] * up[1] - fwd[1] * up[0]];
+  return { right, up, fwd };
+}
+// </pinhole-math>
+
+const CESIUM_VER = "1.120.0";
+const CESIUM_BASE = `https://cdn.jsdelivr.net/npm/cesium@${CESIUM_VER}/Build/Cesium/`;
+let camPose = null;                      // the solved or restored camera of the open photo
+const ces = { viewer: null, ready: null, markers: new Map(), icons: new Map(), on: false, hfov: null };
+let tiles3d = null;                       // null = unknown, then true/false from /api/config
+let startView = null;                    // {lat, lon, ground_m} of the region, from /api/config
+async function loadConfig(seq) {
+  try {
+    const c = await fetch(api("/api/config")).then(r => r.json());
+    if (seq !== regionSeq) return;
+    tiles3d = !!c.tiles3d; startView = c.view || null;
+  } catch (_) { tiles3d = false; }
+}
+
+function loadCesium() {
+  if (window.Cesium) return Promise.resolve();
+  window.CESIUM_BASE_URL = CESIUM_BASE;
+  const css = document.createElement("link"); css.rel = "stylesheet"; css.href = CESIUM_BASE + "Widgets/widgets.css";
+  document.head.appendChild(css);
+  return new Promise((ok, bad) => {
+    const sc = document.createElement("script"); sc.src = CESIUM_BASE + "Cesium.js";
+    sc.onload = ok; sc.onerror = () => bad(new Error("could not load CesiumJS from the CDN")); document.head.appendChild(sc);
+  });
+}
+async function initCesium() {
+  await loadCesium();
+  const v = new Cesium.Viewer("cesium", {
+    baseLayer: false, globe: false, geocoder: false, homeButton: false, sceneModePicker: false,
+    baseLayerPicker: false, navigationHelpButton: false, animation: false, timeline: false,
+    fullscreenButton: false, infoBox: false, selectionIndicator: false, vrButton: false,
+  });
+  ces.viewer = v;
+  const ts = await Cesium.Cesium3DTileset.fromUrl("/tiles3d/v1/3dtiles/root.json", { showCreditsOnScreen: true });
+  v.scene.primitives.add(ts);
+  ces.tileset = ts;
+  centre3d(false);
+  // Left click without a drag (< 5 px) picks the surface.
+  const h = new Cesium.ScreenSpaceEventHandler(v.scene.canvas); let down = null;
+  h.setInputAction(e => { down = e.position.clone(); }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+  h.setInputAction(e => {
+    if (!down || Cesium.Cartesian2.distance(down, e.position) >= 5) { down = null; return; }
+    down = null; pick3d(e.position);
+  }, Cesium.ScreenSpaceEventType.LEFT_UP);
+  v.scene.preRender.addEventListener(applyFov);
+  new ResizeObserver(() => v.resize()).observe($("cesium"));
+}
+// Look at a point from the south and above (heading north). The region's start view is 1.2 km back and
+// 350 m up; a photo's saved camera is looked at from 500 m back and 300 m up. Heights are ellipsoidal
+// and only roughly above the ground, which is enough for an overview.
+function lookFrom(lat, lon, ground, back, up, pitchDeg, fly) {
+  if (!ces.viewer) return;
+  const o = { destination: Cesium.Cartesian3.fromDegrees(lon, lat - back / M_PER_DEG_LAT, ground + up),
+              orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitchDeg), roll: 0 } };
+  if (fly) ces.viewer.camera.flyTo({ ...o, duration: 1.5 }); else ces.viewer.camera.setView(o);
+}
+// Centre the 3D view: on the open photo's camera when it has one, else on the region.
+function centre3d(fly) {
+  const q = camPose, sv = startView;
+  if (q) lookFrom(q.lat, q.lon, q.ground_m ?? (sv ? sv.ground_m : 650), 500, 300, -30, fly);
+  else if (sv) lookFrom(sv.lat, sv.lon, sv.ground_m, 1220, 350, -22, fly);
+  ces.centredFor = q ? st.photo && st.photo.path : null;
+}
+function pick3d(pos) {
+  const v = ces.viewer; if (!v || !st.img) return;
+  const c = v.scene.pickPositionSupported ? v.scene.pickPosition(pos) : undefined;
+  if (!c) { status("No 3D surface under that click."); return; }
+  const g = Cesium.Cartographic.fromCartesian(c);
+  mapClick({ lat: Cesium.Math.toDegrees(g.latitude), lng: Cesium.Math.toDegrees(g.longitude) }, g.height);
+}
+// Cesium's frustum.fov is the horizontal angle on a wide canvas and the vertical one on a tall canvas.
+function applyFov() {
+  if (ces.hfov == null) return;
+  const v = ces.viewer, w = v.canvas.clientWidth, h = v.canvas.clientHeight; if (!w || !h) return;
+  const a = w / h, hf = Cesium.Math.toRadians(ces.hfov);
+  v.camera.frustum.fov = a >= 1 ? hf : 2 * Math.atan(Math.tan(hf / 2) / a);
+}
+function cesIcon(n, pend) {
+  const key = n + (pend ? "p" : "");
+  if (!ces.icons.has(key)) {
+    const c = document.createElement("canvas"); c.width = c.height = 26; const g = c.getContext("2d");
+    g.beginPath(); g.arc(13, 13, 11, 0, 7); g.fillStyle = colorOf(n); g.fill();
+    g.lineWidth = 2; g.strokeStyle = "#fff"; if (pend) g.setLineDash([3, 3]); g.stroke();
+    g.fillStyle = "#fff"; g.font = "bold 12px system-ui"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(n, 13, 14);
+    ces.icons.set(key, c.toDataURL());
+  }
+  return ces.icons.get(key);
+}
+function setCesMarker(p) {
+  dropCesMarker(p.n);
+  if (!ces.viewer || p.lat == null) return;
+  const h = p.h ?? p.hGround;
+  if (h == null) { groundUnder(p); return; }
+  ces.markers.set(p.n, ces.viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, h),
+    billboard: { image: cesIcon(p.n, p === st.pending), disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      verticalOrigin: Cesium.VerticalOrigin.CENTER },
+  }));
+}
+// A 2D-only pair has no height. Clamping to the tiles does not work without a globe (the pin
+// stays at height 0, hundreds of metres underground, and slides as the view orbits), so sample
+// the surface under it once and keep that as a display height; it is not saved with the label.
+async function groundUnder(p) {
+  if (p.hGroundBusy) return; p.hGroundBusy = true;
+  try {
+    const [c] = await ces.viewer.scene.sampleHeightMostDetailed([Cesium.Cartographic.fromDegrees(p.lon, p.lat)]);
+    p.hGround = c && Number.isFinite(c.height) ? c.height : null;
+  } catch (_) { p.hGround = null; }
+  p.hGroundBusy = false;
+  if (p.hGround != null && (st.pairs.includes(p) || st.pending === p)) setCesMarker(p);
+}
+function dropCesMarker(n) {
+  const e = ces.markers.get(n); if (e && ces.viewer) ces.viewer.entities.remove(e);
+  ces.markers.delete(n);
+}
+function syncCesMarkers() { for (const p of st.pairs.concat(st.pending ? [st.pending] : [])) setCesMarker(p); }
+
+async function setMode3d(on) {
+  if (on && !ces.on) {
+    if (tiles3d === false) { status("3D needs GOOGLE_MAPS_API_KEY"); return; }
+    $("modeBtn").disabled = true; status("Loading the 3D view...");
+    try {
+      if (!ces.ready) ces.ready = initCesium();
+      await ces.ready;
+    } catch (err) {
+      ces.ready = null; $("modeBtn").disabled = false;
+      status("3D failed: " + (err && err.message || err)); return;
+    }
+    $("modeBtn").disabled = false;
+  }
+  ces.on = on;
+  document.body.classList.toggle("mode3d", on);
+  $("cesium").classList.toggle("hid", !on); $("map").classList.toggle("hid", on);
+  $("modeBtn").textContent = "Map: " + (on ? "3D" : "2D");
+  if (on) {
+    // A camera restored or solved since the view was last centred pulls it over; otherwise the user's orbit stays.
+    if (camPose && ces.centredFor !== (st.photo && st.photo.path)) centre3d(false);
+    syncCesMarkers(); ces.viewer.resize(); status("3D: drag to orbit, click (no drag) to place a point."); }
+  else { map.invalidateSize(); }
+}
+$("modeBtn").onclick = () => setMode3d(!ces.on);
+
+// Fly the 3D camera to the solved pose so the view can be compared with the photo.
+async function viewFromCamera() {
+  const v = ces.viewer, q = camPose; if (!v || !q) return;
+  status("Finding the surface under the camera...");
+  const carto = Cesium.Cartographic.fromDegrees(q.lon, q.lat);
+  let ground = null;
+  try {
+    const r = await v.scene.sampleHeightMostDetailed([carto]); ground = r[0] && r[0].height;
+  } catch (e) { /* tiles not ready yet: fall back below */ }
+  if (ground == null || !isFinite(ground)) { ground = v.scene.sampleHeight(carto); }
+  const miss = ground == null || !isFinite(ground);
+  // Granada's centre is about 680 m orthometric + 50 m geoid undulation; elsewhere the DEM median.
+  if (miss) ground = startView ? startView.ground_m : 750;
+  ces.hfov = q.hfov_deg; applyFov();
+  v.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(q.lon, q.lat, ground + (+$("camUp").value || 0)),
+    // The solver's positive roll lifts the right side; Cesium's positive roll lowers it.
+    orientation: { heading: Cesium.Math.toRadians(q.heading_deg), pitch: Cesium.Math.toRadians(+$("camPitch").value || 0),
+                   roll: Cesium.Math.toRadians(-(q.roll_deg || 0)) },
+    duration: 1.5,
+  });
+  status(miss ? "No surface found under the camera; used 750 m ellipsoidal as ground." : `Camera ground ${ground.toFixed(1)} m (ellipsoidal).`);
+}
+$("camViewBtn").onclick = viewFromCamera;
+for (const id of ["camUp", "camPitch"]) $(id).addEventListener("change", () => { if (camPose && ces.on) viewFromCamera(); });
+
+// ---------- our city model over the Google mesh ----------
+// The server sends the model in east-north-up metres at info.origin with orthometric heights
+// (GET /api/model/info, /api/model.glb). It is lifted by the geoid offset, measured here from
+// the live Google mesh and kept in memory only (nothing measured from the tiles goes anywhere),
+// plus the dz nudge.
+const mdl = { model: null, info: null, geoid: null, shader: null, busy: false };
+// Remove the loaded model (a region switch): the next Model click builds the new region's.
+function disposeModel() {
+  if (mdl.model && ces.viewer) { try { ces.viewer.scene.primitives.remove(mdl.model); } catch (_) { /* gone already */ } }
+  mdl.model = mdl.info = mdl.geoid = mdl.shader = null;
+  for (const id of ["mdlShow", "mdlAlpha", "mdlDz", "mdlGeoid"]) $(id).disabled = true;
+  $("mdlShow").value = "both"; $("mdlGeoid").textContent = "geoid ?";
+  if (ces.tileset) ces.tileset.show = true;
+}
+const GEOID_PCT = 0.2;   // like register.GEOID_PERCENTILE: ground points, not roofs or trees
+function modelMatrix() {
+  const o = mdl.info.origin, up = (mdl.geoid ?? 0) + (+$("mdlDz").value || 0);
+  return Cesium.Transforms.eastNorthUpToFixedFrame(Cesium.Cartesian3.fromDegrees(o.lon, o.lat, up));
+}
+// No normals in the glb: flat shading from screen-space derivatives, headlight style.
+function modelShader() {
+  return new Cesium.CustomShader({
+    mode: Cesium.CustomShaderMode.MODIFY_MATERIAL,
+    lightingModel: Cesium.LightingModel.UNLIT,
+    translucencyMode: Cesium.CustomShaderTranslucencyMode.TRANSLUCENT,
+    uniforms: { u_alpha: { type: Cesium.UniformType.FLOAT, value: +$("mdlAlpha").value } },
+    fragmentShaderText: `
+      void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+        vec3 p = fsInput.attributes.positionEC;
+        vec3 n = normalize(cross(dFdx(p), dFdy(p)));
+        material.diffuse *= 0.35 + 0.65 * abs(dot(n, normalize(-p)));
+        material.alpha = u_alpha;
+      }`,
+  });
+}
+async function modelInfo(rebuild) {
+  for (let first = true; ; first = false) {
+    const info = await fetch(api("/api/model/info") + (rebuild && first ? "&rebuild=1" : "")).then(r => r.json());
+    if (info.status !== "building") return info;
+    status("Building our city model on the server (the first time takes about 2 minutes)...");
+    await new Promise(ok => setTimeout(ok, 3000));
+  }
+}
+async function measureGeoid() {
+  const g = mdl.info.ground || [];
+  if (!g.length) { status("No ground points for the geoid offset; set dz by hand."); return; }
+  $("mdlGeoid").disabled = true; $("mdlGeoid").textContent = "geoid ...";
+  try {
+    const pts = g.map(([lon, lat]) => Cesium.Cartographic.fromDegrees(lon, lat));
+    const got = await ces.viewer.scene.sampleHeightMostDetailed(pts, mdl.model ? [mdl.model] : []);
+    const d = got.map((c, i) => c && Number.isFinite(c.height) ? c.height - g[i][2] : NaN)
+      .filter(Number.isFinite).sort((a, b) => a - b);
+    if (d.length < 5) { status(`Only ${d.length} ground points hit the Google mesh; set dz by hand.`); return; }
+    mdl.geoid = d[Math.floor(GEOID_PCT * (d.length - 1))];
+    if (mdl.model) mdl.model.modelMatrix = modelMatrix();
+    status(`Geoid offset ${mdl.geoid.toFixed(1)} m from ${d.length} ground points (Google - DEM, 20th percentile).`);
+  } catch (err) {
+    status("Geoid measurement failed: " + (err && err.message || err));
+  } finally {
+    $("mdlGeoid").disabled = !mdl.model;
+    $("mdlGeoid").textContent = mdl.geoid == null ? "geoid ?" : `geoid ${mdl.geoid.toFixed(1)} m`;
+  }
+}
+function applyModelShow() {
+  const v = $("mdlShow").value;
+  if (mdl.model) mdl.model.show = v !== "google";
+  if (ces.tileset) ces.tileset.show = v !== "model";
+}
+async function loadModel() {
+  if (mdl.busy || !ces.viewer) return;
+  if (mdl.model) { ces.viewer.flyTo(mdl.model); return; }
+  mdl.busy = true; $("mdlBtn").disabled = true;
+  const seq = regionSeq;
+  try {
+    const info = await modelInfo(true);
+    if (seq !== regionSeq) return;
+    if (info.status !== "ready") throw new Error(info.error || info.status);
+    mdl.info = info;
+    status("Loading our city model...");
+    mdl.shader = modelShader();
+    mdl.model = await Cesium.Model.fromGltfAsync({
+      url: api("/api/model.glb"), modelMatrix: modelMatrix(), customShader: mdl.shader,
+      upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X,   // vertices are already (E, N, U)
+      allowPicking: false, backFaceCulling: false,
+    });
+    if (seq !== regionSeq) { mdl.model = null; return; }   // the region changed while it loaded
+    ces.viewer.scene.primitives.add(mdl.model);
+    for (const id of ["mdlShow", "mdlAlpha", "mdlDz"]) $(id).disabled = false;
+    applyModelShow();
+    await measureGeoid();
+    const mb = (info.glb_bytes / 1e6).toFixed(1);
+    status(`Model: ${info.source}, ${info.faces} faces, ${mb} MB; geoid ${mdl.geoid == null ? "not measured" : mdl.geoid.toFixed(1) + " m"}.`);
+  } catch (err) {
+    status("Model failed: " + (err && err.message || err));
+  } finally {
+    mdl.busy = false; $("mdlBtn").disabled = false;
+  }
+}
+$("mdlBtn").onclick = loadModel;
+$("mdlShow").onchange = applyModelShow;
+$("mdlAlpha").oninput = () => { if (mdl.shader) mdl.shader.setUniform("u_alpha", +$("mdlAlpha").value); };
+$("mdlDz").addEventListener("input", () => { if (mdl.model) mdl.model.modelMatrix = modelMatrix(); });
+$("mdlGeoid").onclick = measureGeoid;
+
+// ---------- photo canvas ----------
+const cv = $("photo"), ctx = cv.getContext("2d");
+function resize() {
+  const r = $("photoWrap").getBoundingClientRect();
+  cv.width = Math.max(1, r.width); cv.height = Math.max(1, r.height); draw();
+}
+// The panes can start at zero size (a hidden browser tab), so refit whenever one grows from
+// nothing; after that a resize keeps the user's zoom.
+let fpBounds = null;
+new ResizeObserver(() => { const was = cv.width; resize(); if (was < 50) fit(); }).observe($("photoWrap"));
+new ResizeObserver(([e]) => {
+  const was = map.getSize().x; map.invalidateSize();
+  if (was < 50 && e.contentRect.width >= 50 && curRegion) homeMap();
+}).observe($("map"));
+function fit() {
+  if (!st.img) return;
+  const s = Math.min(cv.width / st.img.width, cv.height / st.img.height);
+  st.view = { s, ox: (cv.width - st.img.width * s) / 2, oy: (cv.height - st.img.height * s) / 2 };
+  draw();
+}
+$("fitBtn").onclick = fit;
+const toImg = (px, py) => [(px - st.view.ox) / st.view.s, (py - st.view.oy) / st.view.s];
+const toScr = (x, y) => [x * st.view.s + st.view.ox, y * st.view.s + st.view.oy];
+
+function disc(x, y, n, pend) {
+  const [sx, sy] = toScr(x, y);
+  ctx.beginPath(); ctx.arc(sx, sy, 10, 0, 7); ctx.fillStyle = colorOf(n); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = "#fff"; if (pend) ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = "#fff"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(n, sx, sy + 1);
+}
+function draw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!st.img) return;
+  const v = st.view;
+  drawBase();
+  const sol = st.solve;
+  if (sol) {
+    ctx.textBaseline = "alphabetic";
+    // named footprint ticks along the top
+    ctx.strokeStyle = "rgba(255,214,10,.9)"; ctx.fillStyle = "#ffd60a"; ctx.lineWidth = 1; ctx.font = "10px system-ui";
+    let k = 0;
+    for (const t of sol.ticks) {
+      const [sx] = toScr(t.x, 0); if (sx < 0 || sx > cv.width) continue;
+      ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, 10); ctx.stroke();
+      ctx.save(); ctx.translate(sx + 3, 14 + (k++ % 3) * 0); ctx.rotate(Math.PI / 2); ctx.textAlign = "left";
+      ctx.fillText(t.name.slice(0, 24), 0, 0); ctx.restore();
+    }
+    // predicted x of each pair
+    sol.predicted_x.forEach((px, i) => {
+      const p = st.pairs[i]; if (!p || px == null) return;
+      const [sx] = toScr(px, 0);
+      ctx.strokeStyle = colorOf(p.n); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, cv.height); ctx.stroke();
+    });
+  }
+  if (st.bld.length && $("bldChk").checked) drawBuildings();
+  for (const p of st.auto) {
+    const [sx, sy] = toScr(p.x, p.y);
+    ctx.beginPath(); ctx.arc(sx, sy, 3.5, 0, 7); ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx, sy, 1.2, 0, 7); ctx.fillStyle = "#00e5ff"; ctx.fill();
+  }
+  for (const p of st.pairs) disc(p.x, p.y, p.n, false);
+  const q = st.pending; if (q && q.x != null) disc(q.x, q.y, q.n, true);
+  const s = st.pairs.find(p => p.n === st.sel);
+  if (s) { const [sx, sy] = toScr(s.x, s.y); ctx.beginPath(); ctx.arc(sx, sy, 15, 0, 7); ctx.strokeStyle = "#0a84ff"; ctx.lineWidth = 2; ctx.stroke(); }
+}
+
+// ---------- projected buildings ----------
+const scrPath = (pts, close) => {
+  pts.forEach(([x, y], i) => { const [sx, sy] = toScr(x, y); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+  if (close) ctx.closePath();
+};
+const hue = id => { let x = 0; for (const c of String(id)) x = (x * 31 + c.charCodeAt(0)) >>> 0; return (x * 47) % 360; };
+function drawBuildings() {
+  ctx.save(); ctx.lineJoin = "round";
+  const trace = rs => { ctx.beginPath(); for (const r of rs) scrPath(r, true); };
+  const order = st.bld.filter(b => b.id !== st.hiId && b.id !== st.hoverId)
+    .concat(st.bld.filter(b => b.id === st.hiId || b.id === st.hoverId));
+  for (const b of order) {
+    const hi = b.id === st.hiId || b.id === st.hoverId, c = `hsl(${hue(b.id)},85%,${hi ? 65 : 55}%)`;
+    trace(b.contours);
+    ctx.globalAlpha = hi ? 0.3 : 0.15; ctx.fillStyle = c; ctx.fill();
+    ctx.globalAlpha = 1; ctx.lineWidth = hi ? 3 : 1; ctx.strokeStyle = hi ? "#ff453a" : c; ctx.stroke();
+    if (b.roof.length && !hi) { trace(b.roof); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke(); }
+  }
+  ctx.restore();
+}
+function bldAt(x, y) {                            // visible building under an image point (id buffer)
+  const m = st.idMap; if (!m) return null;
+  const px = Math.floor(x), py = Math.floor(y);
+  if (px < 0 || py < 0 || px >= m.w || py >= m.h) return null;
+  const i = (py * m.w + px) * 4, k = m.data[i] + 256 * m.data[i + 1];
+  return k ? st.bld[k - 1] : null;
+}
+async function loadBuildings() {
+  st.bld = []; st.idMap = null; st.hoverId = st.hiId = null;
+  const q = st.solve && st.solve.pose;
+  if (!q || q.elev_m == null) return;
+  const ph = st.photo;
+  const r = await postJson("/api/project", { camera: q, image_px: [ph.w, ph.h] });
+  if (st.solve && st.photo === ph && r.ok) {
+    st.idMap = await new Promise(res => {
+      if (!r.ids_png) return res(null);
+      const im = new Image();
+      im.onload = () => { const c = document.createElement("canvas"); c.width = im.width; c.height = im.height;
+        const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
+        res({ w: im.width, h: im.height, data: g.getImageData(0, 0, im.width, im.height).data }); };
+      im.onerror = () => res(null); im.src = "data:image/png;base64," + r.ids_png; });
+    st.bld = r.buildings; draw(); if (dv.tab === "or") dvOrient(); drawMapLines(); status(`${r.buildings.length} buildings in view.`); }
+}
+$("bldChk").onchange = draw;
+$("rayChk").onchange = drawMapLines;
+cv.addEventListener("mousemove", e => {
+  if (drag || !st.bld.length || !$("bldChk").checked) return;
+  const r = cv.getBoundingClientRect(), [x, y] = toImg(e.clientX - r.left, e.clientY - r.top);
+  const b = bldAt(x, y), id = b ? b.id : null;
+  if (id === st.hoverId) return;
+  st.hoverId = id; mapHighlight(id); draw();
+  status(b ? `${b.name || "building"} (id ${b.id}), assumed height ${b.height_m.toFixed(0)} m, ${b.dist_m.toFixed(0)} m away` : "");
+});
+cv.addEventListener("mouseleave", () => { if (st.hoverId != null) { st.hoverId = null; mapHighlight(null); draw(); } });
+
+let drag = null;
+function hit(mx, my) {
+  const all = st.pairs.concat(st.pending && st.pending.x != null ? [st.pending] : []);
+  for (let i = all.length - 1; i >= 0; i--) {
+    const [sx, sy] = toScr(all[i].x, all[i].y);
+    if (Math.hypot(sx - mx, sy - my) <= 11) return all[i];
+  }
+  return null;
+}
+cv.addEventListener("mousedown", e => {
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  drag = { mx, my, moved: false, marker: hit(mx, my), ox: st.view.ox, oy: st.view.oy };
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (!drag.moved && Math.hypot(mx - drag.mx, my - drag.my) < 4) return;
+  drag.moved = true;
+  if (drag.marker) { [drag.marker.x, drag.marker.y] = toImg(mx, my); }
+  else { st.view.ox = drag.ox + mx - drag.mx; st.view.oy = drag.oy + my - drag.my; }
+  draw();
+});
+window.addEventListener("mouseup", e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  if (d.moved) { if (d.marker) { invalidate(); renderRows(); } return; }
+  if (e.target !== cv) return;
+  if (d.marker) { select(d.marker.n); return; }
+  const [x, y] = toImg(mx, my);
+  if (!st.img || x < 0 || y < 0 || x > st.img.width || y > st.img.height) return;
+  let p = st.pending;
+  if (p && p.x == null) { p.x = x; p.y = y; finish(p); }
+  else if (!p) {
+    p = { n: st.nextN++, label: "", x, y, lat: null, lon: null, h: null }; st.pending = p; draw();
+    status("Now click the matching point on the map.");
+  }
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const k = Math.exp(-e.deltaY * 0.0015), [ix, iy] = toImg(mx, my);
+  st.view.s = Math.min(40, Math.max(0.02, st.view.s * k));
+  st.view.ox = mx - ix * st.view.s; st.view.oy = my - iy * st.view.s; draw();
+}, { passive: false });
+
+// ---------- pairs ----------
+function select(n) { st.sel = n; renderRows(); draw(); }
+function cancelPending() {
+  const p = st.pending; if (!p) return;
+  dropMarker(p.n);
+  st.pending = null; draw(); status("Pending point cancelled.");
+}
+function removePair(n) {
+  dropMarker(n);
+  st.pairs = st.pairs.filter(p => p.n !== n); if (st.sel === n) st.sel = null;
+  invalidate(); renderRows(); draw();
+}
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.key === "Escape") cancelPending();
+  else if (e.key === "Delete" && st.sel != null) removePair(st.sel);
+});
+function invalidate() {
+  st.solve = null; st.bld = []; st.idMap = null; st.hoverId = st.hiId = null; mapHighlight(null); camPose = null; $("camViewBtn").disabled = true; camLayer.clearLayers(); $("result").textContent = "";
+  $("solveBtn").disabled = st.pairs.length < 4; drawMapLines();
+}
+function renderRows() {
+  const res = st.solve ? st.solve.residuals_px : [], resM = st.solve && st.solve.residuals_m || [],
+        hts = st.solve && st.solve.heights_m || [], h0s = st.solve && st.solve.h0_m || [], inf = st.solve && st.solve.in_footprint || [];
+  $("rows").innerHTML = st.pairs.map((p, i) => `<tr class="${p.n === st.sel ? "sel" : ""}" data-n="${p.n}">
+    <td><span class="dot" style="background:${colorOf(p.n)}"></span> ${p.n}</td>
+    <td><input value="${esc(p.label)}" data-n="${p.n}"></td>
+    <td>${p.x.toFixed(0)}, ${p.y.toFixed(0)}</td>
+    <td>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${p.h == null ? "" : ", " + p.h.toFixed(1) + " m"}</td>
+    <td>${res[i] == null ? "" : res[i].toFixed(1) + " px" + (resM[i] == null ? "" : " / " + resM[i].toFixed(1) + " m")}</td>
+    <td>${hts[i] == null ? "" : hts[i].toFixed(0) + " m" + (inf[i] ? ` (OSM ${h0s[i].toFixed(0)})` : "")}</td>
+    <td><button data-del="${p.n}">Delete</button></td></tr>`).join("") +
+    (st.auto.length ? `<tr><td><span class="dot" style="background:#00e5ff"></span></td><td colspan="5">${st.auto.length} auto pairs (cyan dots on the photo), auto1..auto${st.auto.length}</td><td><button id="clrAuto">Clear</button></td></tr>` : "");
+  drawMapLines();
+}
+$("rows").addEventListener("click", e => {
+  if (e.target.id === "clrAuto") { st.auto = []; renderRows(); draw(); return; }
+  if (e.target.dataset.del) return removePair(+e.target.dataset.del);
+  const tr = e.target.closest("tr"); if (tr && tr.dataset.n && e.target.tagName !== "INPUT") select(+tr.dataset.n);
+});
+$("rows").addEventListener("input", e => {
+  const p = st.pairs.find(q => q.n === +e.target.dataset.n); if (p) p.label = e.target.value;
+});
+
+// ---------- solve / save / load ----------
+const payload = withAuto => ({ photo: st.photo.path, image_px: [st.photo.w, st.photo.h],
+  ...(st.solve && st.solve.pose ? { camera: st.solve.pose, camera_source: st.solve.source || "solve" } : {}),
+  labels: st.pairs.map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null }))
+    .concat(withAuto ? st.auto.map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null, auto: true })) : []) });
+$("solveBtn").onclick = async () => {
+  status("Solving...");
+  const r = await postJson("/api/solve", payload(false));
+  if (!r.ok) { status("Solve failed: " + r.error); return; }
+  st.solve = { ...r, source: "solve" }; const q = r.pose; camPose = q; $("camViewBtn").disabled = false;
+  showCam(q);
+  $("result").textContent = `heading ${q.heading_deg.toFixed(1)} deg, hfov ${q.hfov_deg.toFixed(1)} deg, rms ${q.rms_px.toFixed(1)} px, ` +
+    `sigma ${q.sigma_m.toFixed(0)} m, roll ${q.roll_deg.toFixed(1)} deg, f ${q.f_px.toFixed(0)} px` +
+    (q.elev_m == null ? " (column solve, no terrain)" :
+      `, pitch ${q.pitch_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m (+${(q.elev_m - q.ground_m).toFixed(0)} above ground), ` +
+      `median ${q.median_px.toFixed(1)} px = ${q.median_m.toFixed(1)} m`) +
+    (q.rejected.length ? `, rejected: ${q.rejected.join(", ")}` : "");
+  status("Solved."); renderRows(); draw(); dvRefresh(); await loadBuildings();
+  saveLabels(true);
+};
+// Save the pairs and the solved camera. Solve and Auto register call it right after they succeed,
+// so the camera survives a photo switch or a reload; the Save button reports it.
+async function saveLabels(quiet) {
+  if (!st.photo) return;
+  const r = await postJson("/api/labels", payload(true));
+  if (r.ok) status(quiet ? `Solved and saved (${r.n} labels${st.solve && st.solve.pose ? ", camera" : ""}).`
+                         : `Saved ${r.n} labels (${st.auto.length} auto).`);
+  else status("Save failed: " + r.error);
+}
+$("saveBtn").onclick = () => saveLabels(false);
+
+// ---------- automatic registration against the 3D mesh ----------
+// An offscreen second Cesium viewer renders the mesh from a candidate camera (colour + a depth grid from
+// pickPosition); the server matches it to the photo and returns a better camera. Renders stay in memory.
+const REG_GRID_W = 112, REG_LONG_SIDE = 1600, REG_TILE_WAIT_MS = 90000;  // a cold Granada view takes ~30 s to settle
+// Heading / FOV sweep when the start guess finds nothing: SWEEP_HEADINGS renders around the start
+// position at SWEEP_HFOV (8 x 60 deg overlap by 15 deg), then the best heading at each of SWEEP_FOVS.
+// Smaller, shorter renders: they only rank directions, the normal iterations refine after.
+const SWEEP_HEADINGS = 8, SWEEP_HFOV = 60, SWEEP_FOVS = [40, 25], SWEEP_LONG_SIDE = 1024, SWEEP_WAIT_MS = 30000;
+const SWEEP_IF_BELOW = 25;    // inliers from the start guess below which the sweep runs
+const MIN_SWEEP_SCORE = 6;    // fewer matches with a depth than this in every direction: nothing to iterate from
+async function ensureRenderViewer(rw, rh) {
+  await loadCesium();
+  if (!ces.rv) {
+    const box = document.createElement("div"); box.style.cssText = "position:fixed;left:-30000px;top:0;";
+    document.body.appendChild(box);
+    const v = new Cesium.Viewer(box, {
+      baseLayer: false, globe: false, geocoder: false, homeButton: false, sceneModePicker: false,
+      baseLayerPicker: false, navigationHelpButton: false, animation: false, timeline: false,
+      fullscreenButton: false, infoBox: false, selectionIndicator: false, vrButton: false,
+      useDefaultRenderLoop: false, contextOptions: { webgl: { preserveDrawingBuffer: true } } });
+    v.resolutionScale = 1 / (window.devicePixelRatio || 1);       // drawing buffer = CSS size = rw x rh
+    v.scene.skyAtmosphere.show = false; v.scene.skyBox.show = false; v.scene.fog.enabled = false;
+    v.scene.backgroundColor = Cesium.Color.BLACK;
+    const ts = await Cesium.Cesium3DTileset.fromUrl("/tiles3d/v1/3dtiles/root.json");
+    ts.maximumScreenSpaceError = 8;
+    v.scene.primitives.add(ts);
+    ces.rv = { v, box, ts };
+  }
+  const { v, box } = ces.rv;
+  box.style.width = rw + "px"; box.style.height = rh + "px"; v.resize();
+  return ces.rv;
+}
+function disposeRenderViewer() {
+  if (!ces.rv) return;
+  try { ces.rv.v.destroy(); ces.rv.box.remove(); } catch (e) { /* already gone */ }
+  ces.rv = null;
+}
+function settleTiles(rv, ms) {
+  return new Promise(res => {
+    const t0 = performance.now(); let stable = 0;
+    (function tick() {
+      try { rv.v.render(); } catch (e) { return res(false); }   // viewer disposed (region switch): never hang the render lock
+      stable = rv.ts.tilesLoaded ? stable + 1 : 0;
+      if (stable >= 5) return res(true);
+      if (performance.now() - t0 > ms) return res(false);
+      setTimeout(tick, 60);
+    })();
+  });
+}
+const f32b64 = a => { const u = new Uint8Array(a.buffer); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+// cam: PinholeCamera dict at the photo's size (elev_m orthometric); geoid_m is added for the mesh's ellipsoidal datum.
+// One render at a time: Google depth (dvGoogle) and Auto register share the viewer, and a second
+// setView while the first waits for tiles would move its camera.
+let renderLock = Promise.resolve();
+function renderAt(cam, geoid_m, gridW = REG_GRID_W, opts = {}) {
+  const run = renderLock.then(() => renderNow(cam, geoid_m, gridW, opts));
+  renderLock = run.catch(() => {});
+  return run;
+}
+async function renderNow(cam, geoid_m, gridW, { longSide = REG_LONG_SIDE, waitMs = REG_TILE_WAIT_MS } = {}) {
+  const sc = Math.min(1, longSide / Math.max(cam.width, cam.height));
+  const rw = Math.round(cam.width * sc), rh = Math.round(cam.height * sc);
+  const rv = await ensureRenderViewer(rw, rh), v = rv.v;
+  const cw = v.canvas.width, ch = v.canvas.height;                // what the browser really gave us
+  const view = cesiumView(cam, cw, ch);
+  v.camera.frustum.fov = view.fov;
+  v.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(cam.lon, cam.lat, cam.elev_m + geoid_m),
+                     orientation: { heading: view.heading, pitch: view.pitch, roll: view.roll } });
+  const loaded = await settleTiles(rv, waitMs);
+  v.render();
+  const image = v.canvas.toDataURL("image/jpeg", 0.92);
+  const dw = gridW, dh = Math.max(8, Math.round(dw * ch / cw));
+  const depth = new Float32Array(dw * dh).fill(NaN);
+  const rcam = { ...cam, elev_m: cam.elev_m + geoid_m, width: cw, height: ch, f_px: cam.f_px * cw / cam.width };
+  const [, , fwd] = pinholeAxes(rcam), kx = M_PER_DEG_LAT * Math.cos(cam.lat * Math.PI / 180);
+  for (let j = 0; j < dh; j++) for (let i = 0; i < dw; i++) {
+    const c = v.scene.pickPosition(new Cesium.Cartesian2((i + .5) * cw / dw, (j + .5) * ch / dh));
+    if (!c) continue;
+    const g = Cesium.Cartographic.fromCartesian(c);
+    const z = ((Cesium.Math.toDegrees(g.longitude) - cam.lon) * kx) * fwd[0] +
+              ((Cesium.Math.toDegrees(g.latitude) - cam.lat) * M_PER_DEG_LAT) * fwd[1] + (g.height - rcam.elev_m) * fwd[2];
+    if (z > 0) depth[j * dw + i] = z;
+  }
+  return { image, depth: f32b64(depth), depth_w: dw, depth_h: dh, loaded };
+}
+const postJson = (url, body) => fetch(url, { method: "POST", body: JSON.stringify({ ...body, region: curRegion }) }).then(r => r.json());
+function showCam(q) {
+  camLayer.clearLayers();
+  L.circleMarker([q.lat, q.lon], { radius: 7, color: "#fff", fillColor: "#0a84ff", fillOpacity: 1 }).addTo(camLayer)
+    .bindTooltip("camera");
+  drawMapLines();
+}
+// ---------- start guesses: where we think the photo was taken (server candidates), toggled on the map ----------
+// st.guesses = { list, hints, geoid, pick }. A guess is applied as the current camera but never saved until the user solves / saves.
+const guessLayer = L.layerGroup().addTo(map);
+const GUESS_COLORS = ["#34c759", "#0a84ff", "#ff9f0a", "#bf5af2", "#ff453a", "#00c7be"];
+let guessSeq = 0, guessBusy = false;
+try { const v = localStorage.getItem("photoLabelGuess"); if (v === "0") $("guessChk").checked = false; } catch (_) { /* storage can be blocked */ }
+function clearGuesses() { guessSeq++; guessBusy = false; st.guesses = null; guessLayer.clearLayers(); }
+function wedgePts(q, len) {
+  const kx = 111320 * Math.cos(q.lat * Math.PI / 180), h = q.heading_deg, hf = (q.hfov_deg || 60) / 2, pts = [[q.lat, q.lon]];
+  for (let k = 0; k <= 8; k++) { const a = (h - hf + 2 * hf * k / 8) * Math.PI / 180;
+    pts.push([q.lat + len * Math.cos(a) / 111320, q.lon + len * Math.sin(a) / kx]); }
+  return pts;
+}
+const guessText = (c, i) => `#${i + 1} ${c.label || c.source} — heading ${c.heading_deg.toFixed(0)}°, pitch ${(c.pitch_deg ?? 0).toFixed(0)}°, elev ${(c.elev_m ?? 0).toFixed(0)} m, score ${(+c.score).toFixed(2)}`;
+function drawGuesses() {
+  guessLayer.clearLayers();
+  const g = st.guesses; if (!g || !$("guessChk").checked) return;
+  const icon = (html, sz) => L.divIcon({ className: "", html, iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2] });
+  const h = g.hints || {};
+  const tip = (m, t) => m.bindTooltip(t);
+  if (h.gps) tip(L.marker(h.gps, { icon: icon('<div style="font:16px/16px sans-serif;color:#ffd60a;text-shadow:0 0 3px #000">◆</div>', 16), interactive: true, keyboard: false }), "Photo GPS").addTo(guessLayer);
+  if (h.viewpoint) tip(L.marker([h.viewpoint.lat, h.viewpoint.lon], { icon: icon('<div style="font:18px/18px sans-serif;color:#ffd60a;text-shadow:0 0 3px #000">★</div>', 18), keyboard: false }), "Viewpoint: " + h.viewpoint.name).addTo(guessLayer);
+  if (h.subject) {
+    tip(L.marker([h.subject.lat, h.subject.lon], { icon: icon('<div style="font:18px/18px sans-serif;color:#ff453a;text-shadow:0 0 3px #000">◎</div>', 18), keyboard: false }), "Subject: " + h.subject.name).addTo(guessLayer);
+    if (h.viewpoint) L.polyline([[h.viewpoint.lat, h.viewpoint.lon], [h.subject.lat, h.subject.lon]], { color: "#ff453a", weight: 1.5, dashArray: "5 5", interactive: false }).addTo(guessLayer);
+  }
+  g.list.forEach((c, i) => {
+    const col = GUESS_COLORS[i % GUESS_COLORS.length], on = i === g.pick, t = guessText(c, i);
+    L.polygon(wedgePts(c, 1200), { color: col, weight: on ? 2 : 1, fillColor: col, fillOpacity: on ? .22 : .1, bubblingMouseEvents: false })
+      .on("click", () => applyGuess(i)).bindTooltip(t, { sticky: true }).addTo(guessLayer);
+    if (on) {
+      const m = L.marker([c.lat, c.lon], { draggable: true, zIndexOffset: 1000, keyboard: false, icon: icon(
+        `<div style="width:26px;height:26px;border-radius:50%;background:${col};border:3px solid #fff;box-shadow:0 0 4px #000;color:#fff;font:bold 13px/20px sans-serif;text-align:center">${i + 1}</div>`, 26) });
+      m.bindTooltip(t + " (drag to search from here)");
+      m.on("dragend", () => searchHere(m.getLatLng()));
+      m.addTo(guessLayer);
+    } else
+      L.circleMarker([c.lat, c.lon], { radius: 9, color: "#fff", weight: 2, fillColor: col, fillOpacity: 1, bubblingMouseEvents: false })
+        .on("click", () => applyGuess(i)).bindTooltip(t).addTo(guessLayer);
+  });
+}
+async function applyGuess(i, first) {
+  const g = st.guesses, ph = st.photo; if (!g || !g.list[i] || !ph) return;
+  const c = g.list[i]; g.pick = i;
+  camPose = { ...c }; st.geoid = g.geoid;
+  st.solve = { pose: c, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "guess" };
+  $("camViewBtn").disabled = false; showCam(c); drawGuesses();
+  if (first && !ces.on) map.setView([c.lat, c.lon], 15);
+  $("result").textContent = guessText(c, i);
+  renderRows(); draw(); dvRefresh(); await loadBuildings();
+  if (st.photo === ph && st.guesses === g && g.pick === i)
+    status(`Best guess: ${c.label || c.source} (score ${(+c.score).toFixed(2)}). Pick another on the map (Guesses).`);
+}
+async function fetchGuesses(body, onPhoto) {
+  const ph = st.photo, mine = ++guessSeq;
+  const r = await postJson("/api/register/candidates", { photo: ph.path, ...body });
+  if (mine !== guessSeq || st.photo !== ph) return null;          // photo / region changed, or a newer request started
+  if (!r.ok || !(r.candidates || []).length) { status("No start guess: " + (r.error || r.reason || "none found") + "."); return null; }
+  return r;
+}
+async function loadGuesses() {                  // photo has no saved camera: preload the best guess in the background
+  if (!st.photo) return;
+  status("Finding start guesses…");
+  try {
+    const r = await fetchGuesses({ top_k: 5 });
+    if (!r) return;
+    st.guesses = { list: r.candidates, hints: r.hints || {}, geoid: r.geoid_m, pick: 0 };
+    if (st.solve && st.solve.source !== "guess") { drawGuesses(); status("Start guesses ready (Guesses on the map)."); return; }  // user solved meanwhile
+    await applyGuess(0, true);
+  } catch (e) { status("Start guesses failed: " + e.message); }
+}
+async function searchHere(ll) {
+  const g = st.guesses; if (!g || !st.photo) return;
+  status("Searching from here…");
+  try {
+    const r = await fetchGuesses({ viewpoints: [[ll.lat, ll.lng]], only_viewpoints: true, top_k: 3 });
+    if (!r || st.guesses !== g) { drawGuesses(); return; }
+    g.list = r.candidates.map(c => ({ ...c, source: "here", label: c.label || "Searched here" })).concat(g.list);
+    g.geoid = r.geoid_m ?? g.geoid;
+    await applyGuess(0);
+  } catch (e) { status("Search failed: " + e.message); drawGuesses(); }
+}
+$("guessChk").onchange = () => { try { localStorage.setItem("photoLabelGuess", $("guessChk").checked ? "1" : "0"); } catch (_) {} drawGuesses(); };
+
+let autoBusy = false;
+const PANO_CAM_HEIGHT_M = 2.5;                 // Street View camera above the road, as server.py
+// Ellipsoidal ground height of the Google mesh at a point (render viewer's tileset), or null: the
+// lowest of the point and two rings (4 and 8 m) round it, so a tree or awning over the car does not count.
+async function meshGround(lat, lon) {
+  const rv = await ensureRenderViewer(REG_LONG_SIDE, REG_LONG_SIDE);
+  let done = false;
+  (function tick() { if (done) return; rv.v.render(); setTimeout(tick, 60); })();   // no render loop here: tiles load only on render()
+  const kx = M_PER_DEG_LAT * Math.cos(lat * Math.PI / 180), pts = [Cesium.Cartographic.fromDegrees(lon, lat)];
+  for (const r of [4, 8]) for (let a = 0; a < 360; a += 45)
+    pts.push(Cesium.Cartographic.fromDegrees(lon + r * Math.sin(a * Math.PI / 180) / kx, lat + r * Math.cos(a * Math.PI / 180) / M_PER_DEG_LAT));
+  try {
+    const got = await Promise.race([rv.v.scene.sampleHeightMostDetailed(pts),
+                                    new Promise(res => setTimeout(() => res([]), 20000))]);
+    const hs = got.map(c => c && c.height).filter(Number.isFinite);
+    return hs.length ? Math.min(...hs) : null;
+  } catch (_) { return null; } finally { done = true; }
+}
+const isPanoStart = c => c.source === "pano" || c.source === "pano_anchor";   // known pose: no heading sweep
+async function autoRegister() {
+  if (autoBusy || !st.photo) return;
+  if (tiles3d === false) { status("Auto register needs the Google 3D tiles (no API key on the server)."); return; }
+  autoBusy = true; $("autoBtn").disabled = true;
+  const base = { width: st.photo.w, height: st.photo.h };
+  try {
+    let starts;
+    if (camPose && camPose.elev_m != null) starts = [{ cam: { ...camPose, ...base }, geoid: st.geoid ?? 50,
+      tag: st.solve && st.solve.source === "guess" && st.guesses ? `guess #${st.guesses.pick + 1}` : "current camera" }];
+    else {
+      status("Searching for a start pose from the skyline...");
+      const r = await postJson("/api/register/candidates", { photo: st.photo.path, top_k: 3 });
+      if (!r.ok || !r.candidates.length) { status("No start pose: " + (r.error || r.reason || "none found") + ". Solve with clicked pairs instead."); return; }
+      starts = r.candidates.slice(0, 3).map((c, i) => ({ cam: { ...c, ...base }, geoid: r.geoid_m, tag: `candidate ${i + 1} (${c.source})` }));
+    }
+    const step = async (cam, geoid, rd) => postJson("/api/register/step", { photo: st.photo.path, camera: cam, geoid_m: geoid,
+      user: st.pairs.filter(p => p.h != null).map(p => ({ x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_orth: p.h - geoid })),
+      render: rd.image, depth: rd.depth, depth_w: rd.depth_w, depth_h: rd.depth_h });
+    let best = null;
+    const iterate = async (cam, geoid, label) => {
+      let prev = -1, regeoid = true;
+      for (let it = 1; it <= 3; it++) {
+        const tag = `${label}, iteration ${it}/3`;
+        status(`Auto register: rendering ${tag}...`);
+        const rd = await renderAt(cam, geoid);
+        status(`Auto register: matching ${tag}${rd.loaded ? "" : " (tiles still loading)"}...`);
+        const r = await step(cam, geoid, rd);
+        if (!r.ok && regeoid && r.geoid_m != null && Math.abs(r.geoid_m - geoid) > 3) {
+          // The start geoid was off (a region far from Granada's 50 m), so the render stood too high or
+          // low to match. The server measured it from the render's depth: render again once with it.
+          regeoid = false; geoid = r.geoid_m; it--; continue;
+        }
+        if (!r.ok) { status(`Auto register: ${tag}: ${r.reason || r.error}`); break; }
+        status(`Auto register: ${tag}: ${r.n_inliers} inliers of ${r.n_matches}, median ${r.median_px.toFixed(1)} px, geoid ${r.geoid_m.toFixed(1)} m`);
+        if (!best || r.n_inliers > best.r.n_inliers) best = { r, tag };
+        cam = { ...r.camera, ...base }; geoid = r.geoid_m;
+        if (r.n_inliers <= prev * 1.05) break;                   // no longer improving
+        prev = r.n_inliers;
+      }
+    };
+    for (const s of starts) {
+      // a pano / pano_anchor start with no fitted elevation: DEM height can be a hill or a roof next to the car, stand on Google's ground
+      // (a pose with elev_fitted, e.g. a drone sphere, keeps its elevation)
+      if (isPanoStart(s.cam) && !s.cam.elev_fitted) {
+        const g = await meshGround(s.cam.lat, s.cam.lon);
+        if (g != null) s.cam = { ...s.cam, elev_m: g - s.geoid + PANO_CAM_HEIGHT_M };
+      }
+      await iterate(s.cam, s.geoid, s.tag);
+    }
+    // The guessed heading or FOV can be far off (a skyline search lines a sea horizon up anywhere):
+    // look around from the first start's position, then iterate from the direction that matched best.
+    const s0 = starts[0];
+    if (!isPanoStart(s0.cam) && (!best || best.r.n_inliers < SWEEP_IF_BELOW)) {
+      const sw = await sweepHeadings(s0.cam, s0.geoid, step);
+      if (sw) await iterate(sw.cam, sw.geoid, `sweep (heading ${sw.cam.heading_deg.toFixed(0)}, hfov ${sw.hfov})`);
+    }
+    if (!best) { if (!/^Auto register: /.test($("status").textContent)) status("Auto register found no usable match."); return; }
+    const { r } = best, q = r.camera;
+    st.geoid = r.geoid_m;
+    st.auto = r.pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h }));
+    camPose = q; $("camViewBtn").disabled = false;
+    st.solve = { pose: q, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "auto" };
+    showCam(q);
+    $("result").textContent = `auto register (${best.tag}): ${r.n_inliers} inliers of ${r.n_matches} matches, median ${r.median_px.toFixed(1)} px, ` +
+      `geoid ${r.geoid_m.toFixed(1)} m, heading ${q.heading_deg.toFixed(1)}, pitch ${q.pitch_deg.toFixed(1)}, roll ${q.roll_deg.toFixed(1)}, ` +
+      `hfov ${q.hfov_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m`;
+    renderRows(); draw(); dvRefresh(); await loadBuildings();
+    await saveLabels(true);
+    status(`Auto register done: ${st.auto.length} auto pairs (cyan), camera set and saved.`);
+  } catch (e) {
+    status("Auto register failed: " + e.message);
+  } finally {
+    autoBusy = false; $("autoBtn").disabled = false;   // the viewer (and its loaded tiles) stays for the next photo
+  }
+}
+// Renders SWEEP_HEADINGS directions at SWEEP_HFOV from cam0's position, then the best one at each of
+// SWEEP_FOVS. Score: inliers when the step solved, else matches with a depth. Returns the best
+// {cam, geoid, hfov} (the solved camera when that step solved), or null when nothing matched.
+async function sweepHeadings(cam0, geoid, step) {
+  const withView = (heading, hfov) => ({ ...cam0, heading_deg: ((heading % 360) + 360) % 360, pitch_deg: Math.min(cam0.pitch_deg || 0, 0),
+    f_px: cam0.width / 2 / Math.tan(hfov * Math.PI / 360), hfov_deg: hfov });
+  const score = r => r.ok ? 1000 + r.n_inliers : (r.n_lifted || 0);
+  let top = null;
+  const tryCam = async (cam, hfov, what) => {
+    status(`Auto register: sweep, ${what}...`);
+    const rd = await renderAt(cam, geoid, REG_GRID_W, { longSide: SWEEP_LONG_SIDE, waitMs: SWEEP_WAIT_MS });
+    const r = await step(cam, geoid, rd), sc = score(r);
+    if (!top || sc > top.sc) top = { sc, hfov, cam: r.ok ? { ...r.camera, width: cam0.width, height: cam0.height } : cam, geoid: r.ok ? r.geoid_m : geoid, swept: cam };
+  };
+  for (let k = 0; k < SWEEP_HEADINGS; k++) {
+    const h = cam0.heading_deg + k * 360 / SWEEP_HEADINGS;
+    await tryCam(withView(h, SWEEP_HFOV), SWEEP_HFOV, `heading ${(((h % 360) + 360) % 360).toFixed(0)} (${k + 1}/${SWEEP_HEADINGS})`);
+  }
+  if (!top || top.sc < MIN_SWEEP_SCORE) return null;
+  const h = top.swept.heading_deg;
+  for (const f of SWEEP_FOVS) await tryCam(withView(h, f), f, `heading ${h.toFixed(0)}, hfov ${f}`);
+  return top.sc < MIN_SWEEP_SCORE ? null : top;
+}
+$("autoBtn").onclick = autoRegister;
+
+// ---------- depth view ----------
+// Photo depth (server, Depth Anything: relative inverse depth), Google depth (offscreen render at the solved camera,
+// forward-z metres) and the server's per-photo fit: metres = a / (disp - b). All grids cover the whole photo.
+const unb64f32 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Float32Array(u.buffer); };
+const unb64u8 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; };
+const geoidFor = () => st.geoid ?? mdl.geoid ?? 50;          // as autoRegister: its last geoid, else the model overlay's, else 50
+const gKey = () => st.photo && camPose ? `${curRegion}|${st.photo.path}|${geoidFor()}|${JSON.stringify(camPose)}` : null;
+const curG = () => { const k = gKey(); return k ? dv.gc.get(k) || null : null; };
+const sampleG = (a, w, h, u, v) => a[Math.min(h - 1, Math.max(0, Math.floor(v * h))) * w + Math.min(w - 1, Math.max(0, Math.floor(u * w)))];
+function photoM(u, v) {      // photo depth in metres at normalised photo coords; NaN without a fit
+  const g = curG(), p = dv.p;
+  if (!g || !g.fit || g.fit.fail || !p || p.state !== "ready") return NaN;
+  const d = sampleG(p.disp, p.w, p.h, u, v);
+  return d > g.fit.b ? g.fit.a / (d - g.fit.b) : NaN;
+}
+function googleM(u, v) { const g = curG(); return g ? sampleG(g.depth, g.w, g.h, u, v) : NaN; }
+function gridCanvas(w, h, fn) {   // fn(i) -> [r,g,b] or null (transparent)
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"), im = g.createImageData(w, h), d = im.data;
+  for (let i = 0; i < w * h; i++) { const q = fn(i); if (q) { d[4 * i] = q[0]; d[4 * i + 1] = q[1]; d[4 * i + 2] = q[2]; d[4 * i + 3] = 255; } }
+  g.putImageData(im, 0, 0); return c;
+}
+function dvNeedCam() {
+  if (tiles3d === false) return "Google 3D tiles are not available (no API key on the server)";
+  if (!camPose || camPose.elev_m == null) return "Solve the camera first";
+  return null;
+}
+function dvNeedPhoto() {
+  const p = dv.p;
+  if (!p) return "Loading photo depth...";
+  if (p.state === "missing") return "No depth computed for this photo yet";
+  if (p.state === "running") return "Computing photo depth on the server...";
+  if (p.state === "error") return "Photo depth failed: " + (p.error || "unknown error");
+  return null;
+}
+const fitLabel = f => `fit n ${f.n}, median error ${((Math.exp(f.err) - 1) * 100).toFixed(0)}%`;
+// Layer for the current tab, cached until a grid, fit, tab or camera changes: { canvas|null, msg, kind: m|rel|diff, corner }
+function dvLayer() {
+  const g = curG(), key = `${dv.tab}|${dv.ver}|${gKey()}|${dv.src}|${dv.view}`;
+  if (dv.layer && dv.layer.key === key) return dv.layer;
+  const L = { key, canvas: null, msg: "", kind: null, corner: "" };
+  const gwait = dv.gerr ? "Google depth failed: " + dv.gerr : "Rendering Google depth...";
+  if (dv.tab === "gd") {
+    L.msg = dvNeedCam() || (g ? "" : gwait);
+    if (g) { L.kind = "m"; L.canvas = gridCanvas(g.w, g.h, i => g.depth[i] > 0 ? distRgb(g.depth[i]) : null); }
+  } else if (dv.tab === "pd") {
+    L.msg = dvNeedPhoto() || "";
+    if (!L.msg) {
+      const p = dv.p;
+      if (g && g.fit && !g.fit.fail) {
+        const { a, b } = g.fit; L.kind = "m"; L.corner = fitLabel(g.fit);
+        L.canvas = gridCanvas(p.w, p.h, i => p.disp[i] > b ? distRgb(a / (p.disp[i] - b)) : null);
+      } else {
+        L.kind = "rel"; const span = p.hi - p.lo || 1;
+        L.canvas = gridCanvas(p.w, p.h, i => Number.isFinite(p.disp[i]) ? TURBO[Math.round(255 * Math.min(1, Math.max(0, (p.disp[i] - p.lo) / span)))] : null);
+        L.corner = g && g.fit ? "Fit failed: " + g.fit.fail + " (relative depth)" : "Relative depth (bigger = nearer); metres need the Google depth";
+      }
+    }
+  } else if (dv.tab === "or") {
+    orFill(L, g, gwait);
+  } else {
+    L.msg = dvNeedPhoto() || dvNeedCam() || (!g ? gwait : !g.fit ? "Fitting photo depth to Google..." : g.fit.fail ? "Fit failed: " + g.fit.fail : "");
+    if (!L.msg) {
+      L.kind = "diff"; L.corner = fitLabel(g.fit);
+      L.canvas = gridCanvas(g.w, g.h, i => {
+        const gm = g.depth[i]; if (!(gm > 0)) return null;
+        const pm = photoM(((i % g.w) + .5) / g.w, (Math.floor(i / g.w) + .5) / g.h);
+        return pm > 0 ? divRgb(pm / gm - 1) : null;
+      });
+    }
+  }
+  return dv.layer = L;
+}
+function drawBase() {        // the photo, or the depth layer over dark grey, in the photo's place
+  const v = st.view, w = st.img.width * v.s, h = st.img.height * v.s;
+  if (dv.tab === "photo") { dvChrome(null); ctx.drawImage(st.img, v.ox, v.oy, w, h); return; }
+  const L = dvLayer(); dvChrome(L);
+  if (dv.tab === "or") {       // orientation: a translucent layer over the photo
+    ctx.drawImage(st.img, v.ox, v.oy, w, h);
+    if (L.canvas) { ctx.save(); ctx.globalAlpha = 0.6; ctx.imageSmoothingEnabled = false; ctx.drawImage(L.canvas, v.ox, v.oy, w, h); ctx.restore(); }
+    else if (L.msg) { ctx.save(); ctx.font = "14px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.shadowColor = "#000"; ctx.shadowBlur = 6; ctx.fillStyle = "#fff"; ctx.fillText(L.msg, v.ox + w / 2, v.oy + h / 2); ctx.restore(); }
+    return;
+  }
+  ctx.fillStyle = "#2a2a2a"; ctx.fillRect(v.ox, v.oy, w, h);
+  if (L.canvas) { ctx.imageSmoothingEnabled = true; ctx.drawImage(L.canvas, v.ox, v.oy, w, h); }
+  else if (L.msg) { ctx.fillStyle = "#ddd"; ctx.font = "14px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(L.msg, v.ox + w / 2, v.oy + h / 2); }
+}
+const LEG = { m: ["30 m", "300 m", "3 km"], rel: ["near", "", "far"], diff: ["-50%", "0", "+50%"], pitch: ["0\u00b0", "30\u00b0", "60\u00b0"] };
+function dvChrome(L) {       // legend, corner label and Compute button follow the current layer
+  const kind = L && L.kind, corner = L ? L.corner : "", comp = dv.tab !== "photo" && dv.tab !== "gd" && !!dv.p && dv.p.state === "missing";
+  const sw = L && L.sw || "", sig = `${kind}|${corner}|${comp}|${sw}`; if (sig === dv.chrome) return; dv.chrome = sig;
+  $("oCtl").style.display = dv.tab === "or" ? "flex" : "none";
+  $("oLeg").style.display = sw ? "block" : "none"; if (sw) $("oLeg").innerHTML = sw;
+  $("dLeg").style.display = kind ? "block" : "none";
+  if (kind) {
+    const g = $("dLeg").querySelector("canvas").getContext("2d"), im = g.createImageData(160, 1);
+    for (let x = 0; x < 160; x++) {
+      const f = x / 159, q = kind === "diff" ? divRgb((f * 2 - 1) * D_DIFF) : kind === "pitch" ? TURBO[Math.round(f * 255)] : TURBO[Math.round((1 - f) * 255)];
+      im.data.set([q[0], q[1], q[2], 255], 4 * x);
+    }
+    for (let y = 0; y < 10; y++) g.putImageData(im, 0, y);
+    $("dLeg").querySelectorAll("span").forEach((s, i) => { s.textContent = LEG[kind][i]; });
+  }
+  $("dCorner").style.display = corner ? "block" : "none"; $("dCorner").textContent = corner;
+  $("dCompute").style.display = comp ? "block" : "none";
+}
+function setTab(t) {
+  if (!DV_TABS.includes(t)) t = "photo";
+  dv.tab = t; dv.gerr = null; dv.layer = null; dv.chrome = "";
+  try { localStorage.setItem("photoLabelTab", t); } catch (_) { /* storage can be blocked */ }
+  document.querySelectorAll("#dTabs button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  draw(); dvRefresh();
+}
+$("dTabs").onclick = e => { if (e.target.dataset.t) setTab(e.target.dataset.t); };
+document.querySelectorAll("#dTabs button").forEach(b => b.classList.toggle("on", b.dataset.t === dv.tab));
+function dvReset(all) {      // photo switched, or the region cleared (all): drop the photo depth, and the Google cache on a region change
+  dv.seq++; dv.p = null; dv.loading = false; clearTimeout(dv.timer); dv.layer = null; dv.chrome = ""; dv.ver++; dv.gerr = null;
+  if (all) dv.gc.clear();
+}
+function dvRefresh() {       // fetch / render whatever the current tab needs
+  if (!st.photo || dv.tab === "photo") return;
+  if (dv.tab !== "gd") dvLoadDepth();
+  if (dv.tab !== "pd") dvGoogle();
+  if (dv.tab === "or") dvOrient();
+}
+async function dvLoadDepth() {
+  const ph = st.photo, seq = dv.seq;
+  if (!ph || dv.loading || (dv.p && dv.p.state === "ready")) return;
+  dv.loading = true;
+  try {
+    const r = await fetch(api("/api/depth?photo=" + encodeURIComponent(ph.path))).then(r => r.json());
+    if (seq !== dv.seq) return;
+    if (!r.ok) dv.p = { path: ph.path, state: "error", error: r.error };
+    else if (r.state === "ready") {
+      const disp = unb64f32(r.disp), s = [];
+      for (let i = 0; i < disp.length; i += 7) if (Number.isFinite(disp[i])) s.push(disp[i]);
+      s.sort((a, b) => a - b);
+      dv.p = { path: ph.path, state: "ready", w: r.w, h: r.h, disp, lo: s[Math.floor(.02 * s.length)] ?? 0, hi: s[Math.floor(.98 * s.length)] ?? 1 };
+      for (const g of dv.gc.values()) g.fit = null;           // a fit belongs to the grid it was made against
+    } else dv.p = { path: ph.path, state: r.state, error: r.error };
+  } catch (e) { if (seq === dv.seq) dv.p = { path: ph.path, state: "error", error: e.message }; }
+  if (seq !== dv.seq) return;
+  dv.loading = false; dv.ver++; draw();
+  if (dv.p.state === "running") { status("Photo depth: computing on the server..."); dv.timer = setTimeout(dvLoadDepth, 3000); }
+  else if (dv.p.state === "ready") dvFit();
+  else dvOrient();            // no photo depth available: orientation can go on with Google alone
+}
+$("dCompute").onclick = async () => {
+  const ph = st.photo, seq = dv.seq; if (!ph) return;
+  $("dCompute").disabled = true;
+  try {
+    const r = await postJson("/api/depth/compute", { photo: ph.path });
+    if (seq !== dv.seq) return;
+    dv.p = r.ok ? { path: ph.path, state: r.state } : { path: ph.path, state: "error", error: r.error };
+    dv.ver++; draw();
+    if (r.ok) { status("Photo depth: computing on the server..."); dv.timer = setTimeout(dvLoadDepth, r.state === "ready" ? 0 : 3000); }
+  } catch (e) { status("Compute depth failed: " + e.message); }
+  finally { $("dCompute").disabled = false; }
+};
+async function dvGoogle() {
+  const ph = st.photo, seq = dv.seq;
+  if (!ph || dvNeedCam() || dv.gbusy || autoBusy || curG() || dv.gerr) return;
+  const key = gKey(); dv.gbusy = true; dv.layer = null;
+  status("Google depth: rendering at the solved camera (waiting for tiles)...");
+  let ok = false;
+  try {
+    const rd = await renderAt({ ...camPose, width: ph.w, height: ph.h }, geoidFor(), GD_GRID_W);
+    if (seq === dv.seq) {
+      dv.gc.set(key, { depth: unb64f32(rd.depth), b64: rd.depth, w: rd.depth_w, h: rd.depth_h, fit: null });
+      if (dv.gc.size > 4) dv.gc.delete(dv.gc.keys().next().value);
+      ok = true; status("Google depth ready" + (rd.loaded ? "." : " (tiles were still loading)."));
+    }
+  } catch (e) { dv.gerr = e.message || String(e); status("Google depth failed: " + dv.gerr); }
+  finally { dv.gbusy = false; }      // the render viewer stays: its tiles serve the next render
+  dv.layer = null; dv.ver++; draw();
+  if (seq !== dv.seq || (ok && gKey() !== key)) dvRefresh();   // the photo or camera changed while rendering
+  else dvFit();
+}
+async function dvFit() {
+  const g = curG(), p = dv.p, seq = dv.seq;
+  if (!g || !p || p.state !== "ready" || g.fit || g.fitting) return;
+  g.fitting = true; status("Fitting photo depth to Google depth...");
+  try {
+    const r = await postJson("/api/depth/fit", { photo: p.path, depth: g.b64, depth_w: g.w, depth_h: g.h });
+    if (seq !== dv.seq) return;
+    g.fit = r.ok ? { a: r.a, b: r.b, n: r.n, err: r.err_median_log } : { fail: r.reason || r.error || "fit failed" };
+    status(r.ok ? "Depth " + fitLabel(g.fit) + "." : "Depth fit failed: " + g.fit.fail);
+  } catch (e) { g.fit = { fail: e.message }; status("Depth fit failed: " + e.message); }
+  finally { g.fitting = false; }
+  if (seq === dv.seq) { dv.layer = null; dv.ver++; draw(); dvOrient(); }
+}
+cv.addEventListener("mousemove", e => {      // hover readout in the depth tabs
+  if (dv.tab === "photo" || drag || !st.img) return;
+  if (dv.tab === "or") return orHover(e);
+  const r = cv.getBoundingClientRect(), [x, y] = toImg(e.clientX - r.left, e.clientY - r.top);
+  if (x < 0 || y < 0 || x >= st.img.width || y >= st.img.height) return;
+  const u = x / st.img.width, v = y / st.img.height, pm = photoM(u, v), gm = googleM(u, v), f = m => m > 0 ? m.toFixed(0) + " m" : "-";
+  status(`photo ${f(pm)}, Google ${f(gm)}, difference ${pm > 0 && gm > 0 ? ((pm / gm - 1) * 100).toFixed(0) + "%" : "-"}`);
+});
+
+// ---------- orientation tab: surfaces, wall facing, roof pitch from depth (server: /api/depth/orient) ----------
+// Response per source (photo | google): { w, h, cls u8 (0 none, 1 ground, 2 flat roof, 3 pitched roof, 4 wall), pitch f32 deg, az f32 compass deg, buildings }.
+const OR_CLS = ["none", "ground", "flat roof", "pitched roof", "wall"];
+const OR_SURF = [null, [150, 130, 110], [10, 132, 255], [255, 149, 0], [160, 230, 150]];
+const OR_PITCH_MAX = 60;
+const hslRgb = (h, s, l) => { const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return [Math.round(255 * f(0)), Math.round(255 * f(8)), Math.round(255 * f(4))]; };
+const OR_HUE = Array.from({ length: 360 }, (_, i) => hslRgb(i, .85, .55));
+const OR_SW_SURF = '<span class="sw" style="background:rgb(150,130,110)"></span>ground<span class="sw" style="background:rgb(10,132,255)"></span>flat roof<span class="sw" style="background:rgb(255,149,0)"></span>pitched roof<span class="sw" style="background:rgb(160,230,150)"></span>wall';
+const OR_SW_WALL = '<div class="ring"><i></i><b style="left:23px;top:-3px">N</b><b style="right:-1px;top:19px">E</b><b style="left:23px;bottom:-3px">S</b><b style="left:-1px;top:19px">W</b></div>';
+const compassWord = a => ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round((((a % 360) + 360) % 360) / 45) % 8];
+const compassTxt = a => `${compassWord(a)} ${Math.round(((a % 360) + 360) % 360) % 360}°`;
+function orSource(R) {
+  if (!R) return null;
+  const o = dv.src === "photo" ? "google" : "photo";
+  return R[dv.src] ? { s: R[dv.src], name: dv.src } : R[o] ? { s: R[o], name: o } : null;
+}
+const orDecode = s => s._d || (s._d = { cls: unb64u8(s.cls), pitch: unb64f32(s.pitch), az: unb64f32(s.az) });
+function orRgb(d, view) {
+  if (view === "wall") return i => { const c = d.cls[i], a = d.az[i]; return (c === 4 || c === 3) && Number.isFinite(a) ? OR_HUE[Math.round(((a % 360) + 360) % 360) % 360] : null; };
+  if (view === "pitch") return i => { const c = d.cls[i], p = d.pitch[i]; return (c === 2 || c === 3) && Number.isFinite(p) ? TURBO[Math.round(255 * Math.min(1, Math.max(0, p / OR_PITCH_MAX)))] : null; };
+  return i => OR_SURF[d.cls[i]] || null;
+}
+const orReady = g => { const p = dv.p; return !!p && p.state !== "running" && !(p.state === "ready" && !g.fit); };   // fit settled, or no photo depth to wait for
+const orKey = g => { const f = g.fit && !g.fit.fail ? g.fit : null; return `${gKey()}|${f ? f.a + "," + f.b : "nofit"}|${st.bld.length}`; };
+function orFill(L, g, gwait) {
+  L.msg = dvNeedCam() || (!g ? gwait : "");
+  if (!L.msg && !orReady(g)) L.msg = !dv.p ? "Loading photo depth..." : dv.p.state === "running" ? "Computing photo depth on the server..." : "Fitting photo depth to Google...";
+  if (!L.msg) { const o = g.orient; if (!o || o.state === "busy") L.msg = "Computing orientation..."; else if (o.state === "err") L.msg = "Orientation failed: " + o.error; }
+  if (L.msg) return;
+  const R = g.orient.r, sel = orSource(R);
+  if (!sel) { L.msg = "No orientation result for this photo"; return; }
+  const d = orDecode(sel.s);
+  L.canvas = gridCanvas(sel.s.w, sel.s.h, orRgb(d, dv.view));
+  if (dv.view === "pitch") L.kind = "pitch"; else L.sw = dv.view === "wall" ? OR_SW_WALL : OR_SW_SURF;
+  const ag = R.agree != null ? ` · agree ${Math.round(R.agree <= 1 ? R.agree * 100 : R.agree)}%` : "";
+  const nm = n => n === "photo" ? "Photo" : "Google";
+  L.corner = (sel.name === dv.src ? nm(sel.name) + " depth" : `${nm(sel.name)} depth (${nm(dv.src)} unavailable)`) + ag;
+}
+async function dvOrient() {
+  if (dv.tab !== "or" || !st.photo) return;
+  const g = curG(); if (!g || !orReady(g) || dvNeedCam()) return;
+  const key = orKey(g); if (g.orient && g.orient.key === key) return;
+  const o = g.orient = { key, state: "busy" }, seq = dv.seq, ph = st.photo, f = g.fit && !g.fit.fail ? g.fit : null;
+  status("Orientation: computing...");
+  const body = { photo: ph.path, camera: { ...camPose, width: ph.w, height: ph.h }, depth: g.b64, depth_w: g.w, depth_h: g.h, grid_w: 320,
+    buildings: st.bld.map(b => ({ id: b.id, rings: b.contours, dist: b.dist_m })) };
+  if (f) { body.a = f.a; body.b = f.b; }
+  try {
+    const r = await postJson("/api/depth/orient", body);
+    if (r.ok) { o.state = "ok"; o.r = r; status("Orientation ready."); }
+    else { o.state = "err"; o.error = r.reason || r.error || "failed"; status("Orientation failed: " + o.error); }
+  } catch (e) { o.state = "err"; o.error = e.message || String(e); status("Orientation failed: " + o.error); }
+  if (seq !== dv.seq) { if (g.orient === o) delete g.orient; return; }
+  dv.layer = null; dv.ver++; draw();
+}
+function orMarks() {
+  document.querySelectorAll("#oSrc button").forEach(b => b.classList.toggle("on", b.dataset.v === dv.src));
+  document.querySelectorAll("#oView button").forEach(b => b.classList.toggle("on", b.dataset.v === dv.view));
+}
+function orSet(key, val) {
+  dv[key] = val; dv.layer = null; dv.chrome = "";
+  try { localStorage.setItem(key === "src" ? "photoLabelOrSrc" : "photoLabelOrView", val); } catch (_) { /* storage can be blocked */ }
+  orMarks(); draw();
+}
+$("oSrc").onclick = e => { if (e.target.dataset.v) orSet("src", e.target.dataset.v); };
+$("oView").onclick = e => { if (e.target.dataset.v) orSet("view", e.target.dataset.v); };
+orMarks();
+function orHover(e) {
+  if (drag || !st.img) return;
+  const r = cv.getBoundingClientRect(), [x, y] = toImg(e.clientX - r.left, e.clientY - r.top);
+  if (x < 0 || y < 0 || x >= st.img.width || y >= st.img.height) return;
+  const g = curG(), o = g && g.orient; if (!o || o.state !== "ok") return;
+  const sel = orSource(o.r); if (!sel) return;
+  const s = sel.s, d = orDecode(s), i = Math.min(s.h - 1, Math.floor(y / st.img.height * s.h)) * s.w + Math.min(s.w - 1, Math.floor(x / st.img.width * s.w));
+  const c = d.cls[i], pt = d.pitch[i], az = d.az[i];
+  let t = OR_CLS[c] || "none";
+  if (Number.isFinite(pt)) t += `, pitch ${Math.round(pt)}°`;
+  if (Number.isFinite(az)) t += `, facing ${compassTxt(az)}`;
+  const b = bldAt(x, y), sm = b && s.buildings && s.buildings[b.id];
+  if (sm) {
+    const walls = [...new Set((sm.wall_az || []).map(compassWord))].join("/");
+    const roof = sm.roof === "pitched" ? `pitched${sm.pitch_deg != null ? " " + Math.round(sm.pitch_deg) + "°" : ""}` : sm.roof;
+    t += `; building ${b.id}: ${roof}${walls ? ", walls " + walls : ""} (${sel.name})`;
+  }
+  status(t);
+}
+
+async function loadPhoto(path) {
+  st.photo = st.photos.find(p => p.path === path);
+  syncFlagBtn();
+  for (const n of [...st.mapMarkers.keys(), ...ces.markers.keys()]) dropMarker(n);
+  st.pairs = []; st.auto = []; st.pending = null; st.sel = null; st.nextN = 1; st.geoid = null; invalidate(); dvReset(); clearGuesses();
+  const seq = regionSeq, ph = st.photo;
+  const img = new Image();
+  await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = api("/photo/" + path.split("/").map(encodeURIComponent).join("/")); });
+  const doc = await fetch(api("/api/labels?photo=" + encodeURIComponent(path))).then(r => r.json());
+  if (seq !== regionSeq || st.photo !== ph) return;       // switched region or photo while loading
+  st.img = img;
+  for (const l of doc.labels || []) {
+    if (l.lat == null || l.x == null) continue;
+    if (l.auto) { st.auto.push({ n: "auto" + (st.auto.length + 1), label: l.label, x: l.x, y: l.y, lat: l.lat, lon: l.lon, h: l.h_ellipsoid_m ?? null }); continue; }
+    const p = { n: st.nextN++, label: l.label, x: l.x, y: l.y, lat: l.lat, lon: l.lon, h: l.h_ellipsoid_m ?? null };
+    st.pairs.push(p); setMapMarker(p);
+  }
+  invalidate();
+  const q = doc.camera;                    // a saved camera: buildings reappear without solving again
+  if (q && q.lat != null) {
+    st.solve = { pose: q, ticks: [], predicted_x: [], residuals_px: [], restored: true, source: doc.camera_source || "solve" };
+    camPose = q; $("camViewBtn").disabled = false; showCam(q);
+    if (!ces.on) map.setView([q.lat, q.lon], 16); else centre3d(true);
+    loadBuildings();
+  }
+  renderRows(); resize(); fit(); dvRefresh();
+  status(`${st.pairs.length} saved pairs loaded` + (st.auto.length ? `, ${st.auto.length} auto pairs` : "") + (q ? ", saved camera restored." : "."));
+  if (!(q && q.lat != null)) loadGuesses();
+}
+$("photoSel").onchange = e => loadPhoto(e.target.value);
+// Flag the current photo as bad: the server keeps the flag and leaves it out of /api/photos;
+// here it leaves the list and the next photo opens. The status line offers Undo.
+async function flagPhoto(path, bad) {
+  let r = null;
+  try { r = await postJson("/api/photo/flag", { photo: path, bad }); } catch (_) {}
+  if (!r || !r.ok) { status("Could not flag: " + ((r && (r.reason || r.error)) || "server error")); return false; }
+  return true;
+}
+// "Show flagged" lists flagged photos too (marked, flagBtn turns into Unflag) instead of hiding them.
+const showFlagged = () => $("flagChk").checked;
+const photoOpt = p => `<option value="${esc(p.path)}">${p.bad ? "⚑ flagged · " : ""}${esc(p.path)} (${p.w}x${p.h})</option>`;
+function fillPhotoSel() {
+  // seed frames (seeds/seed_N/...) get one optgroup per seed folder; other photos stay flat
+  const html = [], grp = p => p.path.startsWith("seeds/") ? p.path.slice(0, p.path.lastIndexOf("/")) : "";
+  let cur = "";
+  for (const p of st.photos) {
+    const g = grp(p);
+    if (g !== cur) { if (cur) html.push("</optgroup>"); if (g) html.push(`<optgroup label="${esc(g)}">`); cur = g; }
+    html.push(photoOpt(p));
+  }
+  if (cur) html.push("</optgroup>");
+  $("photoSel").innerHTML = html.join("");
+  if (st.photo && st.photos.includes(st.photo)) $("photoSel").value = st.photo.path;
+}
+function syncFlagBtn() {
+  const bad = !!(st.photo && st.photo.bad);
+  $("flagBtn").textContent = bad ? "Unflag" : "Flag bad";
+}
+async function loadPhotoList(seq) {
+  const list = await fetch(api("/api/photos" + (showFlagged() ? "?all=1" : ""))).then(r => r.json());
+  if (seq !== regionSeq) return null;
+  st.photos = list;
+  return list;
+}
+try { if (localStorage.getItem("photoLabelFlagged") === "1") $("flagChk").checked = true; } catch (_) { /* storage can be blocked */ }
+$("flagChk").onchange = async () => {
+  try { localStorage.setItem("photoLabelFlagged", showFlagged() ? "1" : "0"); } catch (_) {}
+  const cur = st.photo && st.photo.path, list = await loadPhotoList(regionSeq);
+  if (!list) return;
+  st.photo = list.find(p => p.path === cur) || null;
+  fillPhotoSel();
+  if (!st.photo && list.length) { $("photoSel").value = list[0].path; loadPhoto(list[0].path); } else syncFlagBtn();
+};
+$("flagBtn").onclick = async () => {
+  if (!st.photo) return;
+  const item = st.photos.find(p => p.path === st.photo.path), at = st.photos.indexOf(item);
+  if (item && showFlagged()) {                      // flagged photos stay listed: just toggle the mark
+    if (!(await flagPhoto(item.path, !item.bad))) return;
+    if (item.bad) delete item.bad; else item.bad = true;
+    fillPhotoSel(); syncFlagBtn();
+    status((item.bad ? "Flagged " : "Unflagged ") + item.path + ".");
+    return;
+  }
+  if (!item || !(await flagPhoto(item.path, true))) return;
+  st.photos.splice(at, 1);
+  $("photoSel").querySelector(`option[value="${CSS.escape(item.path)}"]`)?.remove();
+  const next = st.photos[Math.min(at, st.photos.length - 1)];
+  if (next) { $("photoSel").value = next.path; await loadPhoto(next.path); } else status("No photos left.");
+  $("status").innerHTML = "";
+  $("status").append("Flagged " + item.path + " as bad. ");
+  const undo = document.createElement("a"); undo.href = "#"; undo.textContent = "Undo";
+  undo.onclick = async e => {
+    e.preventDefault();
+    if (!(await flagPhoto(item.path, false))) return;
+    st.photos.splice(at, 0, item);
+    const o = new Option(`${item.path} (${item.w}x${item.h})`, item.path);
+    const ref = $("photoSel").options[at];
+    (ref ? ref.parentNode : $("photoSel")).insertBefore(o, ref || null);
+    $("photoSel").value = item.path; loadPhoto(item.path);
+  };
+  $("status").append(undo);
+};
+
+// ---------- regions ----------
+// Everything region-specific is dropped and reloaded: photos, footprints, view, the open photo and its
+// pairs, any loaded model. regionSeq lets a slow response from the region left behind be ignored.
+function clearRegion() {
+  for (const n of [...st.mapMarkers.keys(), ...ces.markers.keys()]) dropMarker(n);
+  st.pairs = []; st.auto = []; st.pending = null; st.sel = null; st.nextN = 1;
+  st.photo = null; st.img = null; st.photos = []; st.footprints = null; st.view = { s: 1, ox: 0, oy: 0 };
+  clearGuesses(); invalidate(); renderRows(); draw(); dvReset(true);
+  $("photoSel").innerHTML = "";
+  if (fpGroup) { map.removeLayer(fpGroup); fpGroup = null; }
+  fpAll = [];
+  fpLayers.clear(); fpHi = null; fpBounds = null;
+  disposeModel(); disposeRenderViewer();    // its cached tiles belong to the region left behind
+  ces.centredFor = null;
+}
+async function switchRegion(id) {
+  const seq = ++regionSeq;
+  curRegion = id;
+  history.replaceState(null, "", "#region=" + encodeURIComponent(id));
+  try { localStorage.setItem("photoLabelRegion", id); } catch (_) { /* storage can be blocked */ }
+  if ($("region").value !== id) $("region").value = id;
+  clearRegion();
+  status("Loading " + id + "...");
+  await loadConfig(seq);
+  if (seq !== regionSeq) return;
+  homeMap();
+  if (ces.on) centre3d(true);
+  loadFootprints(seq);
+  const list = await loadPhotoList(seq);
+  if (!list) return;
+  fillPhotoSel();
+  if (list.length) loadPhoto(list[0].path); else status("No photos in " + id + ".");
+  screenPhotos(seq);
+}
+// Auto screening: the server flags street-level frames and stitched panoramas in the background;
+// poll every 10 s, then drop what it flagged from the list (Undo unflags them all).
+async function screenPhotos(seq) {
+  try { await postJson("/api/photos/screen", {}); } catch (_) { return; }
+  let r = null;
+  for (;;) {
+    await new Promise(ok => setTimeout(ok, 10000));
+    if (seq !== regionSeq) return;
+    try { r = await fetch(api("/api/photos/screen")).then(x => x.json()); } catch (_) { continue; }
+    if (r.state !== "running") break;
+  }
+  const gone = st.photos.filter(p => r.flagged.includes(p.path) && !p.bad);
+  if (!gone.length) return;
+  if (showFlagged()) {                               // keep them listed, marked
+    for (const p of gone) p.bad = true;
+    fillPhotoSel(); syncFlagBtn();
+    status(`Auto-flagged ${gone.length} photos (street level / panorama); they stay listed while "Show flagged" is on.`);
+    return;
+  }
+  const was = st.photos.map(p => p.path), cur = st.photo && st.photo.path;
+  st.photos = st.photos.filter(p => !r.flagged.includes(p.path));
+  for (const p of gone) $("photoSel").querySelector(`option[value="${CSS.escape(p.path)}"]`)?.remove();
+  if (cur && r.flagged.includes(cur)) {            // the open photo went: open the next one, as flagBtn does
+    const next = st.photos.find(p => was.indexOf(p.path) > was.indexOf(cur)) || st.photos[st.photos.length - 1];
+    if (next) { $("photoSel").value = next.path; await loadPhoto(next.path); } else status("No photos left.");
+  }
+  $("status").innerHTML = "";
+  $("status").append(`Auto-flagged ${gone.length} photos (street level / panorama). `);
+  const undo = document.createElement("a"); undo.href = "#"; undo.textContent = "Undo";
+  undo.onclick = async e => {
+    e.preventDefault();
+    if (seq !== regionSeq) return;
+    for (const p of gone) if (!(await flagPhoto(p.path, false))) return;
+    st.photos = st.photos.concat(gone).sort((a, b) => was.indexOf(a.path) - was.indexOf(b.path));
+    fillPhotoSel();
+    status(`Restored ${gone.length} photos.`);
+  };
+  $("status").append(undo);
+}
+$("region").onchange = e => switchRegion(e.target.value);
+(async function startRegions() {
+  let info;
+  try { info = await fetch("/api/regions").then(r => r.json()); } catch (_) { status("Cannot reach the server."); return; }
+  $("region").innerHTML = info.regions.map(r => `<option value="${esc(r.id)}">${esc(r.label)} (${r.photos})</option>`).join("");
+  let want = decodeURIComponent((location.hash.match(/region=([^&]*)/) || [])[1] || "");
+  if (!want) { try { want = localStorage.getItem("photoLabelRegion") || ""; } catch (_) { /* ignore */ } }
+  switchRegion(info.regions.some(r => r.id === want) ? want : info.default);
+})();
+resize();
+</script>
+</body>
+</html>

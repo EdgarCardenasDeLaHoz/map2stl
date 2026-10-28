@@ -32,6 +32,26 @@ _Last updated: 2026-10-23_
   are right, so `score_export_heights.py` does not see it.
 - **Fix (not started):** a DEM source for Spain from the free IDEE MDT WCS (5 m; 2 m where
   covered) beside SRTM, or a correction of SRTM toward it. No OpenTopography (COP30) calls.
+## Photo-label Orientation tab: photo and Google labels disagree (open, 2026-10-26)
+
+Tested on `granada_cathedral` (Granada region, saved camera). The chain runs end to end
+(`tools/photo_label/orient.py`, `server.py::api_depth_orient`, `index.html::dvOrient`), but:
+
+- Per-pixel agreement between the photo-depth and Google-depth labels is 38%; roof type agrees
+  on 128 of 199 buildings (e.g. 124052626 is pitched from the photo, flat from Google).
+- The photo-depth labels are speckled: plain facades come out as a mix of pitched roof and wall.
+- Opening the tab shows nothing for about 60 s while Google tiles load: "N buildings in view"
+  overwrites the "Google depth: rendering..." status.
+
+Next (user choice 2026-10-26, after the F-PHOTOCARVE matcher work): score both sources per
+building against the Granada REDIAM lidar before changing the classifier. Uses wanted from the
+tab: roof type, roof pitch, wall facing as a registration cue, and roof/wall split for carving.
+
+## Fixed 2026-10-24: SegFormer b3 silently gave no labels on torch < 2.6
+
+- **Symptom:** every SegFormer user on the CPU-torch PC (2.4.1) got no labels; no message.
+- **Cause:** transformers 4.57 refuses `torch.load` of `pytorch_model.bin` on torch < 2.6, and the cached b3 snapshot with the config had only that file. `_ensure_segformer` swallowed the error.
+- **Fix:** `city2stl/skyline/_core/segmentation.py::_load_segformer_model` loads with `use_safetensors=True`, else takes `model.safetensors` from any cached snapshot of the repo. `_ensure_segformer` now logs a warning with the exception (still returns False). Test: `tests/test_segformer_load.py`.
 
 ## Fixed 2026-10-21: Granada height truth was built from a raster that suppresses buildings
 
