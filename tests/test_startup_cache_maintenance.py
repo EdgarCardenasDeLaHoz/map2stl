@@ -9,7 +9,6 @@ from app.server import server
 def _start(monkeypatch, env):
     calls = []
     monkeypatch.setattr(server, "prune_all_caches", lambda: calls.append("prune") or {})
-    monkeypatch.setattr(server, "migrate_osm_plain_json", lambda *_: calls.append("migrate"))
     if env is None:
         monkeypatch.delenv("MAP2STL_NO_CACHE_MAINTENANCE", raising=False)
     else:
@@ -23,7 +22,7 @@ def test_startup_prunes_by_default(monkeypatch):
     assert "prune" in _start(monkeypatch, None)
 
 
-def test_switch_skips_pruning_and_migration(monkeypatch):
+def test_switch_skips_pruning(monkeypatch):
     assert _start(monkeypatch, "1") == []
 
 

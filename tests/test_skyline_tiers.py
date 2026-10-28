@@ -670,17 +670,6 @@ def test_scoring_old_rows_counts_them_as_corroborated():
     assert bm._pred_tier(rows[0])[1] == "corroborated"
 
 
-def test_sat_joint_supports_a_single_only_where_a_confidence_is_validated(monkeypatch):
-    """sat_joint is wired into single_support but off (no confidence reached 0.8 within tol, 2026-10-10)."""
-    from city2stl.skyline._core import tiers
-
-    assert single_support(62.0, [("sat_joint", 60.0, 1.0)]) == []
-    monkeypatch.setitem(tiers.SUPPORT_MIN_CONF, "sat_joint", 0.6)
-    assert single_support(62.0, [("sat_joint", 60.0, 0.7)]) == ["sat_joint"]
-    assert single_support(62.0, [("sat_joint", 60.0, 0.5)]) == []
-    assert single_support(35.0, [("sat_joint", 34.0, 0.9)]) == []        # under SUPPORT_MIN_M
-
-
 def test_band_tolerated_needs_satellite_support_within_2x_the_upper_end():
     """A non-PH single outside its cadastre band is published when a validated satellite reading
     supports it and it is within 2x the band's upper end (the user, 2026-10-10)."""

@@ -538,6 +538,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ### 2026-10-10 — sat_joint: lean and shadow fitted together with per-scene vectors from anchors; refused on its pre-registered marks
 - **Decision:**
+  - **Removed 2026-10-28 (F-UNIFY step 7; in git history):** `joint.py`, the profile outputs and the `sat_joint` method and tier entry. The record below is kept.
   - Code kept, **off**: `height/satellite/joint.py` (`lean_evidence`, `shadow_evidence`, `joint_reading`,
     `fit_kappas`, `JointModel`, `CONF_TABLE`, `C_PUB` = 1.01); profile outputs in `measure.shadow_height` /
     `lean_height(profile=True)` and `measure_multi(profiles=True, sweep=False)`; reading method `sat_joint`
@@ -596,6 +597,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
   `tests/test_skyline_tiers.py` (sat_joint support wired but off).
 
 ### 2026-10-10 — Cross-sphere triangulation of roof corners fails its Miami marks on yield LiDAR heights publish as tier `survey` (F-SKY26 2d), flagged where stale (rejected; code kept off)
+- **Removed 2026-10-28 (F-UNIFY step 7; in git history):** `_pano/triangulate.py`, its `elevated.py` hooks and test.
 - **Decision:** `_pano/triangulate.py` is not turned on (`TRIANGULATE = False`, env
   `SKYLINE_TRIANGULATE`); no Cartagena replay (v15) was run, as the pre-registration says. The code,
   its hooks and `seed_experiment.py --tri` stay for a denser sphere set.
@@ -764,7 +766,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 
 ### 2026-10-09 — Google Open Buildings 2.5D does not replace the T41 prior for low-rises (refused on the pre-registered test)
 - **Decision:**
-  - `city2stl/skyline/lowrise_prior.py` stays off (`STATUS = "refused"`, site flag
+  - Removed 2026-10-28 (F-UNIFY step 7; in git history): `lowrise_prior.py` and its test. Before that it stayed off (`STATUS = "refused"`, site flag
     `use_google_2p5d_prior` unset everywhere).
   - The reader `city2stl/height/providers/google_ob25d.py` is kept for later tests. It is not in
     `_REGISTRY`.
@@ -1814,6 +1816,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 ### 2026-08-28 — Shadow heights stay a research track; the old shadow provider stays deprecated
 - **Decision:** do not promote satellite shadow heights to a production provider;
   `city2stl/height/providers/shadow_height.py` stays deprecated.
+  - The provider and `tools/eval/eval_shadow_heights.py` were removed 2026-10-28 (F-UNIFY step 7); `satellite/measure.shadow_height()` stays.
 - **Why (Miami, ESRI 2025-01-08 scene, 41° sun):**
   - accepted estimates: n=17 of 122 footprints, MAE 17.48 m, corr +0.792 vs the plate — coverage is the
     real limit;

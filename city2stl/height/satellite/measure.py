@@ -132,21 +132,8 @@ def _lead_samples(P, u, thr=0.6):
     return S, N
 
 
-def _shadow_profile(c: ShadowCtx, SS, Bd, D, vf, start, redge, roof_ok) -> dict:
-    """The shadow search's profiles (``profile=True``): what :mod:`.joint` reads to score any
-    height, not only the one :func:`shadow_height` picks. Float16 (a profile is a few hundred
-    samples; NaN where a sample is hidden). ``ss0`` / ``step`` place sample ``k`` at ``ss0 + step k``
-    metres along the shadow direction; ``start`` is the sample the dark run starts at."""
-    h = np.float16
-    return dict(ss0=float(SS[0]), step=0.5, Bd=np.asarray(Bd, h), D=np.asarray(D, h),
-                vf=np.asarray(vf, h), start=int(start), redge=float(redge), roof_ok=bool(roof_ok),
-                cot=float(c.COT), den=float(c.DEN_ROOF), valid=True)
-
-
-def shadow_height(c: ShadowCtx, i, profile: bool = False) -> dict:
-    """Shadow height of footprint ``i`` of ``c.B`` (v1_single ``shadow``). ``profile``: the
-    returned dict also has ``profile`` (:func:`_shadow_profile`; ``valid`` False when the reading
-    was refused for a reason that makes the profile no evidence: a merged shadow, vegetation)."""
+def shadow_height(c: ShadowCtx, i) -> dict:
+    """Shadow height of footprint ``i`` of ``c.B`` (v1_single ``shadow``)."""
     from scipy import ndimage as ndi  # noqa: PLC0415
 
     M, gray, lab, water, veg, ub, COT, p_ls, DEN_ROOF, DARK = (
@@ -244,15 +231,8 @@ def shadow_height(c: ShadowCtx, i, profile: bool = False) -> dict:
     H_roof = (tip - redge) / DEN_ROOF
     roof_ok = (cr < -25) and H_roof > 2
     H = H_roof if roof_ok else H_base
-    prof = _shadow_profile(c, SS, Bd, D, vf, start, redge, roof_ok) if profile else None
-
-    def _out(d: dict, valid: bool = True) -> dict:
-        if prof is not None:
-            d["profile"] = dict(prof, valid=valid)
-        return d
-
     if H < 2.5:
-        return _out(dict(height_m=None, conf=0.0, reason="shadow too short to resolve"))
+        return dict(height_m=None, conf=0.0, reason="shadow too short to resolve")
     # lateral merge check
     up = np.array([-ub[1], ub[0]])
     allp = AG
@@ -271,11 +251,11 @@ def shadow_height(c: ShadowCtx, i, profile: bool = False) -> dict:
         sides.append(np.mean(dd) if len(dd) >= 3 else np.nan)
     merged = sum(1 for v in sides if v == v and v >= 0.6)
     if merged == 2 and H > 8:
-        return _out(dict(height_m=None, conf=0.0, reason="shadow merged with a neighbour's shadow",
-                         upper_bound_m=round(float(H), 1)), valid=False)
+        return dict(height_m=None, conf=0.0, reason="shadow merged with a neighbour's shadow",
+                    upper_bound_m=round(float(H), 1))
     vfr = float(_at(c, veg, qi[start:end + 1]).mean()) if end >= start else 0.0
     if vfr > 0.35:
-        return _out(dict(height_m=None, conf=0.0, reason="shadow on trees/vegetation"), valid=False)
+        return dict(height_m=None, conf=0.0, reason="shadow on trees/vegetation")
     purity = float(np.nanmean(Bd[start:end + 1]))
     conf = min(1, max(0, ct) / 60) * min(1, vf[kt] / 0.7) * purity
     conf *= 1.0 if roof_ok else 0.7
@@ -292,20 +272,17 @@ def shadow_height(c: ShadowCtx, i, profile: bool = False) -> dict:
     if (tip - redge) < 4 and H < 6:
         conf *= 0.6
     sig = (math.hypot(1.5 * M, 1.5 * M) / DEN_ROOF) if roof_ok else math.hypot(1.5 * M, 3.0) / COT
-    return _out(dict(height_m=round(float(H), 1), conf=round(float(conf), 3),
-                     method="shadow_roof_edge" if roof_ok else "shadow_base", reason=reason,
-                     sigma_m=round(float(sig), 1), H_base_m=round(float(H_base), 1),
-                     H_roof_m=round(float(H_roof), 1), tip_m=float(tip), roof_edge_m=float(redge),
-                     contrast_tip=round(float(ct), 1), contrast_roof=round(float(cr), 1),
-                     valid_frac=round(float(vf[kt]), 2), merged_sides=merged))
+    return dict(height_m=round(float(H), 1), conf=round(float(conf), 3),
+                method="shadow_roof_edge" if roof_ok else "shadow_base", reason=reason,
+                sigma_m=round(float(sig), 1), H_base_m=round(float(H_base), 1),
+                H_roof_m=round(float(H_roof), 1), tip_m=float(tip), roof_edge_m=float(redge),
+                contrast_tip=round(float(ct), 1), contrast_roof=round(float(cr), 1),
+                valid_frac=round(float(vf[kt]), 2), merged_sides=merged)
 
 
-def lean_height(c: ShadowCtx, i, profile: bool = False) -> dict:
+def lean_height(c: ShadowCtx, i) -> dict:
     """Lean height of footprint ``i`` (v1_single ``lean``): needs ``gxx``, ``gyy``, ``k_lean``,
-    ``ul``. ``profile``: the returned dict also has ``profile``: the roof-edge gradient profile
-    along the lean axis (``sh0`` / ``step`` metres, ``Pr`` masked to samples a roof edge could be
-    at, ``va`` the visible share, ``med`` its median, ``bsh`` the base shift, ``k`` the lean per
-    metre of height), which :mod:`.joint` scores for any height."""
+    ``ul``."""
     from scipy import ndimage as ndi  # noqa: PLC0415
 
     M, lab, k_lean, ul, gxx, gyy = c.M, c.lab, c.k_lean, c.ul, c.gxx, c.gyy
@@ -381,10 +358,6 @@ def lean_height(c: ShadowCtx, i, profile: bool = False) -> dict:
     out = dict(height_m=round(float(H), 1), conf=round(conf, 3), reason=reason, sigma_m=round(sig, 1),
                base_shift_m=float(bsh), roof_shift_m=float(s_roof), peak_ratio=round(ratio, 3),
                gain=round(gain, 3), visible_frac=round(float(va[kr]), 2))
-    if profile:
-        out["profile"] = dict(sh0=float(sh[0]), step=0.5, Pr=np.asarray(Pr, np.float16),
-                              va=np.asarray(va, np.float16), med=float(med), bsh=float(bsh),
-                              dmin=float(dmin), k=float(k_lean), valid=True)
     return out
 
 
@@ -400,15 +373,14 @@ def _water_veg(f32: np.ndarray, gray: np.ndarray):
 # ------------------------------------------------------------------------ single scene (v1)
 def measure_single(footprints: Sequence[dict], scene: Scene, M: float, *, dark: float,
                    only: set | None = None, tile_ok=None, ram_gb: float | None = 6.0,
-                   progress=None, profiles: bool = False) -> dict:
+                   progress=None) -> dict:
     """Shadow and lean of every footprint on one scene (v1_single ``main``).
 
     ``footprints`` in a fixed order (the occlusion labels are drawn in that order, tallest tag
     last); ``P`` at the OSM position (the scene registration ``reg_m`` is added here). Measures
     footprints whose centre tile is cached, of area >= 20 m^2, in ``only`` when given.
     ``dark``: the shadow grey threshold (v1: geometry ``dark_thr`` x 1.35). Returns
-    ``{fid: {shadow, lean, area_m2, tag_m}}``. ``profiles``: each ``shadow`` / ``lean`` dict also
-    carries its ``profile`` (:func:`shadow_height`, :func:`lean_height`).
+    ``{fid: {shadow, lean, area_m2, tag_m}}``.
     """
     from PIL import Image  # noqa: PLC0415
     from scipy import ndimage as ndi  # noqa: PLC0415
@@ -505,11 +477,11 @@ def measure_single(footprints: Sequence[dict], scene: Scene, M: float, *, dark: 
                 res[b["fid"]] = o
                 continue
             try:
-                o["shadow"] = shadow_height(ctx, i, profile=profiles)
+                o["shadow"] = shadow_height(ctx, i)
             except Exception as e:  # noqa: BLE001 - one footprint never stops a block
                 o["shadow"] = dict(height_m=None, conf=0.0, reason=f"error: {e}")
             try:
-                o["lean"] = lean_height(ctx, i, profile=profiles)
+                o["lean"] = lean_height(ctx, i)
             except Exception as e:  # noqa: BLE001
                 o["lean"] = dict(height_m=None, conf=0.0, reason=f"error: {e}")
             res[b["fid"]] = o
@@ -554,7 +526,7 @@ def scene_pairs(scenes: Sequence[Scene]) -> list[tuple[str, str]]:
 
 def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str, fids: Sequence,
                   M: float, *, shadow_scenes: set | None = None, ram_gb: float | None = 6.0,
-                  progress=None, profiles: bool = False, sweep: bool = True) -> dict:
+                  progress=None) -> dict:
     """Per-scene shadows and the multiview plane sweep for ``fids`` (w4_multi).
 
     ``scenes`` in a fixed order, ``ref`` one of them (the newest or current scene: the frame the
@@ -563,13 +535,6 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
     (occlusion), with ``P`` at the OSM position. ``shadow_scenes``: limit per-scene shadows to
     these. Returns ``{fid: {shadow: {scene: {...}}, stereo_multiview: {...} | None}}`` (raw;
     :func:`consensus` and :func:`combine` follow).
-
-    ``profiles`` (the joint fit, :mod:`.joint`): each row also has ``profiles`` =
-    ``{scene: {"shadow": profile | None, "lean": profile | None}}``: every scene's shadow profile
-    and its own lean profile (the scene's lean vector, the footprint at the reference position
-    plus the scene's local ground offset), and an untagged footprint's ``hint`` reaches the
-    per-scene searches (``search_cap``). ``sweep=False`` skips the plane sweep (the profile runs
-    that only need the per-scene evidence).
     """
     from scipy import ndimage as ndi  # noqa: PLC0415
     from skimage.draw import polygon as skpoly  # noqa: PLC0415
@@ -669,7 +634,6 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
 
         # ---- shadow per scene
         SH = {}
-        LN = {}
         for n in NAMES:
             if n not in G:
                 continue
@@ -677,15 +641,13 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
                 continue
             S_ = SCN[n]
             Lv = Ls[n]
-            k_n = float(np.hypot(*Lv))
-            lean_ok = profiles and k_n >= 0.08
             sun_ok = S_.sun_el is not None and S_.shadow_bearing is not None
             ub = uv(S_.shadow_bearing) if sun_ok else uv(0.0)
             COT = S_.cot if sun_ok else 1.0
             p_ls = float(Lv @ ub)
             DEN = COT - p_ls
             shadow_ok = sun_ok and DEN >= 0.25
-            if not shadow_ok and not lean_ok:
+            if not shadow_ok:
                 SH[n] = None
                 continue
             dark = S_.dark or float(0.5 * (np.percentile(G[n][HV[n]], 3) + np.percentile(G[n][HV[n]], 50)))
@@ -694,8 +656,6 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
                 ctr = np.array([(B[i]["bb"][0] + B[i]["bb"][2]) / 2, (B[i]["bb"][1] + B[i]["bb"][3]) / 2]) - off
                 gg, _ = g_at(n, ctr) if n != REF else (np.zeros(2), 1)
                 BB[i] = dict(P=[p - off + rREF / M + gg for p in B[i]["P"]], tag=B[i]["tag"])
-                if profiles and B[i].get("hint"):
-                    BB[i]["hint"] = B[i]["hint"]
             lab = np.zeros((Hh, Ww), np.int32)
             for i in sorted(near, key=lambda i: (B[i]["tag"] or 10.0)):
                 h = B[i]["tag"] or 10.0
@@ -707,30 +667,17 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
             lab[~HV[n]] = -1
             ctx = ShadowCtx(gray=G[n], lab=lab, water=WT[n], veg=VG[n], B=BB, ub=ub, COT=COT,
                             p_ls=p_ls, DEN_ROOF=DEN, DARK=dark, M=M)
-            if lean_ok:
-                ctx.gxx = ndi.gaussian_filter(G[n], 1.0, order=(0, 1))
-                ctx.gyy = ndi.gaussian_filter(G[n], 1.0, order=(1, 0))
-                ctx.k_lean = k_n
-                ctx.ul = Lv / k_n
             SHn = {}
-            LNn = {}
             for i in ids:
                 if n != REF and S_.covered is not None and B[i]["fid"] not in S_.covered:
                     SHn[i] = dict(height_m=None, conf=0.0, reason="outside scene polygon")
                     continue
                 if shadow_ok:
                     try:
-                        SHn[i] = shadow_height(ctx, i, profile=profiles)
+                        SHn[i] = shadow_height(ctx, i)
                     except Exception as e:  # noqa: BLE001
                         SHn[i] = dict(height_m=None, conf=0.0, reason=f"error: {e}")
-                if lean_ok:
-                    try:
-                        LNn[i] = lean_height(ctx, i, profile=True)
-                    except Exception as e:  # noqa: BLE001
-                        LNn[i] = dict(height_m=None, conf=0.0, reason=f"error: {e}")
             SH[n] = SHn if shadow_ok else None
-            if lean_ok:
-                LN[n] = LNn
             S_.meta.setdefault("dark_used", []).append(round(dark, 1))
             del lab, ctx
         # ---- multi-view plane sweep
@@ -747,16 +694,11 @@ def measure_multi(footprints: Sequence[dict], scenes: Sequence[Scene], ref: str,
                     out["shadow"][n] = {k: v for k, v in s[i].items()
                                         if k in ("height_m", "conf", "method", "reason", "sigma_m",
                                                  "lower_bound_m", "upper_bound_m")}
-            if profiles:
-                out["profiles"] = {
-                    n: dict(shadow=((SH.get(n) or {}).get(i) or {}).get("profile"),
-                            lean=((LN.get(n) or {}).get(i) or {}).get("profile"))
-                    for n in NAMES}
             P = [p - off + rREF / M for p in B[i]["P"]]
             pts = _interior_pts(P, M)
             hcap = search_cap(B[i], 80.0, 330.0)
             HS = np.arange(0.0, hcap, 0.5)
-            if sweep and len(pts) >= 20:
+            if len(pts) >= 20:
                 smp = {}
                 for n in G:
                     if n != REF and SCN[n].covered is not None and B[i]["fid"] not in SCN[n].covered:

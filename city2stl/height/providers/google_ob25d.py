@@ -47,7 +47,7 @@ API::
     GoogleOB25DProvider().fetch_heights(bbox, dim) -> HeightResult   # presence-masked height
 
 Not in ``service._REGISTRY``. The export merge is ranked on measurement, and this provider has
-been measured only as a low-rise prior (``city2stl/skyline/lowrise_prior.py``).
+been measured only as a low-rise prior (``city2stl/skyline/lowrise_prior.py``, removed 2026-10-28).
 """
 
 from __future__ import annotations

@@ -56,12 +56,13 @@ is what it is → [building-heights.md](../decisions/building-heights.md),
     "Google 3D Tiles is allowed as a height and geometry source".
 - **3DEP lidar per footprint** — `city2stl/height/providers/lidar_3dep_copc.py::footprint_heights`:
   USGS 3DEP COPC point clouds (Planetary Computer), roof median minus ground ring; US only.
-- **Shadow heights** — `city2stl/height/providers/shadow_height.py::ShadowHeightProvider`:
-  deprecated, research only → building-heights.md, "Shadow heights stay a research track…".
+- **Shadow heights (provider removed 2026-10-28)** — the `shadow_height` provider and its eval
+  script are gone; the per-footprint satellite measure lives in
+  `city2stl/height/satellite/measure.py::shadow_height`. History: `docs/research/shadow-heights.md`.
 - **Google Open Buildings 2.5D Temporal** — `city2stl/height/providers/google_ob25d.py`: v1
   (Sirko et al. 2023), 0.5 m rasters (~4 m effective), heights capped at 100 m; Africa, S/SE Asia,
   Latin America and the Caribbean (not the US mainland or Hawaii). Per-footprint readings for
-  `skyline/lowrise_prior.py`; not in `_REGISTRY` (measured only as a low-rise prior, refused →
+  `skyline/lowrise_prior.py` (removed 2026-10-28); not in `_REGISTRY` (measured only as a low-rise prior, refused →
   building-heights.md, "Google Open Buildings 2.5D does not replace the T41 prior…"). CC BY 4.0
   (`ATTRIBUTION`).
 

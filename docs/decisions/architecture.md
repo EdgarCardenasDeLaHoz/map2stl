@@ -2,6 +2,24 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-28 — Dead code removed in F-UNIFY step 7
+- **Decision:** removed, each off by default or with no user:
+  - the `shadow_height` height provider and `tools/eval/eval_shadow_heights.py` (deprecated 2026-08-28; `satellite/measure.shadow_height()` stays);
+  - the `clip_nans` saved-settings rename, server (`regions.py`) and browser (`settings-compat.js`): 0 of 87 `region_settings` rows used it;
+  - the city-model request aliases `mm_per_px`, `fit_height_mm`, `base_mm`: nothing sends them;
+  - `migrate_osm_plain_json`: `osm_raw_cache` holds no plain-JSON files;
+  - `skyline/scripts/demos/` (4 research probes, 2,827 lines);
+  - triangulation, `sat_joint` and `lowrise_prior`, all refused on their pre-registered marks (building-heights.md).
+- **Kept:**
+  - `city2stl/roads.py` and `maintain_dimensions`: live.
+  - F-SKY5: on by default since 2026-10-06; the README said off and is fixed.
+  - The F-SKY12 / F-SKY11.1 flags: they gate live modules.
+  - The pre-sidecar OSM cache probe: cache entries depend on it, and cache changes wait for the user.
+  - F-SKY17 `_estimate_ms_osm_offset`: recorded as failed, but `merge_satellite_into_osm(register_to_osm=True)` applies it by default, so removing it changes output (issues.md).
+- **Why:** less code to read and fewer `SKYLINE_*` switches; the records stay in decisions and git history.
+- **Rejected:** moving the demos to `docs/history`; git history already keeps them.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-28 — Atomic writes and cross-process locks live in geo2stl/cache.py
 - **Decision:**
   - `map2stl/geo2stl/cache.py` holds `atomic_write` (a temp file beside the target, then `os.replace`, retried while Windows holds the target open), `atomic_write_json`, `file_lock` (a blocking lock on `<path>.lock`) and `try_lock_fd` / `unlock_fd`.

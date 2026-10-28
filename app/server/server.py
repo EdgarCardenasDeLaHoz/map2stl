@@ -15,8 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.server.config import OSM_CACHE_PATH
-from app.server.core.cache import migrate_osm_plain_json, prune_all_caches
+from app.server.core.cache import prune_all_caches
 from app.server.core.dem_store import DemGone
 from app.server.routers.auth import router as _auth_router
 from app.server.routers.cache import router as _cache_router
@@ -70,7 +69,6 @@ async def _lifespan(app):
             logger.info("Startup cache maintenance skipped (MAP2STL_NO_CACHE_MAINTENANCE)")
             return
         try:
-            migrate_osm_plain_json(OSM_CACHE_PATH)
             counts = prune_all_caches()
             if any(v > 0 for v in counts.values()):
                 logger.info(f"Startup cache prune: {counts}")

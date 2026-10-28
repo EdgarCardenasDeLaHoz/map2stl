@@ -292,9 +292,6 @@ class ElevatedSeed:
     #: whose top is not their footprint's, and their re-credits to a farther owner), None when
     #: off (``ownership.enabled``); applied by :func:`elevated_estimates`
     ownership: object = None
-    #: the limb-corner observations of the measured footprints (``triangulate.CornerObs``), empty
-    #: when off (``triangulate.enabled``); intersected across seeds by :func:`elevated_estimates`
-    corners: list = field(default_factory=list)
 
 
 def _ring(geom) -> np.ndarray | None:
@@ -564,13 +561,12 @@ def measure_elevated_seed(seed: SkylinePoint, views: list[dict], pitch_deg: floa
                     seed.name, chk["n"], chk["storey_m"], chk["shift_m"], chk["shift_e_m"],
                     chk["shift_n_m"], chk["se_m"], 100 * chk["resid_rel"])
     own = seed_ownership(pano, pose, buildings, ms, depth, instances, seed.name)
-    corners = seed_corners(pano, pose, fps, fids, ms, depth, instances, seed.name)
     out = ElevatedSeed(seed.name, pf, ms, fids,
                        pano_result(seed, pano, pose, ms, fids, depth, instances,
                                    recredits=() if own is None else own.recredits),
                        _view_rows(seed, views, pano, pose, len(ms)),
                        behind=behind_map(pano, pose, fps, fids, ms), floors=floors,
-                       ownership=own, corners=corners)
+                       ownership=own)
     if keep:
         out.pano, out.pose, out.depth, out.instances = pano, pose, depth, instances
     return out
@@ -1099,44 +1095,6 @@ def seed_ownership(pano: fd.Pano, pose: fd.PanoPose, buildings: list[BuildingRec
     return got
 
 
-def seed_corners(pano: fd.Pano, pose: fd.PanoPose, fps: list, fids: list, ms: list,
-                 depth=None, instances=None, seed_name: str = "") -> list:
-    """``triangulate.seed_corners`` of a seed's measured footprints, or ``[]`` when off
-    (``triangulate.enabled``) or when it fails (the run goes on without it). Computed after the
-    cached measurement (its key unchanged), while the pano and the instance map are in memory."""
-    from . import triangulate
-
-    if not triangulate.enabled() or instances is None:
-        return []
-    try:
-        obs, stats = triangulate.seed_corners(pano, pose, fps, fids, ms, instances=instances,
-                                              depth=depth)
-    except Exception as exc:                          # never lose the seed to the check
-        logger.warning("[elevated] %s: corner observation failed (%r)", seed_name, exc)
-        return []
-    logger.info("[elevated] %s: %d roof corners observed on %d footprints (not observed: %s)",
-                seed_name, len(obs), len({o.fid for o in obs}),
-                {k: v for k, v in stats.items() if k != "observed"})
-    return obs
-
-
-def triangulated(seeds, group=None) -> dict:
-    """``{feature_id: triangulate.TriReading}``: the footprints two seeds of different camera
-    groups saw a common roof corner of (:func:`triangulate.triangulate`); ``{}`` when no seed
-    kept corner observations (off)."""
-    from . import triangulate
-
-    corners = {s.seed_name: s.corners for s in seeds if getattr(s, "corners", None)}
-    if len(corners) < 2:
-        return {}
-    got, why = triangulate.triangulate(corners, group=group or triangulate.camera_group)
-    if got:
-        logger.info("[elevated] triangulation: %d footprints from %d corner pairs (rejected: %s)",
-                    len(got), sum(t.n for t in got.values()),
-                    {k: v for k, v in why.items() if k != "ok"})
-    return got
-
-
 def not_owned(seeds) -> dict:
     """``{(seed_name, feature_id): reason}`` of the trusted readings whose top is not their
     footprint's (:func:`seed_ownership`)."""
@@ -1443,39 +1401,6 @@ def _split_satellite(satellite: dict | None) -> tuple[dict | None, dict | None]:
     return fusion_readings(raw), raw
 
 
-#: The pseudo-seed a triangulated reading takes in the fusion.
-TRI_SEED = "tri"
-
-
-def _camera_group(name: str) -> str:
-    from .triangulate import camera_group
-
-    return camera_group(name) if name != TRI_SEED else name
-
-
-def _triangulated_estimate(fid: str, f: dict, t, seeds, by_key: dict, bearing: dict):
-    """The estimate a fused triangulated reading publishes, or None. It stands for a source of its
-    own, so it is emitted only when no drone reading of one of its two cameras is kept (those
-    carry the footprint; the triangulated reading adds nothing independent of them), under the
-    seed of its first sphere that measured the footprint (the tiers read the seed as the
-    reading's source). Its confidence is that sphere's reading's, scaled by the miss."""
-    from .triangulate import camera_group
-
-    used = {camera_group(u) for u in f["used"] if u != TRI_SEED}
-    if used & set(t.groups):
-        return None
-    lead = next(((sa, sb) for sa, sb, *_ in t.pairs if (sa, fid) in by_key), None)
-    if lead is None:
-        return None
-    s, m = by_key[(lead[0], fid)]
-    b = int(round(bearing.get((lead[0], fid), 0.0))) % 360
-    return RegisteredBuildingEstimate(
-        feature_id=fid, name=m.name, view_name=f"{lead[0]}_{b:03d}",
-        heading_offset_deg=float(s.position.pose.offset_deg), x_px=0.5 * (m.x0 + m.x1),
-        y_px=float(m.top_row), forward_m=float(m.dist_m), estimated_height_m=float(t.height_m),
-        confidence=float(np.clip(estimate_confidence(m) / (1.0 + t.miss_m / 5.0), 0.05, 1.0)))
-
-
 def elevated_estimates(seeds: list[ElevatedSeed],
                        satellite: dict | None = None) -> ElevatedEstimates:
     """One estimate per footprint and seed, from :func:`trusted` readings only, for footprints
@@ -1540,34 +1465,19 @@ def elevated_estimates(seeds: list[ElevatedSeed],
                     cal.n, cal.sigma_log, "" if cal.reliable else ", not reliable",
                     sum(len(v) for v in floor_rs.values()))
     by_seed.update(floor_rs)
-    from . import triangulate
-
-    tri = triangulated(seeds)
-    if tri:
-        names = {s.feature_ids[m.footprint]: m.name for s in seeds for m in s.measured}
-        by_seed[TRI_SEED] = [triangulate.fusion_reading(t, names.get(f, ""))
-                             for f, t in tri.items()]
-    fused = fd.fuse_heights(by_seed, group=_camera_group if tri else None)
+    fused = fd.fuse_heights(by_seed)
     by_key = {(s.seed_name, s.feature_ids[m.footprint]): (s, m) for s in seeds for m in s.measured}
     by_key.update({(s.seed_name, f): (s, m) for s in seeds for f, m in rcs.get(s.seed_name, ())})
     # the segments carry each footprint's true bearing (their columns are rolled north-centre)
     bearing = {(s.seed_name, seg["matched_projection"]["feature_id"]): seg["true_bearing_deg"]
                for s in seeds for seg in s.pano_result.matched_segments}
     out = ElevatedEstimates(floors=finfo, storey=cal)
-    out.triangulated = {}
     for fid, f in fused.items():
         if f["disputed"]:
             # seeds that saw it disagree (Cartagena 2026-10-06: seed pairs agreed within 25 % on
             # 5-36 % of shared footprints, the far or older view reading another building):
             # no drone height; the untagged prior or the tag takes over
             continue
-        if TRI_SEED in f["used"]:
-            e = _triangulated_estimate(fid, f, tri[fid], seeds, by_key, bearing)
-            if e is not None:
-                out.append(e)
-                out.triangulated[fid] = {"height_m": e.estimated_height_m,
-                                         "miss_m": tri[fid].miss_m, "n": tri[fid].n,
-                                         "seeds": e.view_name}
         for seed_name in f["used"]:
             if (seed_name, fid) not in by_key:      # a satellite pseudo-seed
                 continue
@@ -1581,7 +1491,7 @@ def elevated_estimates(seeds: list[ElevatedSeed],
     return out
 
 
-__all__ = ["ElevatedSeed", "ElevatedEstimates", "seed_corners", "triangulated", "measure_elevated_seed", "elevated_estimates",
+__all__ = ["ElevatedSeed", "ElevatedEstimates", "measure_elevated_seed", "elevated_estimates",
            "seed_floors", "floors_info", "drop_contradicted_floors", "trusted", "pano_result",
            "seed_ownership", "not_owned", "recredited",
            "footprints_from_records", "ground_layers", "MIN_ELEVATED_H_M", "measure_waterline",

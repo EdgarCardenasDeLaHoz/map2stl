@@ -145,7 +145,7 @@ Add `tests/test_frame_baseline.py`, with golden sha256 values taken from the cur
   - `modules/core/ui-helpers.js::getProjectionParams`;
   - `modules/ui/presets.js`: `collectAllSettings` must always write `frame`, because the blob is
     replaced wholesale;
-  - `modules/ui/settings-compat.js` and `app/server/routers/settings.py::_default_region_settings`;
+  - `app/server/routers/settings.py::_default_region_settings` (`settings-compat.js` was removed 2026-10-28);
   - `modules/dem/graticule.js`;
   - `modules/layers/city-overlay.js`: `_buildGeoToPx` is replaced by `projectedFrac`;
   - `modules/export/print-scale.js::modelScale`: uses the frame's km;

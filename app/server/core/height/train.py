@@ -72,7 +72,6 @@ def collect_tiles(
     from city2stl.height.providers.google_3d import Google3DProvider
     from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
     from city2stl.height.providers.ndsm import NDSMProvider
-    from city2stl.height.providers.shadow_height import ShadowHeightProvider
     from city2stl.height.providers.wsf3d import WSF3DProvider
 
     _prov_map = {
@@ -82,7 +81,6 @@ def collect_tiles(
         "copernicus":  CopernicusProvider(),
         "lidar_3dep":  LiDAR3DEPProvider(api_key=OPENTOPO_API_KEY),
         "ghsl":        GHSLProvider(),
-        "shadow":      ShadowHeightProvider(),
     }
 
     active_providers = [_prov_map[p] for p in providers if p in _prov_map]

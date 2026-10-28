@@ -14,7 +14,6 @@ Request (``POST /api/export/start`` with ``format="city"``)::
     median_size     DEM median filter (default 3; 0/1 = off)
     vector_rivers   "auto" (default) | true | false: the composite's rivers cut as vector
                     solids, with vector_rivers_min_depth_mm (export.mesh_terrain_stage)
-    (legacy names mm_per_px, fit_height_mm, base_mm are still accepted)
     layers          {layer: {enabled, mode, offset_mm, height_scale, line_width_m, ...}}
                     (trails are off unless enabled here, except that where the box holds OSM
                     downhill ski runs they turn on by themselves, unless the request sets
@@ -152,16 +151,9 @@ def _stl_bytes(mesh) -> bytes:
     return mesh.export(file_type="stl")
 
 
-_LEGACY_NAMES = {"mm_per_px": "mm_per_pixel", "fit_height_mm": "model_height",
-                 "base_mm": "base_height"}
-
-
 def normalize_request(data: dict) -> dict:
-    """The city defaults (fit height 30 mm) and legacy field names applied."""
+    """The city defaults (fit height 30 mm) applied."""
     data = {"model_height": 30.0, "level_ground": True, **data}
-    for old, new in _LEGACY_NAMES.items():
-        if old in data:
-            data.setdefault(new, data[old])
     return data
 
 

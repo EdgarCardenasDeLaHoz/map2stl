@@ -13,7 +13,7 @@ Submodules (import them directly):
 Offline producer: ``city2stl/skyline/scripts/20_satellite_heights.py`` writes
 ``runs/satellite/<region>/readings.json``; the region run only reads it
 (``city2stl/skyline/satellite_fusion.py``, site flag ``use_satellite_heights``).
-Not ``height/providers/shadow_height.py``, deprecated since 2026-08-28.
+Not the old ``height/providers/shadow_height.py`` (removed 2026-10-28).
 """
 
 from __future__ import annotations

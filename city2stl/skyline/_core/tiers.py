@@ -400,9 +400,7 @@ SUPPORT_RATIO = 1.5
 #: Validated satellite methods (``single_support``) and the confidence each needs: lean at 0.7
 #: (Chicago LiDAR: lean over 100 m within 25 % 94 %), lean + shadow agreeing (``ls``) at any,
 #: multiview at 0.3 (over 40 m within 25 % 84 %). Stereo is not listed (40-100 m: ~59 %).
-#: ``sat_joint`` (lean and shadow fitted together, 2026-10-10) is listed but off: no confidence reaches the
-#: 0.8 share within tol (``height.satellite.joint.C_PUB``), so the entry is above any confidence.
-SUPPORT_MIN_CONF = {"lean": 0.7, "ls": 0.0, "multiview": 0.3, "sat_joint": 1.01}
+SUPPORT_MIN_CONF = {"lean": 0.7, "ls": 0.0, "multiview": 0.3}
 #: ``single_support`` entry of a single kept because floor counts flagged its plot a high-rise.
 HIGH_RISE_SUPPORT = "high_rise_floors"
 

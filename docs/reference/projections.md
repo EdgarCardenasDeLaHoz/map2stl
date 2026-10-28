@@ -273,7 +273,7 @@ request (bbox + projection) → cache miss → fetch (plate carrée) → write c
   layer caches key on the size they rasterised at, so cosine and equidistant share an entry while
   `none` and cosine do not. (HTTP routes and saved settings call
   the flag `clip_valid_region`; the `geo2stl.projections` functions keep the parameter name
-  `clip_nans`. The route alias `clip_nans` was removed 2026-09-30.) The DEM key does
+  `clip_nans`. The route alias `clip_nans` was removed 2026-09-30, and the saved-settings rename 2026-10-28.) The DEM key does
   carry `maintain_dimensions` (`md`); the other layers re-project on a hit, so a changed
   setting takes effect without a new key.
 - Endpoints:

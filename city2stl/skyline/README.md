@@ -83,7 +83,7 @@ Matching and heights: `_core/registration.py::match_segments_to_buildings` (inte
 
 ## Where things live
 
-Every caller, inside `skyline/` or not (tests, demos), imports the defining `_core/` or `_pano/` module directly.
+Every caller, inside `skyline/` or not (tests), imports the defining `_core/` or `_pano/` module directly.
 - Why: a star import carries neither private names nor later rebinding of module globals.
 - The `pipeline.py` façade over `_core/` was removed 2026-09-30; the other façades (pano_registration,
   region_render, report_plots) on 2026-09-25.
@@ -110,7 +110,7 @@ Every caller, inside `skyline/` or not (tests, demos), imports the defining `_co
 | `satellite_footprints.py` / `satellite_image.py` | MS Building Footprints; ESRI satellite tiles | F-SKY8, F-SKY10 |
 | `height_trace.py` / `height_trace_render.py` | Per-building gate-decision tracer + render | glass-roof Phase 1 |
 | `web_image_seed.py` | Wikipedia/Wikimedia/Flickr skyline image seeds | F-WEB1 |
-| `scripts/` | `08_region_skyline_pdf.py` (production), `09_height_trace.py`, `build_landing_page.py`, `discover_city_seeds.py`, `height_diagnostic_report.py`; research probes 13–16 in `scripts/demos/` | — |
+| `scripts/` | `08_region_skyline_pdf.py` (production), `09_height_trace.py`, `build_landing_page.py`, `discover_city_seeds.py`, `height_diagnostic_report.py`; the research probes 13–16 (`scripts/demos/`) were removed 2026-10-28 (in git history) | — |
 | `sites/*.json` | Per-region config (16 regions) | — |
 
 Module DAG (acyclic): `region_types`/`region_config` ← `region_data`/`streetview_io` ← `seed_selection` ←
@@ -140,7 +140,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | F-SKY2 | OSM-anchored split of merged silhouettes | on | — | [done](../../docs/plans/done/skyline/F-SKY2-osm-anchored-segments.md) |
 | F-SKY3 | Voronoi split over OSM markers | **removed** (MAE 17.3 → 22.1 m) | — | [archive](../../docs/plans/archive/skyline/F-SKY3-osm-marker-instances.md) |
 | F-SKY4 | SegFormer mask panel on per-view PDF pages | on (diagnostic) | — | [done](../../docs/plans/done/skyline/F-SKY4-mask-overlay.md) |
-| F-SKY5 | MobileSAM instance head | off — no benefit measured | `SKYLINE_CV_F_SKY5=1` + checkpoint | [done](../../docs/plans/done/skyline/F-SKY5-mobilesam-instance.md) |
+| F-SKY5 | MobileSAM instance head | on since 2026-10-06 (no gain on Cartagena, 2026-06-02; no-op without the checkpoint) | `SKYLINE_CV_F_SKY5=0` turns it off | [done](../../docs/plans/done/skyline/F-SKY5-mobilesam-instance.md) |
 | F-SKY6 | 1:1 segment ↔ building dedup + "considered but lost" dots | on | — | [done](../../docs/plans/done/skyline/F-SKY6-one-to-one-matching.md) |
 | F-SKY7 | Local-maxima peaks + mask panel layout | on | — | [done](../../docs/plans/done/skyline/F-SKY7-local-max-peaks-and-layout.md) |
 | F-SKY8 | Microsoft satellite footprints | per region | `"use_satellite_footprints": true` | [done](../../docs/plans/done/skyline/F-SKY8-satellite-footprints.md) |
@@ -149,7 +149,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | F-SKY11.2 | Pano → bird's-eye IPM registration | **removed** (depth reach ~5–7 m) | — | [archive](../../docs/plans/archive/skyline/F-SKY11.2-FAILURE-ANALYSIS.md) |
 | F-SKY12 | Depth Anything V2 cross-check; downweight + rescue in aggregation | off by default | `SKYLINE_CV_F_SKY12=1` | [done](../../docs/plans/done/skyline/F-SKY12-depth-from-panos.md) |
 | F-SKY13 | OSM coastline overlay (on); OSM-primary keypoints, Phase C (off) | partly on | `SKYLINE_CV_F_SKY13=0` disables overlay; `SKYLINE_CV_PHASE_C=1` | [done](../../docs/plans/done/skyline/F-SKY13-osm-coastline-footprints-overlay.md) |
-| F-SKY14 | Trained satellite coastline detector | proposed, deferred | — | — |
+| F-SKY14 | Trained satellite coastline detector | dropped (never built) | — | — |
 | F-SKY15 | HTML diagnostic report | on | `SKYLINE_CV_HTML_REPORT=0` disables | [done](../../docs/plans/done/skyline/F-SKY15-html-diagnostic-report.md) |
 | F-SKY16 | Coastline-ICP heading | Phase A measure-only | — | [done](../../docs/plans/done/skyline/F-SKY16-coastline-icp-heading.md) |
 | F-SKY17 | MS ↔ OSM footprint registration | failed | — | [archive](../../docs/plans/archive/skyline/F-SKY17-ms-osm-registration.md) |
@@ -158,9 +158,10 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | F-SKY22/24 | Sliding-window splitter; depth post-cut (no-op); bearing xcorr rescue | on | — | — (see [STATUS](docs/STATUS.md)) |
 | F-DET1/2/3/5 | Blob-count early-out, OSM-FOV gate, weak sub-labels, landing-page det column | on | — | [active](../../docs/plans/active/F-DET-detection-quality-and-early-out.md) |
 | F-DET4a–c | Per-city Type 2 fixes | on hold — instrument first | — | [active](../../docs/plans/active/F-DET-detection-quality-and-early-out.md) |
+| (removed 2026-10-28) | Two-sphere roof-corner triangulation (`_pano/triangulate.py`, `SKYLINE_TRIANGULATE`, off); satellite `sat_joint` reading (`height/satellite/joint.py`, off); Google 2.5D low-rise prior (`lowrise_prior.py`, refused) | removed, in git history | — | [building-heights decisions](../../docs/decisions/building-heights.md) |
 
-- F-SKY14 constraint: any satellite-side coastline detector must be trained against OSM ground truth; HSV heuristics
-  proved unreliable.
+- F-SKY14 (dropped, never built) constraint, if ever revived: any satellite-side coastline detector must be trained
+  against OSM ground truth; HSV heuristics proved unreliable.
 - Pipeline-order rationale (signal source-of-truth table, 2026-05):
   [F-SKY-PIPELINE-CONSOLIDATION](../../docs/plans/archive/skyline/F-SKY-PIPELINE-CONSOLIDATION.md).
 
@@ -341,7 +342,7 @@ Height accuracy is scored on surveyed truth, never on Cartagena (no open survey;
 - **Always-on beach band heuristic** cost 5 matched buildings; replaced by the class-membership ground cap.
 - **Earth/sand in the ground cap** (reverted 2026-06-07): chopped sandy-coloured towers (seed_5 peninsula tip).
   The cap is water-only and bottom-up.
-- **MobileSAM (F-SKY5) on Cartagena** (2026-06-02): identical extracted buildings (317) and coverage, +79 % wall time.
+- **MobileSAM (F-SKY5) on Cartagena** (2026-06-02; default ON since 2026-10-06 by user choice): identical extracted buildings (317) and coverage, +79 % wall time.
   F-SKY2 already handles the merged-tower cases, or SAM's splits don't survive 1:1 dedup.
 - **F-SKY3 Voronoi split:** unconditional splitting regressed MAE 17.3 → 22.1 m and tagged matches 13 → 8.
 - **F-SKY11.2 bird's-eye IPM:** monocular water masks reach ~5–7 m against a 1 km+ bay, so the rotation IoU is flat.
@@ -401,11 +402,11 @@ The single list of skyline open work (the plans roadmap in `map2stl/docs/plans/`
   - Seattle: 3D Tiles reads +3.9 m above lidar on hills; check `google_3d.py::_ground_from_dsm` on slopes.
   - Prague: 3D Tiles gave one value (104.15 m) over many low footprints; find the coarse-tile cause.
 - **Validation and regions**
-  - F-SKY5: only revisit on a region with merged towers F-SKY2 can't split; Cartagena showed no gain.
+  - F-SKY5: on by default since 2026-10-06; Cartagena showed no gain from it (2026-06-02).
   - Wire Miami and Chicago to the opt-in flags (F-SKY8/11.1/13, `pano_only_pdf`) and record per-seed recovery
     accuracy in STATUS (was F-CLEAN13).
 - **Housekeeping**
-  - Decide on the research probes `scripts/demos/13`–`16`: fold conclusions into STATUS and archive (AUDIT-2026-06-07).
+  - The research probes `scripts/demos/13`–`16` were removed 2026-10-28 (in git history).
 
 ## Plans
 

@@ -64,7 +64,7 @@ Two constraints follow:
    - New `city2stl/height/satellite/`: `scene.py`, `readings.py`, `weights.py`.
    - Offline script `scripts/19_satellite_heights.py`.
    - Opt-in site flag `use_satellite_heights`.
-   - Not `height/providers/shadow_height.py`, which is deprecated (2026-08-28).
+   - Not `height/providers/shadow_height.py`, which was removed 2026-10-28.
 8. **Camera pose check from floor distance.** Floor-implied distance does not depend on the
    camera's position, heading or height. Log it first, then use it as a gate or tie-break.
 9. **Commons photo signature** (floors and widths). Only after an oracle test ranks the true
@@ -429,7 +429,7 @@ Two constraints follow:
   trusted single agree with it, 3 have none.
 - 2026-10-09, Google Open Buildings 2.5D low-rise prior (review item 4): reader
   `height/providers/google_ob25d.py` (public bucket, S2 manifests, COG windows in
-  `~/.cache/ob25d/`; not in `_REGISTRY`) and `skyline/lowrise_prior.py` (opt-in
+  `~/.cache/ob25d/`; not in `_REGISTRY`) and `skyline/lowrise_prior.py` (removed 2026-10-28; opt-in
   `use_google_2p5d_prior`, **refused**: decision "Google Open Buildings 2.5D does not replace the
   T41 prior for low-rises"; commit `a220104`). Under 15 m it beats T41 held out in San Juan,
   Mayagüez and Charlotte Amalie (MAE 2.03 / 1.91 / 1.89 vs 3.16 / 2.46 / 2.01, bias <= 0.62 m)

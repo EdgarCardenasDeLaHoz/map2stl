@@ -147,7 +147,7 @@ Open skyline work is listed once, in the
 | F-CLEAN8 | Split `_seed_multiview_registration` into 5 named helpers. | done (2026-05-26) |
 | F-SKY1, 2, 4, 6, 7, 8, 10, 11, 11.1, 12, 15 | Skyline signals (floor periodicity, OSM-anchored segments, mask overlay, 1:1 matching, local-max peaks, satellite footprints, cross-view check, coastline alignment, depth from panos, HTML report). Plans: [plans/done/skyline/](plans/done/skyline/F-SKY1-floor-periodicity.md) (one file per ID); status table in the [skyline README](../city2stl/skyline/README.md#feature-status). | done (2026-05 to 2026-06) |
 | F-SKY-PIPELINE | Consolidate F-SKY1..13 into one pipeline (core / opt-in / diagnostic). Plan archived: [plans/archive/skyline/F-SKY-PIPELINE-CONSOLIDATION.md](plans/archive/skyline/F-SKY-PIPELINE-CONSOLIDATION.md). | superseded (2026-06) |
-| F-SKY17 | Register Microsoft footprints to OSM before dedup. Plan archived: [plans/archive/skyline/F-SKY17-ms-osm-registration.md](plans/archive/skyline/F-SKY17-ms-osm-registration.md). | failed, archived |
+| F-SKY17 | Register Microsoft footprints to OSM before dedup. Plan archived: [plans/archive/skyline/F-SKY17-ms-osm-registration.md](plans/archive/skyline/F-SKY17-ms-osm-registration.md). | failed, archived; the registration code still runs by default (`register_to_osm=True`), see issues.md |
 | P-PLANB-DEM | Off-thread DEM pixel loop (`app/client/static/js/workers/dem-render-worker.js`). | done |
 | ML-1 | Height provider wiring (`city2stl/height/` registry, `/api/height/*`). From `todos/`. | done |
 | ML-2 | Tall-building accuracy gap of the CNN height model. Superseded: no CNN is wired at runtime; tall buildings come from Google 3D Tiles / Overture (see [issues.md](issues.md) §0c). From `todos/`. | superseded |

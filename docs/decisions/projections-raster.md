@@ -132,6 +132,7 @@ Raster orientation, map-projection order and area measurement. Related: [archite
 - **Decision:**
   - The deprecated `clip_nans` alias is gone from every route and request model (terrain, cities, composite, height, schemas) and from export parsing; they read only `clip_valid_region`. `/api/settings` defaults and the SDK use `clip_valid_region`.
   - The one place the old key is still read: `map2stl/app/server/routers/regions.py::_rename_legacy_clip_nans`, as saved region settings load (an explicit `clip_valid_region` wins). The browser also renames it in saved presets (`app/client/static/js/modules/ui/settings-compat.js::normalizeSettingsKeys`).
+    - Both renames were removed 2026-10-28 (F-UNIFY step 7): none of the 87 saved `region_settings` rows used `clip_nans`.
   - The `geo2stl.projections` functions keep their `clip_nans` parameter name (library-internal).
 - **Why:** two spellings meant every reader had to check both, and the composite export path read only `clip_nans`, so an unchecked box was ignored once the client sent `clip_valid_region`.
 - **Rejected:** mapping in `ExportContext` — it covers export bodies but not the settings the SDK and browser load.

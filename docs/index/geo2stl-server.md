@@ -46,7 +46,6 @@ Locator for geo2stl (DEM, imagery, projections, water, trails) and the server-si
 ### Regions, settings, DEM request (server side)
 
 - Saved regions and settings blob: `map2stl/app/server/routers/regions.py` (`list_regions`, `get_region_settings`, `save_region_settings_route`); schema `map2stl/app/server/core/db.py::init_db`
-  - The one place the retired `clip_nans` key is still read (renamed to `clip_valid_region` as saved settings load): `map2stl/app/server/routers/regions.py::_rename_legacy_clip_nans`
 - Default settings (`dem_source` from `default_dem_source`): `map2stl/app/server/routers/settings.py::get_default_settings`
 - DEM route (returns `dem_id`, `source_resolution`, empty-DEM warning): `map2stl/app/server/routers/terrain.py::get_terrain_dem` (`_dem_empty_warning`)
 - Server settings, cache paths, limits: `map2stl/app/server/config.py` (`EE_CACHE_DIR` under `geo2stl.cache.CACHE_ROOT`, `CACHE_DIRS`, `CACHE_MAX_FILES`)

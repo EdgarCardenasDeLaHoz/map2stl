@@ -9,6 +9,10 @@ _Last updated: 2026-10-28_
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
 
+## F-SKY17 Microsoft-to-OSM offset still runs by default though recorded as failed (found 2026-10-28, open)
+- **Symptom:** `city2stl/skyline/satellite_footprints.py::merge_satellite_into_osm` has `register_to_osm=True` by default; with enough pairs `_estimate_ms_osm_offset` shifts every Microsoft polygon before dedup. `docs/proposals.md` records F-SKY17 as "failed, archived".
+- **Next:** decide whether to set the default to False (changes merge output; compare a region's footprints before and after) or record why it stays on.
+
 ## Align tool plate heightmap fills with its own pixel rule, untested (found 2026-10-28, open)
 - **Symptom:** `tools/align_tool/plate_vectors.py::polygons_to_heightmap` burns footprints with `cv2.fillPoly` on rounded vertices. Everything else uses `numpy2stl.raster.burn_polygons` and its cell-centre rule, so plate footprint edges can sit up to a pixel off the app's.
 - **Fix:** add a golden-pixel test, switch to `burn_polygons` (`bounds=(W,S,E,N)`, then `flipud`, since the plate grid has row 0 = south), and re-check one plate registration score.

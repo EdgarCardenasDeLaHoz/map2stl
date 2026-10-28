@@ -180,7 +180,7 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
     city-model namespaces below.
   - Registered elsewhere: each height provider registers its own through
     `city2stl/height/providers/_cache.py::register_ttl` (`ndsm`, `lidar_3dep`, `copernicus_bh`,
-    `open_buildings`, `gba`, `ghsl`, `wsf3d`, `google3d`, `shadow_height`); the app writes
+    `open_buildings`, `gba`, `ghsl`, `wsf3d`, `google3d`; `shadow_height` removed 2026-10-28); the app writes
     `esa_lc` (terrain router); Earth Engine joblib files go to `ee/`
     (`geo2stl/sat2stl.py::CACHE_DIR`, `app/server/config.py::EE_CACHE_DIR`);
     `city2stl/fetch.py::fetch_osm_lakes` writes `osm_lakes`.
@@ -191,8 +191,7 @@ Brief map; detail in [numpy2stl README](../../../numpy2stl/README.md).
   - Why → [mesh-pipeline.md](../decisions/mesh-pipeline.md), "City builds are fast through
     print-layer merging, content-keyed caches and no Triangle in draped slabs".
 - **`app/server/core/cache.py`** — app-side policy only: `app/server/core/cache.py::prune_cache`,
-  `app/server/core/cache.py::prune_all_caches`, `app/server/core/cache.py::clear_bbox_cache`,
-  `app/server/core/cache.py::migrate_osm_plain_json`.
+  `app/server/core/cache.py::prune_all_caches`, `app/server/core/cache.py::clear_bbox_cache`.
 - **DEM key and handles** — `app/server/core/dem_cache.py::dem_cache_key` is the single
   definition of the DEM key (projection excluded; projected per request);
   `app/server/core/dem_store.py::DemStore` hands export the exact grid the client saw, by id.

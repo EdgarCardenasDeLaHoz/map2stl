@@ -25,7 +25,6 @@
  *   window.showToast(msg, type)        — global from app.js file-top
  */
 
-import { normalizeSettingsKeys } from './settings-compat.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State
@@ -409,7 +408,6 @@ function _applyComposite(c) {
 
 function applyAllSettings(s) {
     if (!s) return;
-    s = normalizeSettingsKeys(s);
     const set = _set;
     const setChk = _setChk;
 
@@ -631,10 +629,8 @@ async function loadAndApplyRegionSettings(regionName) {
         ]);
         const defaults = !defaultsError && defaultsData?.settings ? defaultsData.settings : null;
         if (!error && data) {
-            // Normalise both sides first: a legacy clip_nans in the saved blob
-            // must override the defaults' clip_valid_region, not sit beside it.
-            const saved = normalizeSettingsKeys(data.settings || {});
-            const merged = defaults ? _mergeSettings(normalizeSettingsKeys(defaults), saved) : saved;
+            const saved = data.settings || {};
+            const merged = defaults ? _mergeSettings(defaults, saved) : saved;
             // No saved layer stack: reset it rather than keep the previous region's.
             if (merged.view && !merged.view.layers) merged.view = { ...merged.view, layers: null };
             _applyStored(merged);

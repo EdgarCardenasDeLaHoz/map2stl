@@ -1931,7 +1931,6 @@ class TerrainSession:
             ``"ndsm"``           — GLO-30 minus SRTM (~30 m, 56°S–60°N)
             ``"copernicus"``     — Copernicus EU Building Height (~10 m, Europe only)
             ``"lidar_3dep"``     — USGS 3DEP LiDAR nDSM (~1 m, US only)
-            ``"shadow_height"``  — Shadow-based estimation (~5 m, global, Phase 1b placeholder)
             ``"google3d"``       — Google Photorealistic 3D Tiles (~1 m, API key)
 
         After this call ``self.building_heights`` holds a ``HeightResult``
@@ -1951,7 +1950,6 @@ class TerrainSession:
         from city2stl.height.providers.lidar_3dep import LiDAR3DEPProvider
         from city2stl.height.providers.ndsm import NDSMProvider
         from city2stl.height.providers.open_buildings import OpenBuildingsProvider
-        from city2stl.height.providers.shadow_height import ShadowHeightProvider
         from city2stl.height.providers.wsf3d import WSF3DProvider
 
         north = self.bbox["north"]
@@ -1982,7 +1980,6 @@ class TerrainSession:
             "lidar_3dep": lambda: LiDAR3DEPProvider(api_key=OPENTOPO_API_KEY),
             "ghsl": lambda: GHSLProvider(),
             "open_buildings": lambda: OpenBuildingsProvider(),
-            "shadow_height": lambda: ShadowHeightProvider(),
             "google3d": lambda: Google3DProvider(),
         }
 

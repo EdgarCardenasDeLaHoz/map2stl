@@ -852,10 +852,6 @@ def _is_floors(d) -> bool:
     return d.get("kind") == "floors"
 
 
-def _is_tri(d) -> bool:
-    return d.get("kind") == "triangulated"
-
-
 def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0,
                  group=None) -> dict:
     """One height per footprint from several seeds' measurements (``{seed: [Measured or dict]}``).
@@ -886,12 +882,6 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0,
     from seed B beside a drone reading from seed A are two (decision 2026-10-07). ``group``: seed
     name -> camera (two captures from one camera are one source); identity by default.
     ``floors_only``: every kept reading is a floors reading.
-
-    ``kind`` "triangulated" readings (``_pano.triangulate.fusion_reading``) carry the camera
-    ``seeds`` (groups) of the two spheres whose corner rays gave them. They contain those spheres'
-    elevations, so they are not independent of a drone reading from either: one counts as a
-    source only when its camera groups are disjoint from the drone groups kept (a third camera's
-    reading, or no drone reading at all), and then once however many were kept.
     """
     grp = group or (lambda x: x)
     rows: dict = {}
@@ -915,12 +905,10 @@ def fuse_heights(by_seed: dict, agree: float = 0.25, overrule: float = 3.0,
         out_v = [r for r in got if r not in keep and not (bound(r) and r[1]["height_m"] < best)]
         w = np.array([r[2] for r in keep])
         drones = {grp(r[0]) for r in keep
-                  if not _is_sat(r[1]) and not _is_floors(r[1]) and not _is_tri(r[1])}
+                  if not _is_sat(r[1]) and not _is_floors(r[1])}
         fl_src = {grp(r[1].get("seed", r[0])) for r in keep if _is_floors(r[1])}
-        tri_src = {grp(g) for r in keep if _is_tri(r[1]) for g in r[1].get("seeds", ())}
         n_src = (len(drones) + (1 if any(_is_sat(r[1]) for r in keep) else 0)
-                 + (1 if fl_src - drones else 0)
-                 + (1 if any(_is_tri(r[1]) for r in keep) and not (tri_src & drones) else 0))
+                 + (1 if fl_src - drones else 0))
         out[fp] = {"name": anchor[1]["name"],
                    "height_m": float(np.average([r[1]["height_m"] for r in keep], weights=w)),
                    "seeds": {r[0]: round(float(r[1]["height_m"]), 1) for r in got},

@@ -65,7 +65,7 @@ and the registration tools feed building heights into the city model automatical
      - align_tool's `plate_vectors.polygons_to_heightmap`.
 6. **Atomic writes and locks.** **Done 2026-10-28.** One `atomic_write_json` / `file_lock` in `geo2stl/cache.py`;
    `skyline/benchmark` uses it.
-7. **Dead code out.**
+7. **Dead code out.** **Done 2026-10-28** (decision `architecture.md`, "Dead code removed in F-UNIFY step 7"). Kept: `roads.py`, `maintain_dimensions`, F-SKY5 (on), the F-SKY12 / 11.1 flags, the pre-sidecar OSM probe, F-SKY17 (live default).
    - The `shadow_height` provider (deprecated 2026-08-28) and `city2stl/roads.py` (legacy).
    - The legacy request aliases (`mm_per_px`, `fit_height_mm`, `base_mm`, `clip_nans`,
      `maintain_dimensions`), after checking `data.db` presets and the client for users.

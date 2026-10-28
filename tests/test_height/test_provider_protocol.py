@@ -22,7 +22,6 @@ _PROVIDERS = [
     ("lidar_3dep", "LiDAR3DEPProvider"),
     ("ndsm", "NDSMProvider"),
     ("open_buildings", "OpenBuildingsProvider"),
-    ("shadow_height", "ShadowHeightProvider"),
     ("wsf3d", "WSF3DProvider"),
 ]
 
@@ -65,7 +64,6 @@ _EMPTY_NAMES = [
     ("google_3d", "google3d"),
     ("lidar_3dep", "lidar_3dep"),
     ("open_buildings", "open_buildings"),
-    ("shadow_height", "shadow_height"),
     ("wsf3d", "wsf3d"),
 ]
 
