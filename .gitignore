@@ -80,3 +80,5 @@ tools/align_tool/cache/
 tools/align_tool/_debug/
 .coverage
 .claude/worktrees/
+# OneDrive conflict copies and strays, archived instead of deleted
+data/archive/
