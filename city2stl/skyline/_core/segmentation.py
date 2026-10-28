@@ -87,6 +87,34 @@ _segformer_device: str = "cpu"
 #: waits for it before loading onto the card.
 _SEGFORMER_VRAM_GB = {"b0": 0.6, "b1": 0.8, "b2": 1.1, "b3": 1.5, "b4": 2.2, "b5": 2.6}
 
+def _load_segformer_model(model_id: str):
+    """Load SegFormer weights without ``torch.load`` (transformers refuses ``.bin`` on torch < 2.6).
+
+    1. ``from_pretrained(use_safetensors=True)``: works when the resolved snapshot (or the hub)
+       has ``model.safetensors``.
+    2. Otherwise find ``model.safetensors`` in any cached snapshot of the same repo and load it
+       into a model built from the config.
+    """
+    from transformers import SegformerForSemanticSegmentation  # noqa: PLC0415
+
+    try:
+        return SegformerForSemanticSegmentation.from_pretrained(model_id, use_safetensors=True)
+    except Exception as first:  # noqa: BLE001 - snapshot without safetensors, or offline
+        logger.warning("[segformer] safetensors load of %s failed (%s); trying the HF cache",
+                       model_id, first)
+        from huggingface_hub.constants import HF_HUB_CACHE  # noqa: PLC0415
+        from safetensors.torch import load_file  # noqa: PLC0415
+        from transformers import SegformerConfig  # noqa: PLC0415
+
+        repo = Path(HF_HUB_CACHE) / ("models--" + model_id.replace("/", "--")) / "snapshots"
+        found = sorted(repo.glob("*/model.safetensors")) if repo.is_dir() else []
+        if not found:
+            raise RuntimeError(f"no model.safetensors cached for {model_id}") from first
+        model = SegformerForSemanticSegmentation(SegformerConfig.from_pretrained(model_id))
+        model.load_state_dict(load_file(str(found[0])))
+        return model
+
+
 def _ensure_segformer() -> bool:
     """Lazily load SegFormer-b0 (ADE20K). Returns True if the model is ready.
 
@@ -102,14 +130,10 @@ def _ensure_segformer() -> bool:
     _SEGFORMER_LOADED = True
     try:
         import torch  # noqa: PLC0415
-        from transformers import (  # noqa: PLC0415
-            SegformerForSemanticSegmentation,
-            SegformerImageProcessor,
-        )
+        from transformers import SegformerImageProcessor  # noqa: PLC0415
         _segformer_processor = SegformerImageProcessor.from_pretrained(
             _SEGFORMER_MODEL_ID)
-        _segformer_model = SegformerForSemanticSegmentation.from_pretrained(
-            _SEGFORMER_MODEL_ID)
+        _segformer_model = _load_segformer_model(_SEGFORMER_MODEL_ID)
         _segformer_model.eval()  # type: ignore[union-attr]
         # Override the processor's internal resize so a smaller input
         # square reduces the per-forward-pass cost. We touch both the
@@ -149,7 +173,9 @@ def _ensure_segformer() -> bool:
             _segformer_model.to(_segformer_device)  # type: ignore[union-attr]
         print(f"[segformer] device={_segformer_device}  model={_SEGFORMER_MODEL_ID.split('/')[-1]}  input={_input_n}px")
         _SEGFORMER_OK = True
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - callers fall back to no labels, but say why
+        logger.warning("[segformer] unavailable, no labels will be produced: %s: %s",
+                       type(exc).__name__, exc)
         _SEGFORMER_OK = False
     return _SEGFORMER_OK
 

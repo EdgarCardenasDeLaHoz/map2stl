@@ -13,6 +13,9 @@ Identifications (image column -> OSM building) feed ``camera_solver.solve_pose``
 A label may name several OSM buildings (a two-tower complex such as "Vizcayne"); every
 combination is tried (capped at ``MAX_COMBOS``) and the lowest-RMS pose is kept, which also
 says which tower the label meant.
+
+A label carrying ``lat`` and ``lon`` (a point picked on the map, as ``tools/photo_label`` writes
+it) is used directly as its single candidate, before any ``osm_names`` lookup.
 """
 
 from __future__ import annotations
@@ -49,10 +52,17 @@ def building_index(features: list[dict]) -> dict[str, list[tuple[float, float]]]
 
 def solve_from_labels(ann: dict, index: dict[str, list[tuple[float, float]]],
                       **solver_kw) -> tuple[Pose, dict[str, str]]:
-    """Pose from an annotation file; returns it and label -> the OSM name it was matched to."""
+    """Pose from an annotation file; returns it and label -> the OSM name it was matched to.
+
+    A label with ``lat``/``lon`` is used as is (its own label is the "name"); otherwise its
+    ``osm_names`` are looked up in ``index``.
+    """
     options = []  # per usable label: [(osm_name, lat, lon), ...]
     for lab in ann["labels"]:
-        cands = [(n, *ll) for n in lab.get("osm_names", []) for ll in index.get(n.lower(), [])]
+        if lab.get("lat") is not None and lab.get("lon") is not None:
+            cands = [(lab["label"], float(lab["lat"]), float(lab["lon"]))]
+        else:
+            cands = [(n, *ll) for n in lab.get("osm_names", []) for ll in index.get(n.lower(), [])]
         if cands:
             options.append((lab, cands))
     width = int(ann["image_px"][0])

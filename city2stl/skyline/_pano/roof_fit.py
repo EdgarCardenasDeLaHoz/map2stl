@@ -17,7 +17,9 @@ so the observed top inverts in closed form (:func:`invert_top`), no search. The 
 for only inside the band of rows a 3-260 m roof can reach (:func:`observed_top`), and what lies
 above it ranks the column: sky or ground above is trusted, another building (instance or depth
 step) counts, a nearer surface above only bounds the height from below and is left out.
-The columns aggregate to their 35th percentile (a set-back penthouse raises the middle columns;
+With ``depth_calib`` (:func:`calibrate_depth`: Depth Anything fitted to metric distance on the
+view's own feet) a run also ends where it reaches past the footprint's far side (F-PHOTOVIEW:
+stacked houses up a slope). The columns aggregate to their 35th percentile (a set-back penthouse raises the middle columns;
 the median is kept beside it).
 
 :func:`check_pose_from_bases` pools the observed base rows of all measured buildings into one
@@ -100,7 +102,8 @@ def invert_top(h, e_deg, d_in, d_out):
 def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=None,
                  gap_px: int = 6, local_px: int = 12, stop_ratio: float = 0.85,
                  near_ratio: float = 1.3, far_ratio: float | None = None,
-                 base_win_px: int = 0):
+                 base_win_px: int = 0, dist_col=None, d_max: float | None = None,
+                 d_near: float | None = None):
     """``(row, edge)`` of one building's top in one column, or None.
 
     Goes up from the base (or ``start_row``: the top of a nearer building in front) to the
@@ -118,6 +121,15 @@ def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=N
     resumes at its own depth. A run that ends at sky is ``sky``, at any other label ``ground``;
     at the image top ``image``.
 
+    ``dist_col`` (metric distance per row, from :func:`calibrate_depth`) with ``d_max``: a
+    building row farther than ``d_max`` (this footprint's far side plus a margin) belongs to a
+    building behind, whatever the instances say: the run ends there (``depth``), and a gap is
+    not crossed onto it. This separates a roof from the next house uphill, which Depth Anything
+    places only 3-5 % farther at 400 m, under the relative steps above. With ``d_near`` (the
+    footprint's ``d_in``) the distances are first rescaled so the run's first ``local_px`` rows
+    (the wall) sit at ``d_near``: a per-photo calibration is good to ~15 % at 400 m, far coarser
+    than a house's depth, but its error varies slowly across the image.
+
     ``band``: ``(hi, lo)`` rows the top can occupy (heights :data:`H_RANGE_M`). A run still
     going above ``hi`` merged with something taller (None); one ending below ``lo`` is no roof.
     """
@@ -125,6 +137,12 @@ def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=N
     n = len(labels_col)
     is_b = np.isin(labels_col, fd.BUILDING_CLASSES)
     hi, lo = band
+
+    scale = [1.0]
+
+    def behind(k):
+        return dist_col is not None and d_max is not None and bool(dist_col[k] * scale[0] > d_max)
+
     y = min(int(round(base_row if start_row is None else min(base_row, start_row))) - 1, n - 1)
     gap = 0
     while y >= 0 and not is_b[y]:
@@ -132,9 +150,12 @@ def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=N
         if gap > max(gap_px, base_win_px) or y < hi:
             return None
         y -= 1
-    if y < 0:
-        return None
+    if y < 0 or (d_near is None and behind(y)):
+        return None                                 # nothing here, or only a building behind
     bottom = y
+    if dist_col is not None and d_near is not None:
+        d0 = float(np.median(dist_col[max(0, y - local_px + 1):y + 1]))
+        scale[0] = d_near / d0 if np.isfinite(d0) and d0 > 0 else 1.0
     ref = None if depth_col is None else float(np.median(depth_col[max(0, y - local_px + 1):y + 1]))
 
     def level(y0):
@@ -151,6 +172,9 @@ def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=N
         if y - 1 < hi - 1:
             return None                             # taller than any roof: merged
         nb = y - 1
+        if is_b[nb] and behind(nb):
+            edge = "depth"
+            break
         if is_b[nb]:
             if not same(nb, y) and depth_col is not None:
                 loc = level(y)
@@ -166,7 +190,7 @@ def observed_top(labels_col, inst_col, depth_col, base_row, band, *, start_row=N
         k = nb
         while k >= 0 and not is_b[k] and nb - k < gap_px:
             k -= 1
-        if k >= 0 and is_b[k] and k >= hi - 1:
+        if k >= 0 and is_b[k] and k >= hi - 1 and not behind(k):
             if inst_col is not None and inst_col[y] > 0 and inst_col[k] > 0:
                 resume = inst_col[k] == inst_col[y]
             elif depth_col is not None:
@@ -196,6 +220,67 @@ def observed_base(labels_col, base_row: float, win_px: int):
                 best = y
     return None if best is None else float(best + 1)       # the boundary under that row
 
+
+# --------------------------------------------------------------------------- metric depth
+
+
+@dataclass(frozen=True)
+class DepthCalib:
+    """Depth Anything's relative inverse depth as metric distance: ``disp = a / d + b``."""
+    a: float
+    b: float
+    n: int
+    mad_rel: float          # median |log(d_fit / d_true)| over the kept samples
+
+    def distance(self, disp):
+        disp = np.asarray(disp, float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            d = self.a / (disp - self.b)
+        return np.where(disp > self.b, d, np.inf)
+
+
+def fit_inverse_depth(disp, dist_m, iters: int = 4, k: float = 3.0) -> DepthCalib | None:
+    """Robust least squares of ``disp = a / dist + b`` (trimmed at ``k`` MADs per round)."""
+    y, x = np.asarray(disp, float), 1.0 / np.asarray(dist_m, float)
+    keep = np.isfinite(x) & np.isfinite(y)
+    if keep.sum() < 10:
+        return None
+    for _ in range(iters):
+        a, b = np.polyfit(x[keep], y[keep], 1)
+        r = y - (a * x + b)
+        mad = float(np.median(np.abs(r[keep] - np.median(r[keep])))) or 1e-9
+        new = np.isfinite(x) & np.isfinite(y) & (np.abs(r) <= k * 1.4826 * mad)
+        if new.sum() < 10 or (new == keep).all():
+            break
+        keep = new
+    a, b = np.polyfit(x[keep], y[keep], 1)
+    if a <= 0:
+        return None
+    cal = DepthCalib(float(a), float(b), int(keep.sum()), 0.0)
+    d = cal.distance(y[keep])
+    err = np.abs(np.log(d / np.asarray(dist_m, float)[keep]))
+    return DepthCalib(cal.a, cal.b, cal.n, float(np.median(err[np.isfinite(err)])))
+
+
+def calibrate_depth(pano: fd.Pano, pose: fd.PanoPose, footprints: list, depth, cam_h=None,
+                    above_px: int = 3, **fit_kw) -> DepthCalib | None:
+    """Per-photo metric scale of a relative inverse-depth map from the footprints' known
+    distances: a plain :func:`fit_roof_heights` pass (no metric depth) gives the feet it saw
+    (building over street at the predicted base row, not behind a nearer measured roof), and
+    the depth a few rows up each such wall is fitted against ``1 / d_in``
+    (:func:`fit_inverse_depth`). Uses no building height. None with under 10 feet."""
+    from scipy.ndimage import median_filter
+
+    fit_kw = {k: v for k, v in fit_kw.items() if k not in ("depth_calib",)}
+    _ms, bases = _fit(pano, pose, footprints, depth, None, cam_h=cam_h, **fit_kw)
+    dz = median_filter(np.asarray(depth, float), size=(5, 1))
+    ys, ds = [], []
+    for d_in, yb, _off, x in bases:
+        r = int(yb) - 1
+        if r - above_px >= 0:
+            ys.append(float(np.median(dz[r - above_px:r + 1, x])))
+            ds.append(float(d_in))
+    return fit_inverse_depth(ys, ds)
 
 # --------------------------------------------------------------------------- footprints
 
@@ -242,11 +327,24 @@ def _candidates(pano, pose, footprints, max_dist_m, min_cols):
     return out
 
 
+def _cam_heights(pose, footprints, cam_h):
+    """Camera height above each footprint's own base: ``pose.camera_h_m`` everywhere (one
+    ground plane), or ``cam_h[i]`` where that is finite (terrain under each footprint)."""
+    out = np.full(len(footprints), float(pose.camera_h_m))
+    if cam_h is not None:
+        c = np.asarray(cam_h, float)
+        if c.shape != out.shape:
+            raise ValueError(f"cam_h has {c.size} entries for {out.size} footprints")
+        out = np.where(np.isfinite(c), c, out)
+    return out
+
+
 def _fit(pano, pose, footprints, depth, instances, max_dist_m=3000.0, min_cols_deg=0.7,
          core=0.7, stop_ratio=0.85, near_ratio=1.3, far_slack=0.95, min_share=1 / 3,
-         h_range=H_RANGE_M):
+         h_range=H_RANGE_M, cam_h=None, depth_calib=None, far_rel=0.0, far_abs_m=5.0,
+         depth_anchor=True):
     H, W = pano.labels.shape
-    h = pose.camera_h_m
+    hs_cam = _cam_heights(pose, footprints, cam_h)
     bear_col = (pano.frame_heading + pose.offset_deg) % 360.0
     gap_px, local_px, base_win = _px(pano, GAP_DEG), _px(pano, LOCAL_DEG), _px(pano, BASE_WIN_DEG)
     dz = None
@@ -254,9 +352,16 @@ def _fit(pano, pose, footprints, depth, instances, max_dist_m=3000.0, min_cols_d
         from scipy.ndimage import median_filter
 
         dz = median_filter(np.asarray(depth, float), size=(5, 1))
+    if isinstance(depth_calib, str) and depth_calib == "auto":
+        depth_calib = None if depth is None else calibrate_depth(
+            pano, pose, footprints, depth, cam_h=cam_h, max_dist_m=max_dist_m,
+            min_cols_deg=min_cols_deg, core=core, stop_ratio=stop_ratio, near_ratio=near_ratio,
+            far_slack=far_slack, min_share=min_share, h_range=h_range)
+    dist = None if depth_calib is None or dz is None else depth_calib.distance(dz)
     occ = np.full(W, float(H))                     # rows >= occ: hidden behind nearer roofs
     out, bases = [], []
     for c in _candidates(pano, pose, footprints, max_dist_m, _px(pano, min_cols_deg)):
+        h = float(hs_cam[c.i])
         xs_all = np.arange(c.x0, c.x1 + 1)
         iv = ray_intervals(c.xy, bear_col[xs_all])
         n = len(xs_all)
@@ -276,12 +381,15 @@ def _fit(pano, pose, footprints, depth, instances, max_dist_m=3000.0, min_cols_d
                                None if dz is None else dz[:, x], base, (hi, lo),
                                start_row=occ[x], gap_px=gap_px, local_px=local_px,
                                stop_ratio=stop_ratio, near_ratio=near_ratio,
-                               far_ratio=far_slack * d_in / d_out, base_win_px=base_win)
+                               far_ratio=far_slack * d_in / d_out, base_win_px=base_win,
+                               dist_col=None if dist is None else dist[:, x],
+                               d_max=d_out * (1.0 + far_rel) + far_abs_m,
+                               d_near=d_in if depth_anchor else None)
             base_vis = occ[x] >= base - 0.5
             if base_vis:
                 yb = observed_base(pano.labels[:, x], base, base_win)
                 if yb is not None:
-                    bases.append((d_in, yb))
+                    bases.append((d_in, yb, h - pose.camera_h_m, int(x)))
             if got is None:
                 continue
             t, edge = got
@@ -322,7 +430,17 @@ def fit_roof_heights(pano: fd.Pano, pose: fd.PanoPose, footprints: list, depth=N
     predicted silhouettes), height by :func:`invert_top`. A footprint needs ``min_share`` of its
     core columns (and 3) with a usable edge. ``height_m`` is the 35th percentile of those
     columns, ``height_median_m`` their median; ``confidence`` = trusted share x columns (/20,
-    capped) x (1 - IQR / height)."""
+    capped) x (1 - IQR / height).
+
+    ``cam_h`` (optional, one per footprint): the camera's height above that footprint's base,
+    for terrain that is not one plane (a camera on a hill over a sloping town); NaN entries and
+    the default use ``pose.camera_h_m``.
+
+    ``depth_calib`` (optional): a :class:`DepthCalib`, or ``"auto"`` to fit one from this view's
+    footprint feet (:func:`calibrate_depth`). With it, a column's run ends at the first building
+    row farther than the footprint's ``d_out * (1 + far_rel) + far_abs_m`` (:func:`observed_top`
+    ``d_max``): the roof against the next house behind on a slope; ``depth_anchor`` (default
+    True) rescales each run so its wall sits at ``d_in`` first. Default None: unchanged."""
     return _fit(pano, pose, footprints, depth, instances, **kw)[0]
 
 
@@ -343,18 +461,23 @@ def check_pose_from_bases(pano: fd.Pano, pose: fd.PanoPose, footprints: list, de
     the horizon whatever the building's height. Pools the observed feet (:func:`observed_base`)
     of every measured building whose base is not behind a nearer one and fits ``h`` (median of
     ``-d tan e``), and ``h`` with a pitch offset (grid, median residual); flagged when the first
-    is more than ``tol`` from the pose's."""
+    is more than ``tol`` from the pose's.
+
+    With ``cam_h`` (per-footprint camera heights, see :func:`fit_roof_heights`) each foot is
+    taken at its own base; the heights returned stay on the pose's reference (``camera_h_m``),
+    so a shift ``h_bases_m - h_pose_m`` moves every ``cam_h`` entry by the same amount."""
     _ms, bases = _fit(pano, pose, footprints, depth, instances, **kw)
     if len(bases) < 10:
         return PoseCheck(pose.camera_h_m, math.nan, math.nan, math.nan, len(bases), math.nan, False)
     d = np.array([b[0] for b in bases])
+    off = np.array([b[2] for b in bases])           # footprint base below the reference ground
     e = np.asarray(fd._elev_of(pano, pose, np.array([b[1] for b in bases])), float)
     keep = e < -0.5
-    d, e = d[keep], e[keep]
-    h1 = float(np.median(-d * np.tan(np.radians(e))))
+    d, e, off = d[keep], e[keep], off[keep]
+    h1 = float(np.median(-d * np.tan(np.radians(e)) - off))
     best = None
     for hc in pose.camera_h_m * np.exp(np.linspace(math.log(0.6), math.log(1.6), 121)):
-        r = e - (-np.degrees(np.arctan(hc / d)))
+        r = e - (-np.degrees(np.arctan(np.maximum(hc + off, 0.1) / d)))
         fix = float(np.median(r))
         mis = float(np.median(np.abs(r - fix)))
         if best is None or mis < best[0]:

@@ -265,3 +265,55 @@ def test_roof_reading_weight_scale_defaults_to_one():
     from dataclasses import replace
 
     assert fd.measurement_weight(replace(m, weight_scale=0.5)) == pytest.approx(0.3 / 400.0 ** 2)
+
+
+# --------------------------------------------------------------------------- stacked houses
+def _stacked(gap_m):
+    """A 10 m house at 400 m (the ray crosses it from 385 to 415 m) and a 30 m one of the same
+    shape behind it on the same bearing, its near wall ``gap_m`` past the first one's far side:
+    seen from above, the building class runs unbroken from the near roof into the far
+    house's wall (the Albaicín rows, F-PHOTOVIEW)."""
+    near = _rect(*_at(30.0, 400.0), 15.0, 30.0, rot_deg=-30.0)
+    far = _rect(*_at(30.0, 430.0 + gap_m), 15.0, 30.0, rot_deg=-30.0)
+    prisms = [(near, 10.0, 1), (far, 30.0, 2)]
+    fps = [fd.Footprint("near", _ll(near), 10.0), fd.Footprint("far", _ll(far), 30.0)]
+    pano, depth, _inst = _render(prisms)
+    return pano, depth, fps
+
+
+def test_stacked_house_needs_a_depth_break():
+    """Without instances the default 15 % step misses the 7 % jump to the far house's wall and
+    reads the far roof; a 5 % local step (``stop_ratio=0.95``, the photo default) stops there.
+    (With a 5 m gap neither does: :func:`test_metric_depth_break_from_footprint_feet`.)"""
+    pano, depth, fps = _stacked(15.0)
+    old = _by_name(rf.fit_roof_heights(pano, _pose(), fps, depth=depth))
+    assert "near" not in old or old["near"].height_m > 10.0 + _tol(10.0)
+    new = _by_name(rf.fit_roof_heights(pano, _pose(), fps, depth=depth, stop_ratio=0.95))
+    assert abs(new["near"].height_m - 10.0) <= _tol(10.0), new["near"].height_m
+
+
+def test_fit_inverse_depth_recovers_affine_scale_with_outliers():
+    rng = np.random.default_rng(1)
+    d = rng.uniform(100.0, 800.0, 400)
+    disp = 400.0 / d - 0.3
+    disp[:40] *= 1.6                                                   # feet hidden by a nearer roof
+    cal = rf.fit_inverse_depth(disp, d)
+    assert cal.a == pytest.approx(400.0, rel=0.02) and cal.b == pytest.approx(-0.3, abs=0.02)
+    assert np.allclose(cal.distance(400.0 / np.array([200.0, 500.0]) - 0.3), [200.0, 500.0], rtol=0.02)
+    assert np.isinf(cal.distance(-0.5))
+    assert rf.fit_inverse_depth(disp[:5], d[:5]) is None
+
+
+def test_metric_depth_break_from_footprint_feet():
+    """Relative inverse depth on an unknown affine scale (``0.4 x 1000 / d - 0.3``): calibrated on
+    the feet (``depth_calib="auto"``), a run ending past the footprint's far side plus 5 m is
+    cut there, where the default 15 % disparity step reads the far roof."""
+    pano, depth, fps = _stacked(5.0)
+    disp = np.where(depth > 0, 0.4 * depth - 0.3, -0.3)
+    cal = rf.calibrate_depth(pano, _pose(), fps, disp)
+    assert cal is not None and cal.a == pytest.approx(400.0, rel=0.05)
+    old = _by_name(rf.fit_roof_heights(pano, _pose(), fps, depth=disp))
+    assert "near" not in old or old["near"].height_m > 10.0 + _tol(10.0)
+    new = _by_name(rf.fit_roof_heights(pano, _pose(), fps, depth=disp, depth_calib="auto",
+                                       far_rel=0.0, far_abs_m=5.0))
+    assert abs(new["near"].height_m - 10.0) <= _tol(10.0), new["near"].height_m

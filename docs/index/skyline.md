@@ -51,7 +51,9 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Camera from OSM towers: `map2stl/city2stl/skyline/skyline_match.py::locate_and_solve` (`refine`, `identify`).
   - Accept gate (T18): `skyline_match.py::gate_margin` (margin over the best rival that `identify`s a different tower set; `_tower_set`, `SAME_TOWERS_JACCARD`, `APART_M`). `scripts/17_photo_pipeline.py` still uses its own 500 m rival rule.
   - Camera roll (T19): `skyline_match.py::refine` (`max_roll_deg`; `_fit_roll`, `_grid_best`, `ROLL_MIN_GAIN`), `_unroll`, `_score_all_headings(roll_deg=)`, `Hit.roll_deg`; solver side `camera_solver.py::solve_pose` (`roll_deg`, `fit_roll`; `Obs.up_px`, `Pose.roll_deg`, `unroll_columns`, `MAX_ROLL_DEG`).
-  - Labelled photos: `photo_localize.py::solve_from_labels`, with `camera_solver.py::solve_pose`.
+  - Labelled photos: `photo_localize.py::solve_from_labels`, with `camera_solver.py::solve_pose`. A label with `lat`/`lon` is used directly.
+  - Elevated single photo to roof heights (F-PHOTOVIEW): `map2stl/city2stl/skyline/photo_view.py` — camera `PinholeCamera` (`project_ll`), resample onto the Pano row model `pano_grid` / `reproject` / `photo_pano`, camera from labels' full pixel positions `solve_from_rows`, terrain `Dem` / `footprint_bases`, feet refinement `refine_from_bases`, heights `measure` (depth-break switch `depth_break` / `DEPTH_BREAK_KW`); tests `tests/test_photo_view.py`.
+  - Hand-pairing tool (photo point <-> map or Google 3D point, camera solve, model overlay): [photo-label.md](photo-label.md).
   - Same-spot groups: `photo_groups.py::embed_links`.
   - Tower heights: `photo_heights.py::loo_heights` (`top="peak"` reads the tallest step; `measure_towers` records `peak_row`);
     stepped tops (T17): `photo_heights.py::choose_top` picks peak or median per tower across photos;
@@ -64,7 +66,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - One height across seeds: `fuse_heights`.
   - Camera position (waterline over ±600 m, then parks and streets): `fit_camera_position`; diagnostics `fit_position_from_ground`, `waterline_position_scan`.
   - In the region report, for the site's `elevated_seeds`: `map2stl/city2stl/skyline/_pano/elevated.py::measure_elevated_seed` (called from `_pano/orchestrator.py::_seed_multiview_registration`; OSM ground layers `ground_layers`, fused estimates `elevated_estimates`).
-  - Roof-fit heights from above: `map2stl/city2stl/skyline/_pano/roof_fit.py::fit_roof_heights`; per-instance floors: `map2stl/city2stl/skyline/floor_bands.py::instance_floors`.
+  - Roof-fit heights from above: `map2stl/city2stl/skyline/_pano/roof_fit.py::fit_roof_heights` (per-footprint camera height `cam_h`, `_cam_heights`; feet check `check_pose_from_bases`; metric depth from the feet `calibrate_depth` / `fit_inverse_depth` / `DepthCalib`, used as `depth_calib=` and `observed_top(dist_col=, d_max=, d_near=)`); per-instance floors: `map2stl/city2stl/skyline/floor_bands.py::instance_floors`.
   - Drone pano and camera: `map2stl/city2stl/skyline/_pano/elevated.py::sphere_pano`, `level_pano`, `overhead_pose` (camera fit from roofs seen from above).
   - Script: `scripts/18_footprint_detect.py`.
 - Satellite heights (F-SKY26 step 7; free Esri World Imagery / Wayback, no key):
