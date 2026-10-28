@@ -28,6 +28,7 @@ from app.server.routers.geocode import router as _geocode_router
 from app.server.routers.guides import guide_path as _guide_path
 from app.server.routers.guides import router as _guides_router
 from app.server.routers.height import router as _height_router
+from app.server.routers.jobs import router as _jobs_router
 from app.server.routers.layers import router as _layers_router
 from app.server.routers.regions import router as _regions_router
 from app.server.routers.registration import router as _registration_router
@@ -348,6 +349,7 @@ app.include_router(_guides_router)
 app.include_router(_registration_router)
 app.include_router(_geocode_router)
 app.include_router(_usage_router)
+app.include_router(_jobs_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
     "diagnostics, layers, reports, guides, registration")

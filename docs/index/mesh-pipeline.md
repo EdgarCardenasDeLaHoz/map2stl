@@ -14,7 +14,7 @@ Walkthrough: [reference/pipeline.md](../reference/pipeline.md); why: [decisions/
 - Export entry points: `map2stl/app/server/core/export.py` (`generate_stl`, `generate_obj`, `generate_3mf`, `_prepare_export_mesh`, `_repair_mesh`, `_write_mesh`)
 - Request → `ExportContext`, DEM resolution: `map2stl/app/server/core/export_params.py` (`ExportContext`, `resolve_dem`, `mesh_composite_layers`)
 - DEM handoff: `dem_id` handles `map2stl/app/server/core/dem_store.py::DemStore`; the one cache key `map2stl/app/server/core/dem_cache.py::dem_cache_key` (`DEM_CACHE_SCHEMA_VERSION`)
-- Background tasks and download: `map2stl/app/server/core/export_tasks.py` (`start_export_task`, `get_task_status`, `get_task_file`)
+- Background tasks and download: `map2stl/app/server/core/export_tasks.py` (`start_export_task`, `get_task_status`, `get_task_file`), on the shared job runner `map2stl/app/server/core/jobs.py::JobRegistry` (`Job`, `find`; any-kind status `GET /api/jobs/{id}` in `map2stl/app/server/routers/jobs.py`) — [why](../decisions/architecture.md)
 - City export task (layers, trails, landmark overrides): `map2stl/app/server/core/city_model_task.py::run_city_model` (`normalize_request`, `city_osm_params`, `wants_ski_trails` = trails on by default where downhill runs exist)
 - Panorama (skyline report) heights into a city export, opt-in `panorama_heights`: `map2stl/city2stl/panorama_heights.py::apply_panorama_heights` — [why](../decisions/building-heights.md)
 - OSM city layers served from an outdated cache when Overpass is down: `map2stl/app/server/core/city_data.py::_serve_stale_or_raise` (`_stale_payload`)

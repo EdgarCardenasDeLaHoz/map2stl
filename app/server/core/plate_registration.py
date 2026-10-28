@@ -18,8 +18,8 @@ Nothing is written to the pack: the result is returned to the client, which save
 placement to the library file's location sidecar through the existing
 ``POST /api/layers/mesh/library/{rel_path}/location`` route.
 
-Task lifecycle mirrors ``core/city_fetch_tasks.py``: dict + lock, identical running
-requests join, finished tasks swept after ``_TASK_TTL``.  Cancel marks the task
+Runs on the shared job runner (``core/jobs.py``): identical running requests join,
+finished tasks are kept 900 s.  Cancel marks the task
 cancelled and discards its result; a placement already running finishes in its thread.
 """
 
@@ -28,20 +28,15 @@ from __future__ import annotations
 import json
 import logging
 import math
-import threading
-import time
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from app.server.core.jobs import Job, JobRegistry
 from city2stl.registration.align_paths import data_dir
 
 logger = logging.getLogger(__name__)
-
-_TASK_TTL = 900  # seconds a finished task (and its result) is kept
-
 
 # ---------------------------------------------------------------------------
 # Packs
@@ -245,86 +240,51 @@ def run_plate_registration(slug: str, *, place: bool = True, fix: bool = True,
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PlateTask:
-    """State of one background plate registration."""
-    task_id: str
-    params: dict
-    status: str = "running"          # running | done | error | cancelled
+class PlateTask(Job):
+    """State of one background plate registration (running | done | error | cancelled)."""
     stage: str = "queued"            # queued | placing | verifying | done
-    progress: int = 0
-    message: str = "Starting…"
-    error: str | None = None
-    result: dict | None = None
-    created: float = field(default_factory=time.time)
-    finished: float | None = None
 
     def snapshot(self) -> dict:
-        end = self.finished or time.time()
         return {"task_id": self.task_id, "status": self.status, "stage": self.stage,
                 "progress": self.progress, "message": self.message, "error": self.error,
-                "params": self.params, "elapsed_s": round(end - self.created, 1),
+                "params": self.params, "elapsed_s": self.elapsed_s(),
                 "result": self.result if self.status == "done" else None}
 
 
-_tasks: dict[str, PlateTask] = {}
-_lock = threading.Lock()
-
-
-def _cleanup() -> None:
-    cutoff = time.time() - _TASK_TTL
-    with _lock:
-        for tid in [tid for tid, t in _tasks.items()
-                    if t.finished is not None and t.finished < cutoff]:
-            _tasks.pop(tid, None)
+_registry = JobRegistry("plate-reg", ttl=900)
 
 
 def get_task(task_id: str) -> PlateTask | None:
-    with _lock:
-        return _tasks.get(task_id)
+    return _registry.get(task_id)
 
 
 def start_task(slug: str, *, place: bool = True, fix: bool = True,
                rel_path: str | None = None) -> PlateTask:
     """Start (or join an identical running) plate registration; returns its task."""
-    _cleanup()
     params = {"slug": slug, "place": bool(place), "fix": bool(fix), "rel_path": rel_path}
-    with _lock:
-        for task in _tasks.values():
-            if task.status == "running" and task.params == params:
-                return task
-        task = PlateTask(task_id=uuid.uuid4().hex[:12], params=params)
-        _tasks[task.task_id] = task
 
-    def progress(stage, pct, msg):
-        if task.status == "running":
-            task.stage, task.progress, task.message = stage, int(pct), msg
+    def run(task: PlateTask) -> None:
+        def progress(stage, pct, msg):
+            if task.running:
+                task.stage, task.progress, task.message = stage, int(pct), msg
 
-    def run():
         try:
             result = run_plate_registration(slug, place=place, fix=fix, progress=progress)
         except Exception as exc:
             logger.warning("Plate registration %s (%s) failed: %s", task.task_id, slug, exc)
-            if task.status == "running":
-                task.status, task.error = "error", str(exc)
-                task.message = f"Failed: {exc}"
-            task.finished = task.finished or time.time()
+            task.error = str(exc)
+            task.finish("error", f"Failed: {exc}")
             return
-        if task.status == "running":
+        if task.running:
             result["rel_path"] = rel_path
             task.result = result
-            task.status, task.stage, task.progress = "done", "done", 100
-        task.finished = task.finished or time.time()
+            task.stage, task.progress = "done", 100
+        task.finish("done")
 
-    threading.Thread(target=run, daemon=True, name=f"plate-reg-{task.task_id}").start()
-    return task
+    return _registry.start(lambda tid: PlateTask(task_id=tid, params=params), run,
+                           join_identical=params)
 
 
 def cancel_task(task_id: str) -> PlateTask | None:
     """Mark a running task cancelled; its result is discarded when the thread ends."""
-    task = get_task(task_id)
-    if task is None:
-        return None
-    if task.status == "running":
-        task.status, task.message = "cancelled", "Cancelled"
-        task.finished = time.time()
-    return task
+    return _registry.cancel(task_id)

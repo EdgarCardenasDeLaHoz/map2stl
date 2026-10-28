@@ -2,6 +2,19 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-28 — Background jobs share one runner, app/server/core/jobs.py
+- **Decision:**
+  - `map2stl/app/server/core/jobs.py::Job` holds the lifecycle every job shares: id, params, status, progress, message, error, result, timestamps, cancel event, worker thread. `map2stl/app/server/core/jobs.py::JobRegistry` holds start / join-identical / get / cancel and the TTL sweep, and runs each job in a thread named `<kind>-<id>`.
+  - `ExportTask`, `CityFetchTask` and `PlateTask` became subclasses of `Job`. Each keeps its own status words (exports end `complete`, the others `done`), its snapshot and its endpoints, so the client is unchanged.
+  - A cancel ends the job at once. A worker that finishes later cannot overwrite it, because `Job.finish` ignores a cancelled job.
+  - `GET /api/jobs/{id}` and `POST /api/jobs/{id}/cancel` (`map2stl/app/server/routers/jobs.py`) find a job of any kind. The Tools pages use them.
+- **Why:** before this, three copies of a dict + lock + uuid + TTL sweep + thread had drifted apart. Only exports had a heartbeat, only city fetches had a cancel event, and plates had their own cancel race guard. Skyline runs and benchmarks (F-UNIFY Phase 4) would have added two more copies.
+- **Rejected:**
+  - One status vocabulary: it would have changed three client pollers for no gain.
+  - A process pool: jobs share in-memory caches and the GPU lock.
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY plan](../plans/active/F-UNIFY-one-app.md) Phase 1 step 1.
+
 ### 2026-09-30 — One-release shims were removed and library progress goes through logging
 - **Decision:**
   - Removed with their last callers re-pointed: `city2stl/skyline/pipeline.py` (star-import façade), `city2stl/skyline/height/` shim, `app/server/core/height/service.py` (re-export plus an uncalled cached fetch), `tools/align_tool/{osm_model,street_place}.py` `sys.modules` aliases, numpy2stl `applications/{cities,lidar}.py` tombstones and `registration/align/segmentation.py`, `geo2stl/__init__.py` re-exports (import the submodule).

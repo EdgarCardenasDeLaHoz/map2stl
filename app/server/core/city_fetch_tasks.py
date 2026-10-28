@@ -7,9 +7,9 @@ is in use, or to stop it. This registry runs the same ``core/city_data.get_city_
 in a thread and records per-layer state from its progress hooks, so the client can
 poll ``GET /api/cities/status/{id}`` and cancel with ``POST /api/cities/cancel/{id}``.
 
-Same lifecycle pattern as ``core/export_tasks.py`` (dict + lock, finished tasks
-swept after ``_TASK_TTL``), kept separate because a city fetch ends in a JSON
-payload rather than a file, and has per-layer state and cancellation.
+Runs on the shared job runner (``core/jobs.py``: identical running requests join,
+finished tasks swept after 300 s); a city fetch ends in a JSON payload and adds
+per-layer state.
 
 Layer states: pending -> fetching -> done | failed, or cached (served from disk).
 Cancellation stops layers that have not started; Overpass queries already in
@@ -19,37 +19,30 @@ flight run to completion in the worker and their result is discarded.
 from __future__ import annotations
 
 import logging
-import threading
-import time
-import uuid
 from dataclasses import dataclass, field
 
+from app.server.core.jobs import Job, JobRegistry
 from city2stl.fetch import FetchCancelled
 
 logger = logging.getLogger(__name__)
 
-_TASK_TTL = 300  # seconds a finished task (and its result) is kept
-
 
 @dataclass
-class CityFetchTask:
-    """State of one background city fetch."""
-    task_id: str
-    params: dict
-    layers: list[str]
-    status: str = "running"          # running | done | error | cancelled
+class CityFetchTask(Job):
+    """State of one background city fetch (statuses: running | done | error | cancelled)."""
+    layers: list[str] = field(default_factory=list)
     layer_states: dict[str, str] = field(default_factory=dict)
     mirror: str | None = None
-    message: str = "Starting…"
-    error: str | None = None
-    result: dict | None = None
-    created: float = field(default_factory=time.time)
-    finished: float | None = None
-    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def cancel(self) -> None:
+        if self.running:
+            for name, state in self.layer_states.items():
+                if state in ("pending", "fetching"):
+                    self.layer_states[name] = "cancelled"
+        super().cancel()
 
     def snapshot(self) -> dict:
         """JSON-safe status for ``GET /api/cities/status/{id}``."""
-        end = self.finished or time.time()
         return {
             "task_id": self.task_id,
             "status": self.status,
@@ -58,31 +51,16 @@ class CityFetchTask:
             "mirror": self.mirror,
             "message": self.message,
             "error": self.error,
-            "elapsed_s": round(end - self.created, 1),
+            "elapsed_s": self.elapsed_s(),
             "diagonal_km": self.params.get("diagonal_km"),
         }
 
 
-_tasks: dict[str, CityFetchTask] = {}
-_lock = threading.Lock()
-
-
-def _params_key(params: dict) -> tuple:
-    return tuple(sorted((k, tuple(v) if isinstance(v, list) else v)
-                        for k, v in params.items()))
-
-
-def _cleanup() -> None:
-    cutoff = time.time() - _TASK_TTL
-    with _lock:
-        for tid in [tid for tid, t in _tasks.items()
-                    if t.finished is not None and t.finished < cutoff]:
-            _tasks.pop(tid, None)
+_registry = JobRegistry("city-fetch", ttl=300)
 
 
 def get_task(task_id: str) -> CityFetchTask | None:
-    with _lock:
-        return _tasks.get(task_id)
+    return _registry.get(task_id)
 
 
 def start_city_fetch(north: float, south: float, east: float, west: float,
@@ -96,33 +74,23 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
     # Late import: tests patch app.server.core.city_data.fetch_osm_data.
     from app.server.core import city_data
 
-    _cleanup()
     params = {"north": north, "south": south, "east": east, "west": west,
               "layers": list(layers), "simplify_tolerance": simplify_tolerance,
               "min_area": min_area, "diagonal_km": diagonal_km,
               "roof_shapes": city_data.roof_shapes_mode(roof_shapes)}
-    key = _params_key(params)
-    with _lock:
-        for task in _tasks.values():
-            if task.status == "running" and _params_key(task.params) == key:
-                return task
-        task = CityFetchTask(task_id=uuid.uuid4().hex[:12], params=params,
-                             layers=list(layers),
-                             layer_states={name: "pending" for name in layers})
-        _tasks[task.task_id] = task
 
-    def progress(layer: str, state: str) -> None:
-        task.layer_states[layer] = state
-        busy = [n for n, s in task.layer_states.items() if s == "fetching"]
-        task.message = f"Fetching {', '.join(busy)}…" if busy else task.message
+    def run(task: CityFetchTask) -> None:
+        def progress(layer: str, state: str) -> None:
+            task.layer_states[layer] = state
+            busy = [n for n, s in task.layer_states.items() if s == "fetching"]
+            task.message = f"Fetching {', '.join(busy)}…" if busy else task.message
 
-    def roof_progress(done: int, total: int) -> None:
-        task.message = f"Classifying roofs {done:,} of {total:,}…"
+        def roof_progress(done: int, total: int) -> None:
+            task.message = f"Classifying roofs {done:,} of {total:,}…"
 
-    def on_mirror(endpoint: str) -> None:
-        task.mirror = endpoint
+        def on_mirror(endpoint: str) -> None:
+            task.mirror = endpoint
 
-    def run() -> None:
         try:
             result = city_data.get_city_layers(
                 north, south, east, west, layers, simplify_tolerance, min_area,
@@ -130,7 +98,7 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
                 should_cancel=task.cancel_event.is_set, roof_shapes=roof_shapes,
                 roof_progress=roof_progress)
         except FetchCancelled:
-            _finish(task, "cancelled", "Cancelled")
+            task.finish("cancelled", "Cancelled")
             return
         except Exception as exc:
             logger.warning("City fetch task %s failed: %s", task.task_id, exc)
@@ -138,10 +106,10 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
                 if state in ("pending", "fetching"):
                     task.layer_states[name] = "failed"
             task.error = str(exc)
-            _finish(task, "error", f"OSM fetch failed: {exc}")
+            task.finish("error", f"OSM fetch failed: {exc}")
             return
         if task.cancel_event.is_set():
-            _finish(task, "cancelled", "Cancelled")
+            task.finish("cancelled", "Cancelled")
             return
         result = dict(result)
         if diagonal_km is not None:
@@ -152,32 +120,15 @@ def start_city_fetch(north: float, south: float, east: float, west: float,
                 task.layer_states[name] = "failed" if (
                     isinstance(fc, dict) and fc.get("error")) else "done"
         task.result = result
-        _finish(task, "done", "Complete")
+        task.finish("done", "Complete")
 
-    threading.Thread(target=run, daemon=True, name=f"city-fetch-{task.task_id}").start()
-    return task
+    def make(task_id: str) -> CityFetchTask:
+        return CityFetchTask(task_id=task_id, params=params, layers=list(layers),
+                             layer_states={name: "pending" for name in layers})
 
-
-def _finish(task: CityFetchTask, status: str, message: str) -> None:
-    if task.status == "cancelled":   # cancel() already answered the client
-        task.finished = task.finished or time.time()
-        return
-    task.status = status
-    task.message = message
-    task.finished = time.time()
+    return _registry.start(make, run, join_identical=params)
 
 
 def cancel_task(task_id: str) -> CityFetchTask | None:
     """Ask a running fetch to stop; returns the task (None if unknown)."""
-    task = get_task(task_id)
-    if task is None:
-        return None
-    if task.status == "running":
-        task.cancel_event.set()
-        task.status = "cancelled"
-        task.message = "Cancelled"
-        task.finished = time.time()
-        for name, state in task.layer_states.items():
-            if state in ("pending", "fetching"):
-                task.layer_states[name] = "cancelled"
-    return task
+    return _registry.cancel(task_id)
