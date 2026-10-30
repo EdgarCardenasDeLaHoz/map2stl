@@ -15,7 +15,7 @@ Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants 
   - F-SKY5: on by default since 2026-10-06; the README said off and is fixed.
   - The F-SKY12 / F-SKY11.1 flags: they gate live modules.
   - The pre-sidecar OSM cache probe: cache entries depend on it, and cache changes wait for the user.
-  - F-SKY17 `_estimate_ms_osm_offset`: recorded as failed, but `merge_satellite_into_osm(register_to_osm=True)` applies it by default, so removing it changes output (issues.md).
+  - F-SKY17 `_estimate_ms_osm_offset`: kept on after the 2026-10-28 comparison (`building-heights.md` 2026-10-29).
 - **Why:** less code to read and fewer `SKYLINE_*` switches; the records stay in decisions and git history.
 - **Rejected:** moving the demos to `docs/history`; git history already keeps them.
 - **Supersedes / superseded by:** —
@@ -121,6 +121,14 @@ Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants 
 - **Exceptions kept:** `city2stl/osm_raster.py` and the survey provider keep 111 320 so registrations do not move (see entry above).
 - **Supersedes / superseded by:** —
 - **Source:** [F-ARCH plan](../plans/active/F-ARCH-consolidation.md) "Defaults taken without asking".
+
+### 2026-10-28 — Google paid requests are counted at the send point
+- **Decision:** `geo2stl/google_usage.py` counts each paid Google request, per calendar month, in a git-ignored JSON file under `output/usage/`.
+  - What counts: Street View image requests (cap 10,000) and 3D Tiles root requests (cap 1,000). Street View metadata requests are free and tiles below a root are not billed, so neither counts.
+  - Where: immediately before each actual send (`streetview_io._streetview_get`, the 3D Tiles root fetch, the photo-label tiles proxy, the pano manifest fetch), so cache hits are never counted and retries are.
+  - Why at the send point and not at the callers: one place per API cannot be bypassed by a new caller, and a cache-only run can refuse to send there (`cache_only()`), which is how the Heights page enforces "no paid fetches without an OK".
+- **Consequence:** `cache_only` is per job (a ContextVar set in the job's own thread), so a cache-only Heights run and a paid Benchmark score run side by side, each enforced at the send point. Work handed to a `ThreadPoolExecutor` loses the context, so submit `google_usage.bind(fn)` (done in `benchmark.py` and `survey_heights.py`); there is no process pool on a send path. Skipped sends are counted in the job's own scope (`run_region` returns `skipped_paid`).
+- **Supersedes / superseded by:** —
 
 ### 2026-09-26 — Raster row 0 is north by default
 - **Decision:** rasters use the image convention (row 0 = north). Mesh and registration code flips explicitly at its boundary: `numpy2stl/src/numpy2stl/stl2numpy/heightmap.py::mesh_to_heightmap` defaults to `row0="north"`; the registration pipeline, `building_simplify` and the align tool pass `row0="south"`.

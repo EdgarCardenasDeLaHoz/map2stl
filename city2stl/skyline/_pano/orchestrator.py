@@ -274,7 +274,9 @@ def _seed_multiview_registration(
     _seen_pano_ids: set[str] = set()
 
     _web_done: str | None = None
-    for seed, seed_elev, is_photosphere in resolved:
+    for _seed_i, (seed, seed_elev, is_photosphere) in enumerate(resolved):
+        if timer is not None:
+            timer.tick("panoramas", _seed_i, len(resolved))
         # T21: a web seed's image is read only by its own seed; free it once that seed is done
         if _web_done is not None and web_image_cache is not None:
             web_image_cache.pop(_web_done, None)

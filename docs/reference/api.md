@@ -258,7 +258,14 @@ is `city2stl/skyline/scripts/10_benchmark.py::score_report`. Score history is ke
 | GET | `/api/benchmark/regions/{id}` | Current and previous score, `delta_mae_m`, per-tier rows, history, the `heights_from` choices |
 | GET | `/api/benchmark/regions/{id}/gap?heights_from=` | How many truth buildings are not cached and the 3D Tiles fetch estimate |
 | POST | `/api/benchmark/score` | Job `{region, heights_from, allow_paid_fetches=false}`; returns `{task_id, ...}`, poll `GET /api/jobs/{id}`. Cached truth only unless `allow_paid_fetches`; with no cached truth it ends in `error` with the fetch count |
-| GET | `/api/benchmark/usage` | `{value, cap: 1000}` 3D Tiles root requests this month; `value` is null while there is no counter |
+| GET | `/api/benchmark/usage` | `{value, cap: 1000}` 3D Tiles root requests this month, from the Google usage counter |
+| GET | `/api/usage/google` | Per-kind monthly counts and caps `{month, kinds: {streetview_image, tiles_root}: {count, cap}}` |
+| GET | `/api/skyline/regions/{region}/reports` | Region reports for the Heights page: dir, version, title, mtime, n_buildings, tier_counts, index_url (newest version first); plus `next_report` |
+| GET | `/api/skyline/reports/{dir}/map` | Footprints with tier, height, panoramas and OSM tag for the map, plus tier colours and counts |
+| GET | `/api/skyline/estimate?region=` | Panoramas and cached vs paid Street View images: seeds plus auto points, floored at the newest report's panoramas (unverifiable ones count as paid); `basis`, `rough`, `basis_report`, `note`, month count, cap, `over_warn` (past 80 %) |
+| POST | `/api/skyline/runs` | Job `{region, allow_paid_fetches=false}`; cache-only unless the flag is set; 409 while another region runs; poll `GET /api/skyline/runs/{id}` (step 1-4, done/total, gpu) or cancel with `POST /api/jobs/{id}/cancel` (stops at the next stage boundary) |
+
+Env overrides: `MAP2STL_REGION_REPORTS_DIR` (region reports root), `MAP2STL_GOOGLE_USAGE_FILE` (usage counter file).
 
 Report files are served under `/reports/files/benchmark/...`.
 

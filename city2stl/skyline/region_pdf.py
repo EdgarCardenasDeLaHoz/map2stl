@@ -321,12 +321,15 @@ def run_region_pdf_report(
     *,
     trace=None,
     skip_pdf: bool = False,
+    progress_cb=None,
 ) -> dict:
     # Wall-clock timing per pipeline step, surfaced in the HTML report so
     # contributors can see where a run spends its time without re-instrumenting
     # by hand. ``timer`` accumulates sub-steps (level=1) across loop iterations
     # — e.g. the 5 per-seed registration phases summed over all seeds.
-    timer = _StepTimer()
+    # ``progress_cb(label, done, total)`` (see ``_StepTimer``) lets the app show progress and
+    # stop the run at a step boundary by raising; None leaves the run exactly as it was.
+    timer = _StepTimer(progress_cb)
     _timed = timer.timed
 
     api_key = _resolve_api_key(explicit_api_key)
@@ -760,6 +763,8 @@ def run_region_pdf_report(
     # against surveyed heights, against a registered vendor plate, against a
     # previous run — meant scraping a report. Written unconditionally because
     # it is a few hundred KB and every evaluation depends on it.
+    if progress_cb is not None:
+        progress_cb("Writing heights", None, None)
     _write_heights_json(
         output_pdf.parent / output_pdf.stem / "heights.json",
         region_name=bbox.name,

@@ -46,7 +46,11 @@ from __future__ import annotations
 
 from city2stl.resources import scratch_guard
 
-workers = scratch_guard(gpu_gb=None, ram_gb=6.0, max_workers=3)
+# Only as a script (and its spawned workers): an import, e.g. by the tests, must not wait for RAM.
+if __name__ in ("__main__", "__mp_main__"):
+    workers = scratch_guard(gpu_gb=None, ram_gb=6.0, max_workers=3)
+else:
+    workers = 3
 
 import argparse  # noqa: E402
 import json  # noqa: E402

@@ -81,9 +81,15 @@ def _streetview_get(url: str) -> tuple[bytes | None, bool]:
     aborted the whole region run) returns ``(None, False)`` after logging, so
     the view is skipped for this run but re-tried on the next one.
     """
+    from geo2stl import google_usage
+
+    if not google_usage.paid_allowed("streetview_image"):
+        google_usage.note_blocked("streetview_image")
+        return None, False
     last = ""
     for attempt in range(_SV_MAX_ATTEMPTS):
         try:
+            google_usage.record("streetview_image")  # counted where it is sent; cache hits never get here
             r = requests.get(_sign_streetview_url(url), timeout=40)
         except Exception as exc:
             last = f"{type(exc).__name__}: {exc}"
@@ -324,6 +330,19 @@ def _is_no_imagery_placeholder(img: np.ndarray) -> bool:
     dominant = float(np.bincount(grey).max()) / float(grey.size)
     return dominant >= 0.5
 
+def image_cache_key(params: dict) -> str:
+    """Cache key of an image request: the params without the API key, hashed."""
+    cache_params = {k: v for k, v in params.items() if k != "key"}
+    return hashlib.sha1(json.dumps(cache_params, sort_keys=True).encode()).hexdigest()
+
+
+def image_is_cached(params: dict) -> bool:
+    """True when this image request would be answered without a paid fetch: a stored image,
+    or a recent confirmed "no imagery" marker. Pure disk check, for the run estimate."""
+    key = image_cache_key(params)
+    return (_SV_IMAGE_CACHE_DIR / f"{key}.png").exists() or _negative_cache_hit(key)
+
+
 def _streetview_image(
     api_key: str,
     lat: float,
@@ -364,10 +383,7 @@ def _streetview_image(
         # signature (added by _sign_streetview_url) is deliberately NOT
         # part of the cache key — the same logical request signed with a
         # rotated secret returns the same image bytes.
-        cache_params = {k: v for k, v in params.items() if k != "key"}
-        cache_key = hashlib.sha1(
-            json.dumps(cache_params, sort_keys=True).encode()
-        ).hexdigest()
+        cache_key = image_cache_key(params)
         _SV_IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_path = _SV_IMAGE_CACHE_DIR / f"{cache_key}.png"
 

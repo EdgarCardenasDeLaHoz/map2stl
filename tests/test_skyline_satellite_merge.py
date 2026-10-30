@@ -23,3 +23,32 @@ def test_multipolygon_area_sums_parts():
     other = box(-80.1890, 25.7700, -80.1886, 25.77027)
     rec = _merged(MultiPolygon([_SQUARE, other]))
     assert rec.area_m2 == pytest.approx(2 * 40.1 * 29.9, rel=0.05)
+
+
+def test_parse_size_reads_unit_suffixes():
+    from city2stl.skyline.satellite_footprints import _parse_size
+
+    assert _parse_size("37.2MB") == int(37.2 * 1024 ** 2)
+    assert _parse_size("70.1KB") == int(70.1 * 1024)
+    assert _parse_size("1.5GB") == int(1.5 * 1024 ** 3)
+    assert _parse_size("570B") == 570
+
+
+def test_cached_stub_tile_is_refetched(tmp_path, monkeypatch):
+    from city2stl.skyline import satellite_footprints as sf
+
+    monkeypatch.setattr(sf, "_CACHE_DIR", tmp_path)
+    (tmp_path / "qk_1.geojsonl").write_text("{}\n")
+    calls = []
+
+    class _Resp:
+        content = b'{"big": 1}\n' * 100
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(sf.requests, "get", lambda url, timeout: calls.append(url) or _Resp())
+    assert sf._fetch_tile("1", "u", listed_size=500) is not None
+    assert calls == ["u"]
+    assert sf._fetch_tile("1", "u", listed_size=500) is not None
+    assert calls == ["u"]

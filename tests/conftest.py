@@ -312,3 +312,11 @@ def pytest_collection_modifyitems(config, items):
             if r in reasons and not _have(r):
                 item.add_marker(pytest.mark.skip(reason=reasons[r]))
                 break
+
+
+@pytest.fixture(autouse=True)
+def _isolate_google_usage(request, tmp_path, monkeypatch):
+    """The paid-request counter writes to a per-test file, never ``output/usage``."""
+    if request.node.get_closest_marker("integration"):
+        return
+    monkeypatch.setenv("MAP2STL_GOOGLE_USAGE_FILE", str(tmp_path / "_google_usage.json"))

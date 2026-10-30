@@ -628,7 +628,9 @@ def footprint_truth(region: str, footprints: dict[str, list], survey_provider: s
         from concurrent.futures import ThreadPoolExecutor
 
         pool = ThreadPoolExecutor(max_workers=n_workers, thread_name_prefix="truth")
-        results = pool.map(measure, range(1, len(tiles) + 1), tiles)
+        from geo2stl import google_usage
+
+        results = pool.map(google_usage.bind(measure), range(1, len(tiles) + 1), tiles)
     try:
         # the cache is read and written here only, never from a worker thread
         for i, (recs, complete) in enumerate(results, 1):

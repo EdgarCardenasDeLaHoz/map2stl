@@ -152,7 +152,7 @@ As of 2026-09-28. "Plan" links go to `map2stl/docs/plans/`.
 | F-SKY14 | Trained satellite coastline detector | dropped (never built) | — | — |
 | F-SKY15 | HTML diagnostic report | on | `SKYLINE_CV_HTML_REPORT=0` disables | [done](../../docs/plans/done/skyline/F-SKY15-html-diagnostic-report.md) |
 | F-SKY16 | Coastline-ICP heading | Phase A measure-only | — | [done](../../docs/plans/done/skyline/F-SKY16-coastline-icp-heading.md) |
-| F-SKY17 | MS ↔ OSM footprint registration | failed | — | [archive](../../docs/plans/archive/skyline/F-SKY17-ms-osm-registration.md) |
+| F-SKY17 | MS ↔ OSM footprint registration | on; small gain, not a twin fix | — | [archive](../../docs/plans/archive/skyline/F-SKY17-ms-osm-registration.md) |
 | F-SKY18 | Coastline depth-snap + vegetation co-registration | Phases 1–2 on | — | [done](../../docs/plans/done/skyline/F-SKY18-vegetation-landmarks-depth-snap.md) |
 | F-SKY19 | Multi-resolution per-view segmentation | off (experiment) | `SKYLINE_CV_MULTIRES=1` | — |
 | F-SKY22/24 | Sliding-window splitter; depth post-cut (no-op); bearing xcorr rescue | on | — | — (see [STATUS](docs/STATUS.md)) |

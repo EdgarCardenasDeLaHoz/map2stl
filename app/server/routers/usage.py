@@ -3,6 +3,8 @@
 * ``POST /api/usage`` — ``{session, events: [...]}`` from ``static/js/modules/core/usage-log.js``;
   each event is appended as one JSON line to ``output/usage/<YYYY-MM-DD>.jsonl`` (local day),
   with ``session`` added. Nothing leaves the machine; ``output/`` is git-ignored.
+* ``GET /api/usage/google`` — this month's paid Google requests vs the free caps
+  (``geo2stl.google_usage``).
 * ``GET /api/usage/status`` — ``{enabled, dir, files: [{name, bytes}]}``.
 
 The browser already skips password / key / token controls; the server drops any ``value``
@@ -78,3 +80,13 @@ def usage_status():
     files = sorted(d.glob("*.jsonl")) if d.is_dir() else []
     return {"enabled": enabled(), "dir": str(d),
             "files": [{"name": f.name, "bytes": f.stat().st_size} for f in files]}
+
+
+@router.get("/api/usage/google")
+def usage_google():
+    from geo2stl import google_usage
+
+    month = google_usage.current_month()
+    counts = google_usage.month_counts(month)
+    return {"month": month,
+            "kinds": {k: {**v, "label": google_usage.LABELS[k]} for k, v in counts.items()}}

@@ -23,6 +23,7 @@ const VIEW_CONTAINERS = {
     dem: 'demContainer',
     model: 'modelContainer',
     benchmark: 'benchmarkContainer',   // Tools menu page (BenchmarkPage.vue), no tab
+    heights: 'heightsContainer',       // Tools menu page (HeightsPage.vue), no tab
 };
 
 /**
@@ -35,7 +36,7 @@ function _invalidateMapSize() {
 /**
  * Switch the main view to the specified tab.
  * Hides all containers then shows the selected one.
- * @param {'map'|'globe'|'dem'|'model'|'benchmark'} view
+ * @param {'map'|'globe'|'dem'|'model'|'benchmark'|'heights'} view
  */
 /**
  * Picking a region and opening Extrude is the whole job (user, 2026-10-02; replaced the
@@ -105,7 +106,7 @@ window.switchView = function switchView(view) {
         // NOTE: Do NOT auto-load layers here. Layer loading is triggered by goToEdit()
         // or explicit user action. Auto-loading here causes duplicate requests when
         // goToEdit() calls switchView() and then loadDEM() itself.
-    } else if (view === 'benchmark') {
+    } else if (view === 'benchmark' || view === 'heights') {
         // The page has its own region list; the sidebar's would sit beside it twice.
         if (sidebar) sidebar.style.display = 'none';
     } else if (view === 'model') {

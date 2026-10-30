@@ -141,11 +141,21 @@ the header, as pages in the same app shell, with the same header, region pill an
   - Cached truth only by default. With no cached truth and fetches off, the job fails with the
     fetch count. Partial cache: scores what is cached and notes the gap.
   - Not built: "Add current region" (the library has no add-region function); the "3D Tiles
-    this month" bar stays hidden because nothing counts 3D Tiles root requests yet
-    (`GET /api/benchmark/usage` returns `value: null`); the purple "3D Tiles (plane ground)"
+    this month" bar now shows the real count (`GET /api/benchmark/usage`, Google usage counter below); the purple "3D Tiles (plane ground)"
     row (cached scores carry no per-source breakdown).
   - Page-scoped light theme only; the app shell and header stay dark.
-- Part 2 (open): Heights, Photo solve, Plate align pages.
+- **Part 2a done: Google paid-fetch usage counter.**
+  - `geo2stl/google_usage.py` counts paid requests per month (Street View images, cap 10,000;
+    3D Tiles root requests, cap 1,000) in `output/usage/google_usage.json`, at each send point;
+    cache hits are not counted. `GET /api/usage/google`.
+- **Part 2b done: Street View heights page** (Tools > Street View heights).
+  - Reports list, tier card, footprint map (tier colours, hover card), New run card with
+    estimate and monthly bar, Measure heights, Running card with Cancel.
+  - Cache-only by default; paid images need the confirm (count and share of cap, red past 80 %).
+  - Run is a job with 4 steps, cancel at stage boundaries, GPU lock respected.
+  - Not built: step 5 of the mockup (pipeline has 4), "Compare with vN", "used in Extrude" and
+    the "in use" chip (Phase 5), a colour-by dropdown, an editable panorama spacing.
+- Part 3 (open): Photo solve, Plate align pages.
 
 ## Phase 5: panorama heights in reconstruction
 

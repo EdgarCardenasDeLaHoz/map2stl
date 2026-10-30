@@ -73,6 +73,9 @@ def bearing(lat1, lon1, lat2, lon2) -> float:
 
 def _get(url: str, params: dict, key: str) -> bytes:
     q = urllib.parse.urlencode({**params, "key": key})
+    if url == IMG_URL:  # image requests are billed; metadata is free
+        from geo2stl import google_usage
+        google_usage.record("streetview_image")
     try:
         with urllib.request.urlopen(f"{url}?{q}", timeout=30) as r:
             return r.read()

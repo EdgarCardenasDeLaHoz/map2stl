@@ -96,12 +96,12 @@ def _bbox_quadkeys(
     return qks
 
 
-def _load_dataset_links() -> dict[str, str]:
+def _load_dataset_links() -> dict[str, tuple[str, int]]:
     """Fetch (cached) the Microsoft Buildings dataset-links CSV; return
-    a dict mapping quadkey → tile download URL. Multiple tiles share a
-    quadkey across countries; we keep the largest (most-populated)
-    entry per quadkey since that's the one that matters for skyline
-    work in metro areas."""
+    a dict mapping quadkey → (tile download URL, listed size in bytes).
+    Multiple tiles share a quadkey across countries; we keep the largest
+    (most-populated) entry per quadkey since that's the one that matters
+    for skyline work in metro areas."""
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = _CACHE_DIR / "dataset-links.csv"
     if not csv_path.exists():
@@ -122,7 +122,7 @@ def _load_dataset_links() -> dict[str, str]:
             prev = qk_to.get(qk)
             if prev is None or size_bytes > prev[0]:
                 qk_to[qk] = (size_bytes, url)
-    return {qk: url for qk, (_, url) in qk_to.items()}
+    return {qk: (url, size) for qk, (size, url) in qk_to.items()}
 
 
 def _parse_size(size_str: str) -> int:
@@ -131,7 +131,8 @@ def _parse_size(size_str: str) -> int:
     size_str = size_str.strip()
     if not size_str:
         return 0
-    units = {"B": 1, "KB": 1024, "MB": 1024 ** 2, "GB": 1024 ** 3}
+    # Longest suffix first: "37.2MB" also ends with "B".
+    units = {"GB": 1024 ** 3, "MB": 1024 ** 2, "KB": 1024, "B": 1}
     for suffix, mult in units.items():
         if size_str.endswith(suffix):
             try:
@@ -144,12 +145,16 @@ def _parse_size(size_str: str) -> int:
         return 0
 
 
-def _fetch_tile(qk: str, url: str) -> Path | None:
+def _fetch_tile(qk: str, url: str, listed_size: int = 0) -> Path | None:
     """Download a quadkey tile to the cache and return the path to the
-    decompressed GeoJSONL file. Returns None on fetch failure."""
+    decompressed GeoJSONL file. Returns None on fetch failure.
+
+    A cached file smaller than the listed (compressed) size came from a
+    smaller tile for the same quadkey (before ``_parse_size`` read
+    "MB"/"KB" correctly, stub country tiles won), so it is fetched again."""
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     out_path = _CACHE_DIR / f"qk_{qk}.geojsonl"
-    if out_path.exists():
+    if out_path.exists() and out_path.stat().st_size >= 0.9 * listed_size:
         return out_path
     try:
         r = requests.get(url, timeout=300)
@@ -196,10 +201,10 @@ def fetch_microsoft_buildings_for_bbox(
 
     out: list[dict] = []
     for qk in sorted(qks):
-        url = links.get(qk)
-        if url is None:
+        link = links.get(qk)
+        if link is None:
             continue
-        tile_path = _fetch_tile(qk, url)
+        tile_path = _fetch_tile(qk, *link)
         if tile_path is None:
             continue
         with tile_path.open(encoding="utf-8") as f:

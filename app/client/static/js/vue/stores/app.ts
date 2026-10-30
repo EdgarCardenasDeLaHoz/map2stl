@@ -116,7 +116,7 @@ export const useAppStore = defineStore('app', {
         viewerSatRoofs: false,
 
         // ── UI state ──────────────────────────────────────────────────────────
-        activeView: 'map' as 'map' | 'dem' | 'model' | 'benchmark',
+        activeView: 'map' as 'map' | 'dem' | 'model' | 'benchmark' | 'heights',
         sidebarMode: 'expanded' as 'expanded' | 'normal' | 'hidden',
 
         // ── Callbacks registered by modules (non-reactive) ────────────────────

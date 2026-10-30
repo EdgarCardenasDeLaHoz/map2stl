@@ -16,6 +16,9 @@
 
     <!-- Benchmark page (Tools menu) -->
     <BenchmarkPage />
+
+    <!-- Street View heights page (Tools menu) -->
+    <HeightsPage />
   </div>
 </template>
 <script setup lang="ts">
@@ -23,4 +26,5 @@ import MapContainer   from './MapContainer.vue';
 import DemContainer   from './DemContainer.vue';
 import ModelContainer from './ModelContainer.vue';
 import BenchmarkPage  from './BenchmarkPage.vue';
+import HeightsPage    from './HeightsPage.vue';
 </script>

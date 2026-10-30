@@ -59,7 +59,9 @@ _SKYLINE_RUNS = _MAP2STL / "city2stl" / "skyline" / "runs"
 
 #: Only these directories are reachable through ``/reports/files``. Keys appear in URLs.
 _ROOTS: dict[str, Path] = {
-    "region": _SKYLINE_RUNS / "region_reports",
+    # MAP2STL_REGION_REPORTS_DIR moves where region reports are listed, served and written
+    # (the Street View heights page runs): tests and a verification run use a scratch folder.
+    "region": Path(os.environ.get("MAP2STL_REGION_REPORTS_DIR") or _SKYLINE_RUNS / "region_reports"),
     "height": _MAP2STL / "output" / "height_reports",
     "trace": _SKYLINE_RUNS / "height_traces",
     "benchmark": _SKYLINE_RUNS / "benchmark",

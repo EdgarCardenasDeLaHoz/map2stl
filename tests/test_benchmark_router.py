@@ -93,9 +93,13 @@ def test_unknown_region_404(client, bench):
     assert client.post("/api/benchmark/score", json={"region": "nowhere"}).status_code == 404
 
 
-def test_usage_is_null_without_a_counter(client):
+def test_usage_reads_the_google_counter(client):
+    from geo2stl import google_usage
+
     d = client.get("/api/benchmark/usage").json()
-    assert d["value"] is None and d["limit"] == 1000
+    assert d["value"] == 0 and d["limit"] == 1000
+    google_usage.record("tiles_root", 4)
+    assert client.get("/api/benchmark/usage").json()["value"] == 4
 
 
 def _wait(client, task_id, timeout=5.0):

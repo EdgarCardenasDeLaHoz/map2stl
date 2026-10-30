@@ -411,6 +411,8 @@ def gap_for(region: str, heights_from: str) -> dict | None:
 
 
 def tiles_usage() -> dict:
-    """3D Tiles root requests this month. Nothing counts them yet, so value is None and the
-    page hides the bar (a counter would plug in here)."""
-    return {"value": None, "limit": TILES_ROOT_CAP, "month": time.strftime("%Y-%m")}
+    """3D Tiles root requests this month, from the shared paid-request counter."""
+    from geo2stl import google_usage
+
+    row = google_usage.month_counts()["tiles_root"]
+    return {"value": row["count"], "limit": TILES_ROOT_CAP, "month": google_usage.current_month()}

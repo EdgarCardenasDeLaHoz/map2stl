@@ -7,6 +7,18 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-29 — F-SKY17 MS→OSM registration stays on: a small gain on US cities, not a fix for Cartagena's twins
+- **Decision:** `merge_satellite_into_osm(register_to_osm=True)` stays the default. F-SKY17's status is "helps a little; does not fix Cartagena's twin footprints", not "failed". (User, 2026-10-29: "Keep on, fix status".)
+- **Why:** on/off comparison on Miami, Chicago, Seattle (scratch, 2026-10-28):
+  - Offsets are small and stable, (-0.45,-0.03) / (-0.56,+0.86) / (-1.41,+0.36) m; 78-90 % of MS polygons pair with OSM.
+  - With it on, 1.3k-2.7k more near-twins are dropped in Chicago/Seattle (IoU with the OSM twin goes from ~0.45 to 0.55-0.65, over the 0.5 dedup threshold).
+  - LiDAR nDSM (one 300 m window each) covers more of the shifted MS outlines: Chicago 0.947→0.968, Seattle 0.901→0.967. Miami had no usable nDSM.
+  - Cartagena (2026-05-28, archived plan): twins are shape/size, not a shift, so registration does not remove them.
+- **Rejected:** default False. It moves MS away from the LiDAR buildings and keeps more duplicates.
+- **Also found:** `_parse_size` read "37MB" as 0 (the "B" suffix matched first), so stub country tiles won the quadkey for Miami and Boston (~6.9k instead of ~29.9k MS polygons). It was fixed the same day; a cached tile smaller than its listed size is fetched again.
+- **Not live:** no site sets `use_satellite_footprints`, so no region runs the merge today.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-23 — Google 3D Tiles ground can be a sloped plane per window (`ground="plane"`), opt-in
 - **Problem:** `_ground_from_dsm` takes a per-window p5 of the DSM as flat ground. On a hillside the
   window's low corner sets the ground, so buildings uphill read tall: about +1.26 m per 1 % of slope.

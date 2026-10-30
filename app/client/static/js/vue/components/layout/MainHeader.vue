@@ -25,7 +25,7 @@
 
     <div class="header-actions">
       <!-- Tools: the power tools live here, out of the Beginner view (design guidelines §1).
-           Only Benchmark is built so far; the rest say "coming soon". -->
+           Street View heights and Benchmark are built so far; the rest say "coming soon". -->
       <div class="tools-menu">
         <button type="button" id="toolsMenuBtn" class="tools-btn" :class="{ on: store.activeView === 'benchmark' }"
                 aria-haspopup="menu" :aria-expanded="toolsOpen" title="Tools"
@@ -261,7 +261,7 @@ onMounted(() => document.addEventListener('click', closeHelp));
 onBeforeUnmount(() => document.removeEventListener('click', closeHelp));
 // Tools menu (F-UNIFY Phase 4). `view` is the page it opens; no view = not built yet.
 const TOOLS: { label: string; hint: string; view?: string }[] = [
-  { label: 'Street View heights', hint: 'Measure heights from panoramas for this region' },
+  { label: 'Street View heights', hint: 'Measure heights from panoramas for this region', view: 'heights' },
   { label: 'Photo solve', hint: 'Place your own photo and read heights from it' },
   { label: 'Plate align', hint: 'Line a printed plate up with the map' },
   { label: 'Benchmark', hint: 'Score heights against LiDAR / 3D Tiles', view: 'benchmark' },

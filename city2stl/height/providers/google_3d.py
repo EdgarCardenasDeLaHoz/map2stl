@@ -699,8 +699,14 @@ class Google3DProvider:
                 )
 
         # Fetch tileset
+        from geo2stl import google_usage
+
+        if not google_usage.paid_allowed("tiles_root"):
+            google_usage.note_blocked("tiles_root")
+            return _empty_result(dim)
         session = requests.Session()
         try:
+            google_usage.record("tiles_root")  # one billed root request per uncached raster
             root_url = f"{_ROOT_URL}?key={self._api_key}"
             r = session.get(root_url, timeout=_REQUEST_TIMEOUT)
             r.raise_for_status()

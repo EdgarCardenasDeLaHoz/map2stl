@@ -104,6 +104,9 @@ def _bounded(fn, items, workers: int):
         return
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+    from geo2stl import google_usage
+
+    fn = google_usage.bind(fn)
     todo = iter(items)
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="survey") as pool:
         running = {pool.submit(fn, it) for _, it in zip(range(workers), todo, strict=False)}

@@ -1775,6 +1775,9 @@ class LabelHandler(BaseHTTPRequestHandler):
             if hit is not None:
                 self._send(200, hit[0], hit[1])
                 return
+        if rel == TILES_PREFIX + "root.json":  # opens a billed session; tiles under it are not counted
+            from geo2stl import google_usage
+            google_usage.record("tiles_root")
         try:
             resp = urlopen(urllib.request.Request(url, headers={"User-Agent": "photo-label/1"}), timeout=30)
         except urllib.error.HTTPError as exc:

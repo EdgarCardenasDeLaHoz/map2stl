@@ -45,9 +45,18 @@ class _StepTimer:
     sub-step). First-seen order is preserved.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, progress_cb=None) -> None:
         self._order: list[tuple[str, int]] = []
         self._totals: dict[tuple[str, int], float] = {}
+        #: ``progress_cb(label, done, total)``: called when a top-level step starts
+        #: (``done``/``total`` None) and per unit inside a step (:meth:`tick`). It may raise
+        #: to stop the run at that boundary (the app's Cancel). None = no reporting.
+        self.progress_cb = progress_cb
+
+    def tick(self, label: str, done: int, total: int) -> None:
+        """Report ``done`` of ``total`` units of the current step (e.g. panoramas)."""
+        if self.progress_cb is not None:
+            self.progress_cb(label, done, total)
 
     def _register(self, label: str, level: int) -> tuple[str, int]:
         """Reserve the row's position in render order. Called at *enter* so a
@@ -71,6 +80,8 @@ class _StepTimer:
         # Register order on *enter* so parents precede their children in the
         # rendered table; finalise the duration on *exit*.
         key = self._register(label, level)
+        if level == 0 and self.progress_cb is not None:
+            self.progress_cb(label, None, None)
         t0, m0 = time.perf_counter(), _rss_gb()
         try:
             yield
