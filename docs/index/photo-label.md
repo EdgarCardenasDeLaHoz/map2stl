@@ -107,3 +107,16 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
 - **Tests:** `tests/test_photo_label_server.py`, `tests/test_photo_label_regions.py`, `tests/test_photo_label_register.py`,
   `tests/test_photo_label_model.py`, `tests/test_photo_label_auto_pose.py`, `tests/test_photo_label_depth.py`,
   `tests/test_photo_label_orient.py`, `tests/test_photo_label_guesses.py`, `tests/test_photo_label_screen.py`.
+
+## In the app: Tools > Photo solve (F-UNIFY Phase 4 part 3)
+- **Router and service:** `app/server/routers/photo.py` (routes under `/api/photo/`, list in its
+  docstring), `app/server/core/photo_solve.py` (`tool()` loads `tools/photo_label/server.py`,
+  `regions`, `solve`, `project`, `footprints`, `candidates`, `save_heights`, `commons_search`,
+  `commons_add`, `add_photo`). Env: `MAP2STL_PHOTO_REGIONS_FILE`, `MAP2STL_PHOTO_ANNOTATIONS_DIR`.
+- **Page:** `app/client/static/js/vue/components/views/PhotoSolvePage.vue`; pure logic
+  `modules/ui/photo-solve-format.js` (`stepHint`, `cameraRows`, `fovWedge`, `llToScreen`,
+  `heightRows`, `labelsPayload`).
+- **Google:** none. Jobs and solve run in `google_usage.cache_only()`; the Config has no key.
+  The 3D tile proxy, `api_register_step`, depth and orientation, GLB overlay stay in the tool.
+- **Heights sidecar:** `<annotations>/<region>_photo_heights.json`, source `photo`.
+- **Tests:** `tests/test_photo_solve_router.py`, `tests/js/photoSolveFormat.test.js`.

@@ -30,6 +30,8 @@ from app.server.routers.guides import router as _guides_router
 from app.server.routers.height import router as _height_router
 from app.server.routers.jobs import router as _jobs_router
 from app.server.routers.layers import router as _layers_router
+from app.server.routers.photo import router as _photo_router
+from app.server.routers.plate import router as _plate_router
 from app.server.routers.regions import router as _regions_router
 from app.server.routers.registration import router as _registration_router
 from app.server.routers.reports import router as _reports_router
@@ -352,6 +354,8 @@ app.include_router(_usage_router)
 app.include_router(_jobs_router)
 app.include_router(_benchmark_router)
 app.include_router(_skyline_router)
+app.include_router(_photo_router)
+app.include_router(_plate_router)
 logger.info(
     "Routers loaded: regions, terrain, cities, export, cache, settings, composite, height, "
     "diagnostics, layers, reports, guides, registration")

@@ -268,6 +268,23 @@ is `city2stl/skyline/scripts/10_benchmark.py::score_report`. Score history is ke
 Env overrides: `MAP2STL_REGION_REPORTS_DIR` (region reports root), `MAP2STL_GOOGLE_USAGE_FILE` (usage counter file).
 
 Report files are served under `/reports/files/benchmark/...`.
+## Photo solve and Plate align (`app/server/routers/photo.py`, `app/server/routers/plate.py`)
+Photo solve (`/api/photo/regions/{r}/...`; region `r` from `GET /api/photo/regions`):
+- `GET photos`, `POST photos?name=` (raw image bytes; JPG/PNG/WebP, 40 MB), `GET image?path=`.
+- `GET labels?path=`, `POST labels` (pairs and solved camera), `POST flag` (unusable).
+- `POST solve` (camera fit and heights table), `POST project` (buildings in view),
+  `GET footprints?lat&lon&radius_m` (for the map, nearest first, max 4000).
+- `POST register` (auto start camera, job), `POST commons` (search, job), `POST commons/add`
+  (`upload.wikimedia.org` URLs only), `POST screen` / `GET screen` (screen photos).
+- `GET heights`, `POST heights` (keep the heights read from a photo; sidecar, source `photo`).
+- `GET /api/photo/jobs/{id}`: snapshot plus `result` when done. No Google request is made.
+
+Plate align (`/api/plate/...`):
+- `GET plates`, `GET plates/{slug}` (shapes, window, guess, saved placement), `GET plates/{slug}/image/{name}`.
+- `POST plates/{slug}/score` (`{matrix}` to overlap and edge gap), `POST plates/{slug}/save`
+  (`{payload}`), `POST plates/{slug}/refine` and `POST plates/{slug}/refetch` (jobs; refetch also
+  takes `margin`, `center`).
+- `GET /api/plate/jobs/{id}`. The Auto tab uses `/api/registration/plate/start` and `.../status/{id}`.
 
 ## Usage log (`app/server/routers/usage.py`)
 

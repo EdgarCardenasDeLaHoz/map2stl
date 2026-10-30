@@ -155,7 +155,23 @@ the header, as pages in the same app shell, with the same header, region pill an
   - Run is a job with 4 steps, cancel at stage boundaries, GPU lock respected.
   - Not built: step 5 of the mockup (pipeline has 4), "Compare with vN", "used in Extrude" and
     the "in use" chip (Phase 5), a colour-by dropdown, an editable panorama spacing.
-- Part 3 (open): Photo solve, Plate align pages.
+- **Part 3 done: Photo solve and Plate align pages** (Tools menu; Vue only, no new vanilla JS).
+  - Photo solve: pair photo points with map points, solve the camera, Auto register (start camera)
+    as a job, buildings on the photo, heights table with Use these heights (sidecar
+    `<region>_photo_heights.json`, source `photo`), Commons search/add, Screen photos, add a photo.
+  - Plate align: choose a plate, Auto (place by streets) or Manual (drag, corner scale, rotate
+    handle, keys), Refine (ECC) and Fetch fresh map data as jobs, live overlap and edge gap,
+    Save placement, Export JSON.
+  - One implementation each: `city2stl/registration/align_edit.py` (save, load, refine, refetch,
+    score) is imported by `tools/align_tool/server.py` and the app; `core/photo_solve.py` loads
+    `tools/photo_label/server.py` and calls its `api_*` functions.
+  - No Google request from either page: jobs and solve run in `google_usage.cache_only()`;
+    verified 0 and 0 on the monthly counter after a live solve.
+  - Not built (kept in the standalone tools): Google 3D tile proxy, 3D map mode, View from
+    camera, render-based `api_register_step`, depth and orientation tabs, GLB overlay and
+    `register_model`, satellite base map in the pairing map, picking a building from the id
+    image, wheel-to-scale on the plate, the localStorage mirror of Save.
+  - Phase 5 should read the sidecar as `height_source = photo_*`.
 
 ## Phase 5: panorama heights in reconstruction
 

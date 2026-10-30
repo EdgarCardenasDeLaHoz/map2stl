@@ -25,9 +25,9 @@
 
     <div class="header-actions">
       <!-- Tools: the power tools live here, out of the Beginner view (design guidelines §1).
-           Street View heights and Benchmark are built so far; the rest say "coming soon". -->
+           Street View heights, Photo solve, Plate align and Benchmark are all built. -->
       <div class="tools-menu">
-        <button type="button" id="toolsMenuBtn" class="tools-btn" :class="{ on: store.activeView === 'benchmark' }"
+        <button type="button" id="toolsMenuBtn" class="tools-btn" :class="{ on: TOOL_VIEWS.includes(store.activeView) }"
                 aria-haspopup="menu" :aria-expanded="toolsOpen" title="Tools"
                 @click.stop="toolsOpen = !toolsOpen; helpOpen = false">Tools <span aria-hidden="true">▾</span></button>
         <div v-if="toolsOpen" class="help-dropdown tools-dropdown" role="menu" @click.stop>
@@ -262,10 +262,11 @@ onBeforeUnmount(() => document.removeEventListener('click', closeHelp));
 // Tools menu (F-UNIFY Phase 4). `view` is the page it opens; no view = not built yet.
 const TOOLS: { label: string; hint: string; view?: string }[] = [
   { label: 'Street View heights', hint: 'Measure heights from panoramas for this region', view: 'heights' },
-  { label: 'Photo solve', hint: 'Place your own photo and read heights from it' },
-  { label: 'Plate align', hint: 'Line a printed plate up with the map' },
+  { label: 'Photo solve', hint: 'Place your own photo and read heights from it', view: 'photo' },
+  { label: 'Plate align', hint: 'Line a printed plate up with the map', view: 'plate' },
   { label: 'Benchmark', hint: 'Score heights against LiDAR / 3D Tiles', view: 'benchmark' },
 ];
+const TOOL_VIEWS: string[] = TOOLS.map((t) => t.view).filter((v): v is string => !!v);
 function openTool(t: { view?: string }) {
   if (!t.view) return;            // "coming soon": the menu stays open, nothing happens
   toolsOpen.value = false;

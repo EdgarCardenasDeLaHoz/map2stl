@@ -8,6 +8,7 @@ can import it; the files stay where the tool has always put them.
 Environment overrides (same names the tool's ``paths.py`` honours):
 
     ALIGN_DATA_DIR   exported per-plate packs (default ``tools/align_tool/data``)
+    ALIGN_GROUND_TRUTH_DIR  saved hand alignments (default ``tools/align_tool/ground_truth``)
     MAPS_ROOT        the "3D Maps" folder holding ``Cities/`` and ``strm_h5/``
     STRM_H5_ROOT     folder holding ``strm_data.h5`` (default ``MAPS_ROOT/strm_h5``)
 
@@ -28,6 +29,11 @@ MAPS_ROOT = Path(os.environ.get("MAPS_ROOT") or REPO_ROOT.parents[1])
 def data_dir() -> Path:
     """Pack directory, read fresh so tests can point ``ALIGN_DATA_DIR`` at a fixture."""
     return Path(os.environ.get("ALIGN_DATA_DIR") or ALIGN_TOOL / "data")
+
+
+def ground_truth_dir() -> Path:
+    """Hand alignments (tracked in git), read fresh; ``ALIGN_GROUND_TRUTH_DIR`` redirects scratch runs."""
+    return Path(os.environ.get("ALIGN_GROUND_TRUTH_DIR") or ALIGN_TOOL / "ground_truth")
 
 
 #: Overpass water layers cached by ``osm_water`` (always beside the tool, as before).

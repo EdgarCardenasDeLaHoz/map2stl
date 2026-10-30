@@ -54,6 +54,7 @@ Why: [decisions/registration-plate-location.md](../decisions/registration-plate-
 Manual drag-align, ground truth and batch export. Refinement: [reference/align-refinement.md](../reference/align-refinement.md).
 
 - Drag UI and server: `map2stl/tools/align_tool/drag_align.html`; `map2stl/tools/align_tool/server.py::AlignHandler` (`ROUTES`, `api_save`, `api_refine`, `api_refetch`)
+- Shared editing code (save, load, refine, refetch, score): `city2stl/registration/align_edit.py` (`api_save`, `api_load`, `api_refine`, `api_refetch`, `api_score`); imported by the tool server and by the app's Plate align page (`app/server/core/plate_align.py`, `app/server/routers/plate.py`, `/api/plate/...`; page `PlateAlignPage.vue`, logic `modules/ui/plate-align-format.js`); `ALIGN_GROUND_TRUTH_DIR` redirects saves via `align_paths.ground_truth_dir`; tests `tests/test_plate_align_router.py`, `tests/js/plateAlignFormat.test.js`
 - Pack export (plate at three stages, semantic exclusion after refinement, row 0 = south): `map2stl/tools/align_tool/export_align_data.py::main` (`CITIES`, `SLUGS`, `PACK_ROOTS`, `plate_building_heights`, `semantic_exclusion`)
 - Opening-transform refinement: `map2stl/tools/align_tool/refine_guess.py::refine_arrays` (`solve_span`, `span_is_measured`, `apply_to_disk`)
 - Evaluation against ground truth: `map2stl/tools/align_tool/eval_registration.py::evaluate_city` (`truth_in_export_frame`, `truth_is_unverified`, `segmentation_scores`)

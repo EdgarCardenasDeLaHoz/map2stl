@@ -19,6 +19,12 @@
 
     <!-- Street View heights page (Tools menu) -->
     <HeightsPage />
+
+    <!-- Photo solve page (Tools menu) -->
+    <PhotoSolvePage />
+
+    <!-- Plate align page (Tools menu) -->
+    <PlateAlignPage />
   </div>
 </template>
 <script setup lang="ts">
@@ -27,4 +33,6 @@ import DemContainer   from './DemContainer.vue';
 import ModelContainer from './ModelContainer.vue';
 import BenchmarkPage  from './BenchmarkPage.vue';
 import HeightsPage    from './HeightsPage.vue';
+import PhotoSolvePage from './PhotoSolvePage.vue';
+import PlateAlignPage from './PlateAlignPage.vue';
 </script>

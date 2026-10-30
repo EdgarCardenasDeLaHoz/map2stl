@@ -574,3 +574,31 @@ rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 - **Note:** `dist/` is gitignored and served as fallback — `.vue` edits need `npm run build`.
 - **Supersedes / superseded by:** Vue call answered by [Standardise on Vue](#2026-09-26--standardise-on-vue-and-retire-v2)
 - **Source:** decisions.md 2026-08-26 entry
+
+### 2026-10-29 — Photo solve and Plate align share code with the standalone tools
+- **Decision:** the Plate align page and `tools/align_tool` both import save, load, refine, refetch
+  and score from `city2stl/registration/align_edit.py` (new `api_score`). The Photo solve page
+  loads `tools/photo_label/server.py` with importlib (`core/photo_solve.py::tool`) and calls its
+  `api_*` functions on a per-region `Config` built with `api_key=""`.
+- **Why:** one implementation, two front ends; a fix lands in both. A Config with no key cannot send
+  a Google request even if a route is added by mistake; jobs also run in `google_usage.cache_only()`.
+- **Rejected:** copying the tool's code into `core/` — it would drift; proxying the tool's HTTP
+  server — a second process and port for the same functions.
+- **Supersedes / superseded by:** —
+
+### 2026-10-29 — Heights read from a photo are kept in a sidecar with source "photo"
+- **Decision:** Use these heights writes `<annotations>/<region>_photo_heights.json`
+  (`{source: "photo", photos: {<photo>: {saved, heights: [{building, lat, lon, height_m, osm_height_m}]}}}`).
+  It never edits OSM tags, survey or LiDAR heights. Phase 5 reads it as `height_source = photo_*`.
+- **Why:** a camera fit from a few hand pairs is weaker than a survey; keeping it apart lets the
+  height priority decide, and lets the user delete it.
+- **Rejected:** writing into the region's building file — mixes provenance.
+- **Supersedes / superseded by:** —
+
+### 2026-10-29 — Plate align: Score and Refine use the saved pack rasters; env override for saves
+- **Decision:** `score` and `refine` read the pack's saved `.npy` rasters, so they are disabled
+  after a fresh fetch until it is saved. `ALIGN_GROUND_TRUTH_DIR` redirects saved placements
+  (scratch runs and tests); `align_paths.ground_truth_dir()` reads it fresh.
+- **Why:** the rasters on disk are what the registration code was validated against; tests and
+  scratch servers must not write into the tracked `ground_truth/` folder.
+- **Supersedes / superseded by:** —
