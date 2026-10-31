@@ -9,6 +9,10 @@ One footprint gets at most one reading per method (``SatReading``):
 - ``stereo``: the pair consensus across dated scenes (``measure.consensus``);
 - ``multiview``: the plane-sweep NCC peak over all scene pairs (``stereo_multiview``);
 - ``ls``: lean and shadow agreeing (within 25 %): the conf-weighted mean, conf the larger;
+- ``geopose``: a learned overhead height model's roof-area median (``geopose.to_reading``); an
+  independent second reading, conf fixed at 0.5, lean and backend in ``extra``. It is not in
+  ``skyline``'s ``SUPPORT_MIN_CONF`` / ``TIER_KIND`` / fusion list, so it cannot publish or
+  support a height; ``calibrate`` leaves it alone;
 
 Readings under ``weights.MIN_CONF`` (0.15) are not made. The rules are those of the F-SKY26
 harness ``Code/claude/scripts/seed_experiment.py::load_sat`` (2026-10-07), which the satellite
@@ -38,12 +42,12 @@ import numpy as np
 
 from geo2stl.cache import atomic_write_json
 
-from .weights import MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
+from .weights import GEOPOSE_MIN_M, MIN_CONF, MULTIVIEW_MIN_CONF, TALL_M
 
 #: Two readings agree within this share (the benchmark's 25 % yardstick).
 AGREE = 0.25
 #: Methods a footprint can have, in the order fusion considers them.
-METHODS = ("ls", "lean", "shadow", "stereo", "multiview")
+METHODS = ("ls", "lean", "shadow", "stereo", "multiview", "geopose")
 #: 2 (2026-10-23): ``group`` agrees through ``tiers.agree`` (25 % of the smaller, was the larger).
 READINGS_VERSION = 2
 #: A lean under ``TALL_M`` is not a roof reading whatever its peak shape. LiDAR (2026-10-08,
@@ -65,7 +69,7 @@ LEAN_TRUST_CONF = 0.7
 class SatReading:
     """One satellite height reading of one footprint."""
 
-    method: str                       # lean | shadow | stereo | multiview | ls
+    method: str                       # lean | shadow | stereo | multiview | ls | geopose
     height_m: float
     conf: float
     scene: str | None = None          # scene(s) it comes from ("+"-joined for merged shadows)
@@ -130,12 +134,14 @@ def calibrate(rs: list[SatReading]) -> list[SatReading]:
 
 def footprint_readings(*, lean: dict | None = None, shadows: dict | None = None,
                        stereo: dict | None = None, multiview: dict | None = None,
+                       geopose: dict | None = None,
                        ref_scene: str | None = None, calibrate: bool = True) -> list[SatReading]:
     """One footprint's readings from its raw measurements.
 
     ``lean``: ``{height_m, conf}`` of the reference scene (key ``qc`` accepted for ``conf``);
     ``shadows``: ``{scene: {height_m, conf}}``; ``stereo``: the consensus; ``multiview``: the
-    plane-sweep peak. ``calibrate``: apply :func:`calibrate` (False: the 2026-10-07 rules).
+    plane-sweep peak; ``geopose``: a ``geopose.heights_for_footprints`` result. ``calibrate``:
+    apply :func:`calibrate` (False: the 2026-10-07 rules).
     """
     out: list[SatReading] = []
     by: dict[str, SatReading] = {}
@@ -159,6 +165,10 @@ def footprint_readings(*, lean: dict | None = None, shadows: dict | None = None,
     if mv.get("height_m") and (mv.get("conf") or 0) >= MULTIVIEW_MIN_CONF:
         by["multiview"] = SatReading("multiview", float(mv["height_m"]), float(mv["conf"]),
                                      n_scenes=int(mv.get("n_pairs") or 0))
+    if geopose and geopose.get("h_m") and geopose["h_m"] >= GEOPOSE_MIN_M:
+        from .geopose import to_reading  # noqa: PLC0415 - keeps torch-free imports light
+
+        by["geopose"] = to_reading(geopose, ref_scene)
     if "lean" in by and "shadow" in by and by["lean"].height_m >= 40.0 \
             and _agree(by["lean"].height_m, by["shadow"].height_m):
         a, b = by["lean"], by["shadow"]

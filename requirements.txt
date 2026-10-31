@@ -66,7 +66,7 @@ scikit-image==0.26.0
 # uncomment below (and optionally add segmentation-models-pytorch) for the CPU build.
 # torch>=2.0
 # torchvision>=0.15
-# timm>=0.9
+# timm>=0.9  # also needed by city2stl/height/satellite/geopose.py (RS3DAda, AltiMap backends)
 # transformers>=4.40
 # segmentation-models-pytorch>=0.3  # optional U-Net via smp; timm fallback used otherwise
 

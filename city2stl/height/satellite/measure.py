@@ -12,7 +12,10 @@ Footprints are dicts: ``fid`` (id), ``P`` (list of global z18 pixel rings at the
 ``bb`` (pixel bbox), ``tag`` (OSM height tag or None: it only sizes search windows and the
 occlusion labels; truth heights are never read), ``lat``, ``lon``; optional ``hint`` (the highest
 drone or floors reading of an untagged footprint, from a region run: it only widens the search
-window, :func:`search_cap`).
+window, :func:`search_cap`) and ``geopose`` (a ``geopose.py`` height of an untagged footprint: it
+widens the window the same way, but only while :data:`GEOPOSE_GATE` or ``geopose_gate=True`` is on)
+and ``photo_mask`` (the agreed photo-view height; same, with :data:`PHOTO_MASK_GATE` /
+``photo_mask_gate=True``; :func:`tall_gate`).
 
 Shadow (``shadow_height``): slide the footprint's shadow-facing outline along the shadow bearing;
 the dark run start (roof edge) to its tip gives ``H_roof = (tip - roof_edge) / (cot(el) - p)``,
@@ -53,19 +56,53 @@ CAP_FACTOR = 1.6
 #: LiDAR, untagged: 35.6 % of footprints under 30 m vs 11.1 % at 60 m); hints are opt-in only.
 HINT_TALL_M = 80.0
 HINT_TALL_CAP_M = 220.0
+#: The Geopose tall gate (F-SATTALL, 2026-10-31): an untagged footprint whose ``geopose`` height
+#: (``geopose.heights_for_footprints``, an independent learned model, not a drone hint) is over
+#: :data:`HINT_TALL_M` is also searched up to :data:`HINT_TALL_CAP_M`. **Off** until it is scored
+#: against the same Honolulu untagged false-tall rate that refused the hint gate (11.1 % at the
+#: 60 m window); ``search_cap(..., geopose_gate=True)`` turns it on per call, this sets the default.
+GEOPOSE_GATE = False
+#: The photo-mask tall gate (F-SATTALL, 2026-10-31; the Geopose baseline under-reads towers 10-80x,
+#: so this replaces it as the candidate): an untagged footprint whose ``photo_mask`` height (the
+#: agreed step-F reading, 2+ photo views agreeing, ``mask_heights.py``) is over :data:`HINT_TALL_M`
+#: is also searched up to :data:`HINT_TALL_CAP_M`. **Off** until scored by
+#: ``claude/scripts/score_tall_gate.py``; ``photo_mask_gate=True`` turns it on per call.
+PHOTO_MASK_GATE = False
 
 
-def search_cap(f: dict, floor_m: float, top_m: float) -> float:
+def tall_gate(f: dict, geopose_gate: bool | None = None, photo_mask_gate: bool | None = None) -> bool:
+    """True for an untagged footprint ``f`` with a ``geopose`` height over :data:`HINT_TALL_M`
+    while the Geopose gate is on (``geopose_gate``, default :data:`GEOPOSE_GATE`), or a
+    ``photo_mask`` height over it while the photo-mask gate is on (``photo_mask_gate``, default
+    :data:`PHOTO_MASK_GATE`)."""
+    if f.get("tag"):
+        return False
+    if (GEOPOSE_GATE if geopose_gate is None else geopose_gate) and float(f.get("geopose") or 0.0) > HINT_TALL_M:
+        return True
+    return bool(PHOTO_MASK_GATE if photo_mask_gate is None else photo_mask_gate)         and float(f.get("photo_mask") or 0.0) > HINT_TALL_M
+
+
+def geopose_tall(f: dict, gate: bool | None = None) -> bool:
+    """:func:`tall_gate` with only the Geopose gate (kept for callers and tests)."""
+    return tall_gate(f, geopose_gate=gate, photo_mask_gate=False)
+
+
+def search_cap(f: dict, floor_m: float, top_m: float, geopose_gate: bool | None = None,
+               photo_mask_gate: bool | None = None) -> float:
     """How high one footprint's shadow, lean or sweep search goes, in metres:
     ``CAP_FACTOR`` x its tag, at least ``floor_m`` (60 m shadow and lean, 80 m sweep), at most
     ``top_m``. Untagged: also ``CAP_FACTOR`` x its ``hint`` (the highest drone or floors reading),
-    and at least :data:`HINT_TALL_CAP_M` when the hint is over :data:`HINT_TALL_M`."""
+    and at least :data:`HINT_TALL_CAP_M` when the hint is over :data:`HINT_TALL_M`. Also at least
+    :data:`HINT_TALL_CAP_M` when :func:`tall_gate` is true (a ``geopose`` or ``photo_mask`` height
+    over :data:`HINT_TALL_M` with that gate on; the ``*_gate`` arguments override
+    :data:`GEOPOSE_GATE` / :data:`PHOTO_MASK_GATE`, both off by default, so those fields change
+    nothing until a gate is scored)."""
     tag = float(f.get("tag") or 0.0)
     cap = max(floor_m, CAP_FACTOR * tag)
     if not tag:
         hint = float(f.get("hint") or 0.0)
         cap = max(cap, CAP_FACTOR * hint)
-        if hint > HINT_TALL_M:
+        if hint > HINT_TALL_M or tall_gate(f, geopose_gate, photo_mask_gate):
             cap = max(cap, HINT_TALL_CAP_M)
     return min(top_m, cap)
 
@@ -76,7 +113,7 @@ def _margin_h(f: dict) -> float:
     30 m."""
     if f.get("tag"):
         return float(f["tag"])
-    if f.get("hint"):
+    if f.get("hint") or tall_gate(f):
         return search_cap(f, 80.0, 330.0) / 1.2
     return 30.0
 
@@ -806,4 +843,5 @@ def finish_multi(res: dict) -> dict:
 
 __all__ = ["ShadowCtx", "shadow_height", "lean_height", "measure_single", "measure_multi",
            "scene_pairs", "consensus", "combine", "finish_multi", "search_cap", "MIN_PAIR_DL",
-           "COMBINE_CMIN", "CAP_FACTOR", "HINT_TALL_M", "HINT_TALL_CAP_M"]
+           "COMBINE_CMIN", "CAP_FACTOR", "HINT_TALL_M", "HINT_TALL_CAP_M", "GEOPOSE_GATE", "PHOTO_MASK_GATE",
+           "geopose_tall", "tall_gate"]

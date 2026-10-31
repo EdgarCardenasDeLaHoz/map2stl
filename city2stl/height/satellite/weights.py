@@ -20,7 +20,12 @@ TALL_M = 40.0
 #: Multiview (NCC plane-sweep peak) readings count only at this confidence or above.
 MULTIVIEW_MIN_CONF = 0.3
 
-KINDS = ("lean", "shadow", "stereo", "multiview", "ls")
+#: ``geopose`` (a learned overhead height model, ``geopose.py``): never a publishing method; its
+#: sigma is deliberately wide. It reads 15-100 m with a few metres RMSE on lidar-labelled data but
+#: under-reads towers (AltiMap's own test: 104 m vs 151 m), so over 100 m it weighs less.
+GEOPOSE_MIN_M = 10.0
+
+KINDS = ("lean", "shadow", "stereo", "multiview", "ls", "geopose")
 
 
 def sigma_log(kind: str, h: float, conf: float) -> float | None:
@@ -28,8 +33,9 @@ def sigma_log(kind: str, h: float, conf: float) -> float | None:
 
     ``kind``: ``lean`` (current-scene roof shift), ``shadow`` (scenes merged to one reading),
     ``stereo`` (pair consensus across dated scenes), ``multiview`` (NCC plane-sweep peak over all
-    scene pairs) or ``ls`` (lean and shadow agreeing). Lean, stereo and multiview under 40 m are
-    dropped (sigma >= 0.5; stereo 0.61-0.84 on Chicago, multiview 0.59).
+    scene pairs), ``ls`` (lean and shadow agreeing) or ``geopose`` (learned overhead height,
+    sigma 0.35, 0.45 over 100 m, dropped under 10 m; unscored, conservative). Lean, stereo and
+    multiview under 40 m are dropped (sigma >= 0.5; stereo 0.61-0.84 on Chicago, multiview 0.59).
     """
     h, c = float(h), float(conf)
     if kind == "lean":
@@ -55,6 +61,8 @@ def sigma_log(kind: str, h: float, conf: float) -> float | None:
     if kind == "ls":
         lean, shadow = sigma_log("lean", h, c), sigma_log("shadow", h, c)
         return min(s for s in (lean, shadow, REF_SIGMA_LOG) if s is not None)
+    if kind == "geopose":
+        return None if h < GEOPOSE_MIN_M else 0.35 if h <= 100.0 else 0.45
     raise ValueError(kind)
 
 
@@ -65,4 +73,4 @@ def weight_scale(kind: str, h: float, conf: float) -> float:
 
 
 __all__ = ["sigma_log", "weight_scale", "REF_SIGMA_LOG", "MIN_CONF", "TALL_M",
-           "MULTIVIEW_MIN_CONF", "KINDS"]
+           "MULTIVIEW_MIN_CONF", "GEOPOSE_MIN_M", "KINDS"]

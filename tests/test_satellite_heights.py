@@ -418,3 +418,24 @@ def test_scene_outline_takes_every_polygon_of_the_scene_in_the_bbox(monkeypatch)
     got = ss.in_rings(o["2025-05-11_WV03"], [0.5, 1.5, 2.2, 2.5], [0.5, 0.5, 0.5, 0.5])
     assert got.tolist() == [True, False, True, False]
     assert ss.scene_polygon(cfg, "r", "2025-05-11_WV03", [], bbox=(0, 0, 3, 1)) == o["2025-05-11_WV03"]
+
+
+# ------------------------------------------------------------------------------ photo-mask gate
+def test_photo_mask_gate_widens_only_untagged_footprints_over_80_m_when_on(monkeypatch):
+    """F-SATTALL: the agreed photo-view height is the tall gate candidate; off by default."""
+    cap = sm.search_cap
+    tall = dict(tag=None, photo_mask=150.0)
+    assert sm.PHOTO_MASK_GATE is False
+    assert cap(tall, 60.0, 320.0) == 60.0 and cap(tall, 80.0, 330.0) == 80.0     # off: unchanged
+    assert cap(tall, 60.0, 320.0, photo_mask_gate=True) == sm.HINT_TALL_CAP_M
+    assert cap(tall, 80.0, 330.0, photo_mask_gate=True) == sm.HINT_TALL_CAP_M
+    assert cap(dict(tag=150.0, photo_mask=300.0), 60.0, 320.0, photo_mask_gate=True) == 240.0  # tagged
+    assert cap(dict(tag=None, photo_mask=60.0), 60.0, 320.0, photo_mask_gate=True) == 60.0     # not tall
+    assert cap(dict(tag=None, photo_mask=80.0), 60.0, 320.0, photo_mask_gate=True) == 60.0     # not over
+    assert sm.tall_gate(tall) is False and sm.tall_gate(tall, photo_mask_gate=True) is True
+    assert sm.tall_gate(dict(tag=None, geopose=150.0), photo_mask_gate=True) is False
+    assert sm.geopose_tall(dict(tag=None, geopose=150.0), True) and not sm.geopose_tall(tall, True)
+    monkeypatch.setattr(sm, "PHOTO_MASK_GATE", True)
+    assert sm.search_cap(tall, 60.0, 320.0) == sm.HINT_TALL_CAP_M
+    assert sm.search_cap(tall, 60.0, 320.0, photo_mask_gate=False) == 60.0
+    assert sm._margin_h(tall) == pytest.approx(sm.search_cap(tall, 80.0, 330.0) / 1.2)
