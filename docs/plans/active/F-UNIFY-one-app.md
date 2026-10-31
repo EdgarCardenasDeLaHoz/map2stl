@@ -171,6 +171,11 @@ the header, as pages in the same app shell, with the same header, region pill an
     camera, render-based `api_register_step`, depth and orientation tabs, GLB overlay and
     `register_model`, satellite base map in the pairing map, picking a building from the id
     image, wheel-to-scale on the plate, the localStorage mirror of Save.
+  - Later (user 2026-10-31): bring the Google 3D mesh features (3D view, View from camera,
+    render-based auto register, GLB overlay) into the Photo solve page behind the same
+    paid-fetch confirm as Street View heights. Until then they live in `tools/photo_label`.
+  - Follow-up: `core/photo_solve.py` loads `tools/photo_label/server.py` by importlib; move the
+    `api_*` logic into a package module (as `align_edit.py` did) so the app does not import a tool server.
   - Phase 5 should read the sidecar as `height_source = photo_*`.
 
 ## Phase 5: panorama heights in reconstruction
