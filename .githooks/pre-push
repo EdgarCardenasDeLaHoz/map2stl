@@ -37,13 +37,15 @@ while read -r _lref lsha _rref _rsha; do
 done
 [ -n "$SHAS" ] || exit 0
 
-junction() {  # junction <link> <target>
-    cmd //c mklink /J "$(cygpath -w "$1")" "$(cygpath -w "$2")" > /dev/null
+# MSYS2_ARG_CONV_EXCL stops Git Bash rewriting /J into a path ("Invalid switch").
+junction() {  # junction <link> <target>; fails if the link was not made
+    MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J "$(cygpath -w "$1")" "$(cygpath -w "$2")" > /dev/null
+    [ -e "$1" ] || { echo "pre-push: could not link $1 to $2" >&2; return 1; }
 }
 
 unjunction() {  # rmdir removes the junction, never the target
     [ -e "$1" ] || [ -L "$1" ] || return 0
-    cmd //c rmdir "$(cygpath -w "$1")" > /dev/null 2>&1 || true
+    MSYS2_ARG_CONV_EXCL='*' cmd /c rmdir "$(cygpath -w "$1")" > /dev/null 2>&1 || true
 }
 
 cleanup() {
@@ -76,9 +78,9 @@ run_suites() {  # run_suites <sha>
     echo "pre-push: testing a clean checkout of $(echo "$sha" | cut -c1-12) in $BASE"
     git -C "$REPO" worktree add --detach "$BASE/map2stl" "$sha" > /dev/null
     for j in $JUNCTIONS; do
-        [ -e "$REPO/$j" ] && junction "$BASE/map2stl/$j" "$REPO/$j"
+        if [ -e "$REPO/$j" ]; then junction "$BASE/map2stl/$j" "$REPO/$j" || return 1; fi
     done
-    junction "$BASE/numpy2stl" "$REPO/../numpy2stl"
+    junction "$BASE/numpy2stl" "$REPO/../numpy2stl" || return 1
 
     WT="$BASE/map2stl"
     (
