@@ -169,7 +169,7 @@ def _frame_template(frame_gray, view: dict, cam: PanoCamera, half_deg: float):
 
     fh, fw = frame_gray.shape
     fcam = pv.PinholeCamera(0.0, 0.0, 0.0, float(view["heading_deg"]), float(view.get("pitch_deg") or 0.0),
-                            0.0, fw / 2 / math.tan(math.radians(float(view["fov_deg"])) / 2), fw, fh)
+                            0.0, f_px_of_fov(fw, view["fov_deg"]), fw, fh)
     n = int(round(half_deg / cam.deg_per_col))
     cols = np.arange(-n, n + 1)
     head = float(view["heading_deg"]) + cols * cam.deg_per_col
@@ -241,6 +241,28 @@ def fit_col0_heading(seed_dir, cam: PanoCamera | None = None, half_deg: float = 
             "n_frames": len(out), "per_frame": out}
 
 
+def f_px_of_fov(width: float, fov_deg: float) -> float:
+    """Pinhole focal length in pixels of a frame ``width`` px wide with horizontal field of view ``fov_deg``."""
+    return float(width) / 2 / math.tan(math.radians(float(fov_deg)) / 2)
+
+
+def pose_elevation(pose: dict) -> tuple[float | None, bool]:
+    """(camera elevation, fitted?) from a seed's `pose.json`: `cam_elev_m` (fitted), else
+    `ground_m + cam_height_m`, else (None, False) and the caller falls back to the DEM."""
+    if pose.get("cam_elev_m") is not None:
+        return float(pose["cam_elev_m"]), True
+    if pose.get("ground_m") is not None and pose.get("cam_height_m") is not None:
+        return float(pose["ground_m"]) + float(pose["cam_height_m"]), False
+    return None, False
+
+
+def frame_pose_parts(view: dict, pose: dict, width: float) -> dict:
+    """Heading, pitch, roll and focal length of one seed frame: `views.json` heading / pitch / fov
+    (``width`` px wide), roll from `pose.json` `horizon_tilt_deg`."""
+    return {"heading_deg": float(view["heading_deg"]), "pitch_deg": float(view.get("pitch_deg") or 0.0),
+            "roll_deg": float(pose.get("horizon_tilt_deg") or 0.0), "f_px": f_px_of_fov(width, view["fov_deg"])}
+
+
 def seed_frame_cameras(seed_dir, cam: PanoCamera, elev_m: float | None = None) -> list[dict]:
     """The pinhole cameras of a seed's frames (`views.json`: heading, pitch, fov, size; position and
     elevation of ``cam``) as camera dicts for the page's Google 3D renders (auto register on the strip)."""
@@ -249,7 +271,7 @@ def seed_frame_cameras(seed_dir, cam: PanoCamera, elev_m: float | None = None) -
     for v in views:
         w, h = int(v.get("width") or v.get("w")), int(v.get("height") or v.get("h"))
         fov = float(v["fov_deg"])
-        f = w / 2 / math.tan(math.radians(fov) / 2)
+        f = f_px_of_fov(w, fov)
         out.append({"file": v["file"], "lat": cam.lat, "lon": cam.lon, "elev_m": cam.elev_m if elev_m is None else elev_m,
                     "heading_deg": float(v["heading_deg"]), "pitch_deg": float(v.get("pitch_deg") or 0.0),
                     "roll_deg": 0.0, "f_px": f, "hfov_deg": fov, "width": w, "height": h})

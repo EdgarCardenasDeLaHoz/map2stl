@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -19,7 +20,6 @@ def mod(monkeypatch):
     spec.loader.exec_module(m)
     import torch
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)   # never touch a GPU in tests
-    m._screen_state.clear()
     return m
 
 
@@ -30,7 +30,7 @@ def _labels(ground_frac, h=100, w=100):
 
 
 def test_screen_from_labels_rules(mod):
-    f = mod.photo_screen.screen_from_labels
+    f = sys.modules["screen"].screen_from_labels
     street = f(_labels(0.5), 400, 300)
     assert street["reason"].startswith("auto: street level (ground 50%")
     pano = f(_labels(0.0), 480, 100)
@@ -69,7 +69,7 @@ def _run(mod, cfg):
 
 def test_job_flags_unflag_sticks_and_manual_reason_kept(mod, tmp_path, monkeypatch):
     cfg = _region(mod, tmp_path)
-    monkeypatch.setattr(mod.photo_screen, "_ensure_label_map",
+    monkeypatch.setattr(sys.modules["screen"], "_ensure_label_map",
                         lambda rgb: _labels(0.5 if rgb.shape[0] == 300 else 0.0))
     # one photo is flagged by hand beforehand: keeps its reason
     mod.api_photo_flag(cfg, {"photo": "street.png", "bad": True, "reason": "mine"})
@@ -95,7 +95,7 @@ def test_state_shape_idle_and_no_gpu_message(mod, tmp_path, monkeypatch):
     st = mod.api_photos_screen_state(cfg)
     assert st == {"ok": True, "state": "idle", "done": 0, "total": 0, "flagged": [], "message": ""}
     calls = []
-    monkeypatch.setattr(mod.photo_screen, "_ensure_label_map", lambda rgb: calls.append(1))
+    monkeypatch.setattr(sys.modules["screen"], "_ensure_label_map", lambda rgb: calls.append(1))
     st = _run(mod, cfg)
     assert set(st) == {"ok", "state", "done", "total", "flagged", "message"}
     assert calls == []                                        # >10 pending, no CUDA: no SegFormer
@@ -105,7 +105,7 @@ def test_state_shape_idle_and_no_gpu_message(mod, tmp_path, monkeypatch):
 
 
 def test_geometry_rules_and_known_pose_skips_only_aspect(mod):
-    ps = mod.photo_screen
+    ps = sys.modules["screen"]
     assert ps.geometry_reason(None) == ""
     assert ps.geometry_reason({"cam_height_m": 2.5, "nearest_building_m": 200}).startswith("auto: street level (camera")
     assert ps.geometry_reason({"cam_height_m": 90.0, "nearest_building_m": 18.4}) == "auto: too close (nearest building 18 m)"
@@ -123,7 +123,7 @@ def test_geometry_rules_and_known_pose_skips_only_aspect(mod):
 
 
 def test_measure_pose_counts_visible_and_nearest(mod, monkeypatch):
-    ps = mod.photo_screen
+    ps = sys.modules["screen"]
     big, small = 0.01 * 100 * 100, 1
     fake = {"buildings": [{"visible_px": big, "edge_m": 80.0}, {"visible_px": big, "edge_m": 30.0},
                           {"visible_px": small, "edge_m": 5.0}], "ids": np.ones((100, 100), np.uint16)}
@@ -143,7 +143,7 @@ def test_measure_pose_counts_visible_and_nearest(mod, monkeypatch):
 
 
 def test_measure_depth_metrics_synthetic(mod):
-    ps = mod.photo_screen
+    ps = sys.modules["screen"]
     h = w = 100
     lab = np.zeros((h, w), int)
     lab[:40] = ps.SKY
@@ -151,23 +151,23 @@ def test_measure_depth_metrics_synthetic(mod):
     lab[70:] = 6                                    # road
     far = np.full((h, w), 0.2, np.float32)          # all far
     far[70:] = 1.0
-    m = ps.measure(None, lab, far)
+    m = ps.measure(lab, far)
     assert m["ground"] == pytest.approx(0.3) and m["skyline_frac"] == 1.0
     assert m["seg_buildings"] == 1 and m["near_block_frac"] == 0.0
     near = np.full((h, w), 1.0, np.float32)         # the building is the nearest thing
     near[:40] = 0.0
-    m = ps.measure(None, lab, near)
+    m = ps.measure(lab, near)
     assert m["near_block_frac"] == pytest.approx(0.3) and m["skyline_frac"] == 0.0 and m["seg_buildings"] == 0
-    assert ps.measure(None, lab, None)["near_block_frac"] is None
+    assert ps.measure(lab, None)["near_block_frac"] is None
 
 
 def test_job_known_pose_skips_aspect_but_gets_geometry(mod, tmp_path, monkeypatch):
     cfg = _region(mod, tmp_path)
-    monkeypatch.setattr(mod.photo_screen, "_ensure_label_map", lambda rgb: _labels(0.0))
+    monkeypatch.setattr(sys.modules["screen"], "_ensure_label_map", lambda rgb: _labels(0.0))
     poses = {"pano": (True, {"cam_height_m": 90.0, "nearest_building_m": 400.0}),     # known, fine, wide
              "street": (True, {"cam_height_m": 2.5, "nearest_building_m": 12.0}),
              "street2": (True, {"cam_height_m": 90.0, "nearest_building_m": 20.0})}
-    monkeypatch.setattr(mod, "_pose_geometry", lambda p, c: poses.get(p.stem, (False, None)))
+    monkeypatch.setattr(sys.modules["screening"], "_pose_geometry", lambda p, c: poses.get(p.stem, (False, None)))
     st = _run(mod, cfg)
     flags = mod.load_flags(cfg)
     assert sorted(st["flagged"]) == ["street.png", "street2.png"]

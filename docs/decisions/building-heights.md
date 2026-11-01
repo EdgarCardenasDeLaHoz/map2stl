@@ -51,28 +51,28 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 - **Supersedes / superseded by:** refines the 2026-10-07 screen entry below; —.
 - **Source:** `skyline-local/benchmark/2026-10-05_2148/miami_skyline_report/photo_results.json`, `2026-10-03_1952/chicago_.../photo_results.json`, `commons_cache/<city>/profiles.json`, the 37-photo verdict table from the 2026-10-07 review. Chicago: drops 11 of 53 rescued, their truth MAE 26.9 m vs 18.1 m kept (no verdicts). Evidence is two bad photos and one reviewer: confirm on the next reviewed screen (p79's rescued fit was never saved).
 ### 2026-10-25 — Auto register sweeps heading and FOV when the start guess fails, and keeps its render viewer across photos
-- **Decision:** when the best start guess gives fewer than 25 inliers (and is not a Street View pano), `index.html::autoRegister` renders 8 headings 45° apart at a 60° FOV, keeps the heading with the most inliers (or depth-lifted matches), tries it at 40° and 25°, and iterates from the winner. The 35 mm focal length from EXIF, when present, narrows the solver's f range. The offscreen render viewer and its tiles stay alive until the region changes; renders are serialised by a lock.
+- **Decision:** when the best start guess gives fewer than 25 inliers (and is not a Street View pano), `tools/photo_label/static/registration.js::autoRegister` renders 8 headings 45° apart at a 60° FOV, keeps the heading with the most inliers (or depth-lifted matches), tries it at 40° and 25°, and iterates from the winner. The 35 mm focal length from EXIF, when present, narrows the solver's f range. The offscreen render viewer and its tiles stay alive until the region changes; renders are serialised by a lock.
 - **Why:** on the first Commons batch the La Popa guess pointed ~140° away (the skyline search had aligned the sea horizon), zoomed photos were rendered too wide to match, and the viewer was rebuilt per photo, so every first render was coarse and hit the 90 s tile cap. The Google-depth tab could also dispose the viewer mid-render and hang it. Only 4 of 59 Cartagena Commons photos carry a 35 mm focal length, so the FOV sweep is still needed.
 - **Also:** the viewpoint named in a photo's title ("from La Popa") is searched on its own and pinned as the first guess. Among ~100 footprint viewpoints its skyline score lost: for "Castillo San Felipe … from La Popa" the top guess sat at 11 m in Bocagrande, 4 km away.
 - **Result (rerun 2026-10-25):** 0 of 9 Cartagena Commons photos registered, with or without the sweep. From the pinned La Popa start, aimed at the castle at a 10° FOV, the render shows the right scene, but Google's Cartagena tiles are draped imagery with sparse box buildings, not a photogrammetry mesh: 78 SIFT matches, 0 inliers. The fixes stay; Cartagena needs another source of correspondences.
 - **Rejected:** sweeping every photo — the sweep costs 8–10 renders; it runs only when the guess fails.
 - **Supersedes / superseded by:** —
-- **Source:** `tools/photo_label/index.html::sweepHeadings`, `tools/photo_label/server.py::photo_focal_35mm`, `tools/photo_label/server.py::api_register_candidates`
+- **Source:** `tools/photo_label/static/registration.js::sweepHeadings`, `tools/photo_label/seeds.py::photo_focal_35mm`, `tools/photo_label/solve.py::api_register_candidates`
 
 ### 2026-10-25 — Photos are auto-flagged when street level or a stitched panorama
 - **Decision:** the photo-label server flags a photo as bad on its own when (a) SegFormer ground classes (floor, road, sidewalk, earth, person, path) cover >= 25% of it (street level) or (b) width / height >= 3.5 (stitched panorama). Result cached as `<stem>_screen.json`; a photo with a cache file is never re-flagged, so a manual unflag sticks. No CUDA: SegFormer runs for at most 10 photos, otherwise the aspect rule only.
 - **Why:** measured on 74 Cartagena photos against 20 hand flags: all 15 Street View frames have ground share 0.34-0.51, every kept photo <= 0.15; flagged panoramas have aspect 4.06-4.75, the widest kept photo 2.33. The two rules reproduce 18 of the 20 manual flags with zero false positives.
 - **Rejected:** building share threshold — SegFormer labels a distant city as mountain / earth (two good La Popa views read 0.002 and 0.007 building share). Brightness — the user kept five darker night shots.
 - **Supersedes / superseded by:** —
-- **Source:** `tools/photo_label/screen.py`, `tools/photo_label/server.py::api_photos_screen`
+- **Source:** `tools/photo_label/screen.py`, `tools/photo_label/screening.py::api_photos_screen`
 
 ### 2026-10-24 — Auto register uses a measured geoid per region, and Street View panos stand on Google's ground
 - **Decision:** `regions.json` carries `geoid_m` per region (Granada 50, Cartagena -6.2, the
   Google mesh's sea surface in the bay). With it set, `register.py::register_step` keeps that
   geoid (`fit_geoid=False`) instead of estimating one per render. A pano seed's camera height is
-  the lowest Google mesh point within 8 m of the car plus 2.5 m (`index.html::meshGround`), not
+  the lowest Google mesh point within 8 m of the car plus 2.5 m (`tools/photo_label/static/registration.js::meshGround`), not
   the DEM. Footprints are drawn on one canvas and only those near the view are on the map
-  (`index.html::fpWindow`); a pano seed takes the image file's real size, not `site.json`'s.
+  (`tools/photo_label/static/map2d.js::fpWindow`); a pano seed takes the image file's real size, not `site.json`'s.
 - **Why:** every Cartagena pano failed ("only 0 matches have a depth"): the renders stood on
   Granada's +50 m geoid. The per-render estimate cannot replace a known value at street level:
   on one pano it read +36 m from a render at 0 and -11 m from a render at 50. The 30 m DEM read

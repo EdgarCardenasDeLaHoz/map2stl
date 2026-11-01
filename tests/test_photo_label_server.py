@@ -330,7 +330,7 @@ def tiles(tmp_path, monkeypatch):
             raise reply["r"]
         return reply["r"]
 
-    monkeypatch.setattr(mod, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mod.tiles, "urlopen", fake_urlopen)
     logs = []
     monkeypatch.setattr(mod.LabelHandler, "log_message", lambda self, fmt, *a: logs.append(fmt % a))
 
@@ -483,12 +483,13 @@ class _FakeConn:
 
 def test_pooled_response_returns_only_finished_connections():
     mod = _module()
+    mod.tiles._idle.clear()
     done, half = _FakeConn(), _FakeConn()
-    with mod._PooledResponse(_FakeResp(True), done, "h"):
+    with mod.tiles._PooledResponse(_FakeResp(True), done, "h"):
         pass
-    with mod._PooledResponse(_FakeResp(False), half, "h"):
+    with mod.tiles._PooledResponse(_FakeResp(False), half, "h"):
         pass
-    assert mod._idle["h"] == [done] and not done.closed
+    assert mod.tiles._idle["h"] == [done] and not done.closed
     assert half.closed
 
 
@@ -601,3 +602,38 @@ def test_project_buildings_outlines_withheld_at_measured_height():
     assert top < min(y for ring in b["contours"] for _x, y in ring) - 100       # the dashed box rises far above
     both = ts.project_buildings(dem, fc, cam, measured=True)["buildings"][0]
     assert both["height_m"] == 148.0 and "measured_outline" not in both
+
+
+def _raw(base, path):
+    import http.client
+    c = http.client.HTTPConnection(base.split("//")[1], timeout=10)
+    c.request("GET", path)
+    r = c.getresponse()
+    body = r.read()
+    out = (r.status, r.getheader("Content-Type"), r.getheader("Cache-Control"), body)
+    c.close()
+    return out
+
+
+def test_static_modules_served_with_type_and_no_cache(srv):
+    base, _ = srv
+    st, ctype, cache, body = _raw(base, "/static/main.js")
+    assert st == 200 and ctype == "text/javascript; charset=utf-8" and cache == "no-cache" and body
+    st, ctype, _c, _b = _raw(base, "/static/style.css")
+    assert st == 200 and ctype == "text/css; charset=utf-8"
+
+
+@pytest.mark.parametrize("path", ["/static/../server.py", "/static/%2e%2e/server.py", "/static/..%2fserver.py",
+                                  "/static/%2e%2e%2fserver.py", "/static/missing.js"])
+def test_static_rejects_traversal_and_missing(srv, path):
+    base, _ = srv
+    assert _raw(base, path)[0] == 404
+
+
+def test_static_serves_only_js_and_css(srv):
+    base, _ = srv
+    assert _raw(base, "/static/")[0] == 404
+    assert _raw(base, "/static/../server.py")[0] == 404
+    d = Path(SERVER).parent / "static"
+    if (d / "main.js").exists():
+        assert _raw(base, "/static/main.js.map")[0] == 404

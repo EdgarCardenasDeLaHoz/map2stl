@@ -143,7 +143,7 @@ def _norm_disp(depth, shape):
     return np.clip(d / top, 0.0, None) if top > 0 else np.zeros(shape, np.float32)
 
 
-def measure(rgb, labels, depth) -> dict:
+def measure(labels, depth) -> dict:
     """Metrics of one photo from its ADE20K label map and raw inverse depth (None: depth metrics are None).
     near_block_frac: share of pixels that are wall / building / tree / plant AND near (normalised disparity
     > NEAR_DISP). seg_buildings: connected building segments of at least MIN_SEGMENT_FRAC of the photo whose

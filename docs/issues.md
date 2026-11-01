@@ -44,7 +44,7 @@ _Last updated: 2026-10-28_
 ## Photo-label Orientation tab: photo and Google labels disagree (open, 2026-10-26)
 
 Tested on `granada_cathedral` (Granada region, saved camera). The chain runs end to end
-(`tools/photo_label/orient.py`, `server.py::api_depth_orient`, `index.html::dvOrient`), but:
+(`tools/photo_label/orient.py`, `depth.py::api_depth_orient`, `tools/photo_label/static/orient.js::dvOrient`), but:
 
 - Per-pixel agreement between the photo-depth and Google-depth labels is 38%; roof type agrees
   on 128 of 199 buildings (e.g. 124052626 is pitched from the photo, flat from Google).

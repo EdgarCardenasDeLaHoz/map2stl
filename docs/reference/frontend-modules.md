@@ -487,3 +487,19 @@ One IIFE on `window.reportsPage`.
 | `selectRegion(dir)` / `selectAll()` | Sidebar selection |
 | `openFile(url, label)` / `openLightbox(src, cap)` | Report iframe / image overlay |
 | `init()` | Wire tabs, filters, search, lightbox; `load()` |
+
+### Photo-label tool page (`tools/photo_label/index.html` + `static/*.js`)
+
+Plain ES modules, no build step: `index.html` is the markup, `static/main.js` boots it. Paths:
+`tools/photo_label/static/<module>.js::<function>` — `layoutWide`, `drawMeasuredOutlines`, `loadBuildings` in `draw.js`;
+`autoRegisterStrip` in `strip.js`; `heightText`, `fpTip` in `map2d.js`. Mode, tool switches and the Settings sheet:
+`ui.js::setMode`, `setTool`, `setAutoScreen`, `applyUi`, `openSheet`; header Saved state and context pill: `chrome.js::setSaved`, `syncCtx`.
+
+| Function | Does |
+|---|---|
+| `layoutWide()` | Wide-photo layout (aspect over `WIDE_ASPECT`, e.g. a pano strip): toggles the `widePhoto` body class and resizes the canvas |
+| `autoRegisterStrip()` | Auto register on a pano strip: renders Google 3D at the seed's 12 frame poses, matches each against the strip, sends all pairs to the cylindrical solve |
+| `heightText(p)` | Words for a footprint's or projected building's height and its source (`osm_tag`, `osm_levels`, `published`, `measured_withheld`, `default`) with the measured / published figures |
+| `fpTip(p)` | Map tooltip text of a footprint: name plus `heightText` when the pipeline knew the height |
+| `drawMeasuredOutlines(list)` | Dashed yellow outline at the measured height of `measured_withheld` buildings (the server's `measured_outline` rings) |
+| `loadBuildings()` | `/api/project` for the solved camera, sends the `#hModeSel` "Heights: published / measured" choice; changing it reprojects |

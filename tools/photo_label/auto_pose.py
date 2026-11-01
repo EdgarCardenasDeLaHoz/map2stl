@@ -21,12 +21,18 @@ city) yields no candidates; the caller must then fall back to clicked pairs.
 from __future__ import annotations
 
 import math
+import sys
+from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import map_coordinates
 
 from geo2stl.geo import EARTH_RADIUS_M as EARTH_R
 from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from latlon import dist_m  # noqa: E402
 
 REFRACTION_K = 0.13
 CANOPY_M = 10.0             # buildings and trees stand on the bare-earth DEM, added to every ray sample
@@ -256,18 +262,6 @@ def viewpoints_from_fc(fc: dict) -> list[tuple[float, float]]:
     return out
 
 
-def viewpoints_from_overpass(data: dict) -> list[tuple[float, float]]:
-    """(lat, lon) of ``tourism=viewpoint`` and ``man_made`` tower/observation nodes in a raw
-    Overpass JSON (``server.overpass_to_geojson`` keeps only buildings, so it has none)."""
-    out = []
-    for e in (data or {}).get("elements", []):
-        tg = e.get("tags") or {}
-        if e.get("type") == "node" and (tg.get("tourism") == "viewpoint"
-                                        or tg.get("man_made") in ("tower", "observation")):
-            out.append((float(e["lat"]), float(e["lon"])))
-    return out
-
-
 def _geom_points(g: dict) -> np.ndarray:
     t, c = g.get("type"), g.get("coordinates")
     if t == "Point":
@@ -301,11 +295,6 @@ def _grid_candidates(sampler, lat0, lon0, radius_m, step_m=150.0):
             cnt += 1
     ok = np.isfinite(z) & (lower / cnt >= 0.6)
     return lat[ok], lon[ok]
-
-
-def _dist_m(lat1, lon1, lat2, lon2):
-    kx = M_PER_DEG_LAT * math.cos(math.radians((lat1 + lat2) / 2))
-    return math.hypot((lon2 - lon1) * kx, (lat2 - lat1) * M_PER_DEG_LAT)
 
 
 # --------------------------------------------------------------------------- search
@@ -431,7 +420,7 @@ def candidate_poses(rgb: np.ndarray, dem, *, center_lat: float, center_lon: floa
 
     out: list[dict] = []
     for r in results:
-        if any(_dist_m(r["lat"], r["lon"], o["lat"], o["lon"]) < 100.0
+        if any(dist_m(r["lat"], r["lon"], o["lat"], o["lon"]) < 100.0
                and abs((r["heading"] - o["heading"] + 180) % 360 - 180) < 5.0 for o in out):
             continue
         out.append(r)

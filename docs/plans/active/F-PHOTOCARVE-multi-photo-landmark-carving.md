@@ -14,7 +14,7 @@ landmark; output as fitted building parts; Cartagena cameras registered against 
 
 - Cartagena, Google tiles: the batch registered 0 of 9 Commons photos. A correctly aimed La Popa
   render gave 78 matches and 0 inliers.
-- Cartagena Street View frames (15, known pose from `server.py::pano_seed`): every one stops at
+- Cartagena Street View frames (15, known pose from `seeds.py::pano_seed`): every one stops at
   "only 6 matches have a depth" against the Google render (2026-10-26). Their known pose is
   already their camera; they become the anchors.
 - Granada: started from the saved, hand-solved camera of `granada_cathedral`, auto register still

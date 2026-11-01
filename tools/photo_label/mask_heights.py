@@ -66,13 +66,14 @@ DEFAULT_H = 9.0
 def frame_camera(view: dict, pose: dict, elev_m: float | None = None):
     """The pinhole camera of one frame (`server._seed_frame_pose`: views.json heading / pitch /
     fov, pose.json lat / lon / `cam_elev_m`, roll from `horizon_tilt_deg`)."""
+    from pano_camera import frame_pose_parts
+
     from city2stl.skyline.photo_view import PinholeCamera
     w, h = int(view["width"]), int(view["height"])
-    f_px = w / 2 / math.tan(math.radians(float(view["fov_deg"])) / 2)
+    p = frame_pose_parts(view, pose, w)
     elev = float(pose["cam_elev_m"] if elev_m is None else elev_m)
-    return PinholeCamera(float(pose["lat"]), float(pose["lon"]), elev, float(view["heading_deg"]),
-                         float(view.get("pitch_deg") or 0.0), float(pose.get("horizon_tilt_deg") or 0.0),
-                         f_px, w, h)
+    return PinholeCamera(float(pose["lat"]), float(pose["lon"]), elev, p["heading_deg"], p["pitch_deg"],
+                         p["roll_deg"], p["f_px"], w, h)
 
 
 def load_mask(path) -> np.ndarray:
@@ -214,7 +215,7 @@ def pose_gate(mask: np.ndarray, ids: np.ndarray, f_px: float) -> dict:
     return out
 
 
-def column_top(mask: np.ndarray, ids: np.ndarray, k: int, x: int, base_row: int, osm_top: int):
+def column_top(mask: np.ndarray, ids: np.ndarray, x: int, base_row: int, osm_top: int):
     """Mask top row of the building at column `x` or None (why: second value). Walk up from just
     above the base through building / other pixels; the run must end in sky, hold mostly building,
     and not run on through a farther footprint's outline above this outline's top."""
@@ -291,7 +292,7 @@ def analyse_frame(mask: np.ndarray, cam, fc: dict, dem, ground_of=None) -> dict:
         hs, mg, drops = [], [], {}
         for j in sel:
             x, br, ot = int(cols[j]), int(base[j]), int(otop[j])
-            top, why = column_top(mask, ids, k, x, br, ot)
+            top, why = column_top(mask, ids, x, br, ot)
             if top is None:
                 drops[why] = drops.get(why, 0) + 1
                 continue

@@ -201,13 +201,13 @@ def test_cam_dict_accepts_both_spellings():
 
 # ----------------------------------------------------------------- the browser's projection maths
 
-INDEX = TOOLS / "index.html"
+INDEX = TOOLS / "static" / "geo.js"
 NODE = shutil.which("node")
 
 
 def _js_math() -> str:
     m = re.search(r"// <pinhole-math>(.*?)// </pinhole-math>", INDEX.read_text(encoding="utf-8"), re.S)
-    assert m, "pinhole-math region missing from index.html"
+    assert m, "pinhole-math region missing from static/geo.js"
     return m.group(1)
 
 
@@ -336,8 +336,11 @@ def test_candidates_route_uses_auto_pose(srv, monkeypatch):
     fake.candidate_poses = candidate_poses
     fake.viewpoints_from_fc = lambda fc: [(37.1801, -3.5901)]      # within SEED_MATCH_M of the candidate
     monkeypatch.setitem(sys.modules, "auto_pose", fake)
-    r = _post(base, "/api/register/candidates", {"photo": "a.png"})
+    # refresh: a `<stem>_guesses.json` written by an earlier test beside a.png would answer from the cache
+    # and never reach auto_pose, leaving `seen` empty
+    r = _post(base, "/api/register/candidates", {"photo": "a.png", "refresh": True})
     assert r["ok"], r
+    assert seen, "candidate_poses was not called: the answer came from a cached guesses file"
     c = r["candidates"][0]
     assert c["elev_m"] == 790.0 and c["heading_deg"] == 200.0 and c["f_px"] == 380.0 and c["width"] == 400
     assert c["source"] == "viewpoint" and r["geoid_m"] == reg.GEOID_DEFAULT_M

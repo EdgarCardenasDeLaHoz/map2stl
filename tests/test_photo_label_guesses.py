@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import math
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -95,7 +96,7 @@ def world(mod, tmp_path, monkeypatch):
                      dem_path=None, api_key="", landmarks=LMS)
     cfg.dem = lambda: object()
     cfg.footprints = lambda: {}
-    monkeypatch.setattr(mod, "_dem_centre", lambda dem: (10.42, -75.54))
+    monkeypatch.setattr(sys.modules["solve"], "_dem_centre", lambda dem: (10.42, -75.54))
     monkeypatch.setattr(auto_pose, "viewpoints_from_fc", lambda fc: [(10.40, -75.50)])
     calls = []
 
@@ -212,7 +213,7 @@ def test_pano_short_circuits_search(mod, tmp_path, monkeypatch):
     assert r["hints"]["viewpoint"]["lat"] == pytest.approx(10.4245)
     # explicit viewpoints bypass the shortcut
     cfg.footprints = lambda: {}
-    monkeypatch.setattr(mod, "_dem_centre", lambda d: (10.4, -75.5))
+    monkeypatch.setattr(sys.modules["solve"], "_dem_centre", lambda d: (10.4, -75.5))
     mod.api_register_candidates(cfg, {"photo": "v1/v1_095.png", "viewpoints": [[10.4, -75.5]]})
     assert len(calls) == 1
 

@@ -48,8 +48,7 @@ def env(tmp_path, monkeypatch):
         calls.append(req.full_url)
         return reply["r"]
 
-    monkeypatch.setattr(mod, "urlopen", fake_urlopen)
-    monkeypatch.setattr(mod, "_depth_state", {})
+    monkeypatch.setattr(mod.tiles, "urlopen", fake_urlopen)
     cfg = mod.Config(tmp_path / "photos", tmp_path / "o.json", tmp_path / "a", api_key=KEY, dem_path=None,
                      tiles_cache_dir=tmp_path / "cache")
     httpd = mod.make_server(cfg, "127.0.0.1", 0)

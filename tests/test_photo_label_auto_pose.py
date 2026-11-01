@@ -128,7 +128,7 @@ def test_candidate_poses_recovers_known_camera():
     assert (best["width"], best["height"]) == (1000, 600)
     assert abs((best["heading"] - 20.0 + 180) % 360 - 180) <= 2.0
     assert abs(best["pitch"] - (-6.0)) <= 1.0
-    assert ap._dist_m(best["lat"], best["lon"], clat, clon) <= 150.0
+    assert ap.dist_m(best["lat"], best["lon"], clat, clon) <= 150.0
     assert best["score"] < 3.0
     assert [r["score"] for r in res] == sorted(r["score"] for r in res)
 

@@ -254,7 +254,7 @@ def _clip_near(poly: np.ndarray) -> np.ndarray:
     return np.array(out)
 
 
-def _prism_faces(pts_c: np.ndarray, zb: float, zt: float, e: np.ndarray, n: np.ndarray):
+def _prism_faces(pts_c: np.ndarray, zb: float, zt: float):
     """Visible-side faces of a prism: (kind, camera-space polygon) with kind 1 roof, 2 wall.
     `pts_c` (m, 2) ring in metres east/north of the camera, `zb`/`zt` base/top relative to the
     camera. Back-facing walls are skipped, the roof only when the camera is above it."""
@@ -386,7 +386,7 @@ def project_buildings(dem, fc: dict, cam, radius_m: float = PROJECT_RADIUS_M,
         mask = np.zeros((h, w), np.uint8)
         area = 0.5 * float(np.sum(pc[:, 0] * np.roll(pc[:, 1], -1) - np.roll(pc[:, 0], -1) * pc[:, 1]))
         ring = pc if area >= 0 else pc[::-1]
-        polys = [pl for _kd, pl in _prism_faces(pc, zb, zb + m, None, None)]
+        polys = [pl for _kd, pl in _prism_faces(pc, zb, zb + m)]
         polys.append(np.column_stack([ring, np.full(len(ring), zb + m)]))      # the roof, seen from below too
         for pl in polys:
             for _d, px in face_px(pl):
@@ -401,7 +401,7 @@ def project_buildings(dem, fc: dict, cam, radius_m: float = PROJECT_RADIUS_M,
         zt = zb + drawn_height(pr, measured)
         pc = np.column_stack([(pts[:, 0] - cam.lon) * kx, (pts[:, 1] - cam.lat) * M_PER_DEG_LAT])
         base[slot] = (pc, zb)
-        for kd, poly in _prism_faces(pc, zb, zt, None, None):
+        for kd, poly in _prism_faces(pc, zb, zt):
             for dist, px in face_px(poly):
                 faces.append((dist, slot, kd, px))
     faces.sort(key=lambda t: -t[0])

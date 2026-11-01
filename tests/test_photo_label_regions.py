@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import math
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -193,7 +194,7 @@ def test_cli_overrides_replace_the_default_regions_entry(mod, tmp_path, monkeypa
     osm.write_text(json.dumps(_overpass("Only")), encoding="utf-8")
     photos = tmp_path / "ph"
     _png(photos / "p.png")
-    monkeypatch.setattr(mod, "load_regions", lambda: {"alpha": {"label": "A", "osm": str(osm), "dem": "",
+    monkeypatch.setattr(sys.modules["regions"], "load_regions", lambda: {"alpha": {"label": "A", "osm": str(osm), "dem": "",
                                                                    "photos": {"": str(tmp_path / "other")}}})
     reg = mod.build_regions("alpha", osm=str(osm), dem="", photos=str(photos))
     cfg = reg.get("alpha")

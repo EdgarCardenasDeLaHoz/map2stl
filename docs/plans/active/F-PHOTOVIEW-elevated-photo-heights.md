@@ -138,9 +138,9 @@ confirm", camera unknown, Commons bulk run yes, CPU for the three photos (this P
 are built and run once. The target is not met.
 
 - **Depth view in the photo-label tool** (2026-10-24). Tabs Photo depth / Google depth /
-  Difference (`tools/photo_label/index.html::dvGoogle`, `server.py::api_depth_fit`). On photo 1
+  Difference (`tools/photo_label/static/depth-view.js::dvGoogle`, `depth.py::api_depth_fit`). On photo 1
   Depth Anything fits Google's mesh depth with 4,710 pairs at 6 % median error. The Google
-  render only settled once the tile proxy reused connections (`server.py::pooled_urlopen`,
+  render only settled once the tile proxy reused connections (`tiles.py::pooled_urlopen`,
   HTTP/1.1, `loopback_v6`): a cold view now settles in about 30 s instead of never. An
   Orientation tab (surfaces, wall facing, roof pitch, per-building summary written to
   `<stem>_orient.json`) is derived from the fitted depth's normals; a normals network on the

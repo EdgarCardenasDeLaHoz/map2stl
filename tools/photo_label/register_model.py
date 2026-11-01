@@ -582,7 +582,7 @@ def refine(rgb_or_feats, scene: ModelScene, cam0: PinholeCamera, *, bounds=None,
 
     starts = [np.zeros(7)]
     if search:
-        starts = [np.zeros(7)] + [q for q in _grid_search(scene, feats, small0, pos0, dts[0], lo, hi, say,
+        starts = [np.zeros(7)] + [q for q in _grid_search(scene, small0, pos0, dts[0], lo, hi, say,
                                                                   h_range, h_step, n_keep)
                                   if abs(q[0]) >= 4.0 or abs(q[3]) >= 0.15]
     n0 = len(_view_data(scene, small0, pos0, None)[0])
@@ -603,7 +603,7 @@ def refine(rgb_or_feats, scene: ModelScene, cam0: PinholeCamera, *, bounds=None,
     return Fit(full, p, sc, cost, n, sky, {"starts": len(starts), "seconds": round(time.time() - t_start, 1)})
 
 
-def _grid_search(scene, feats, small0, pos0, dt0, lo, hi, say, h_range: float = 14.0, h_step: float = 2.0,
+def _grid_search(scene, small0, pos0, dt0, lo, hi, say, h_range: float = 14.0, h_step: float = 2.0,
                  n_keep: int = 2) -> list[np.ndarray]:
     """Coarse heading grid at the start focal length (samples chosen once in a frame wide enough to rotate through)."""
     half = math.atan(small0.width / 2 / small0.f_px) + math.radians(h_range + 3.0)
@@ -788,29 +788,30 @@ def commons_items(cfg, picks=COMMONS_PICKS, log=print) -> list[dict]:
     one line each) flagged photos, stitched panoramas / street-level screens, photos without cached start
     guesses, and any not in `picks`. Guesses: cached `<stem>_guesses.json` (`server.api_register_candidates`),
     the title-pinned one first, then the best-ranked, three in all."""
+    import screen
     import server
-    from register import cam_from_dict  # noqa: F401  (kept: same dict shape as the labels)
-    flags = {}
-    fp = Path(cfg.annotations_dir) / f"{cfg.region}_photo_flags.json"
-    if fp.is_file():
-        flags = json.loads(fp.read_text(encoding="utf-8"))
+    flags = server.load_flags(cfg)
     items = []
     for _key, _root, p in server._photo_files(cfg):
         name = p.parent.name
-        scr = p.with_name(p.stem + "_screen.json")
+        scr = screen.screen_path(p)
+        screen_reason = ""
+        if scr.is_file():
+            screen_reason = (json.loads(scr.read_text(encoding="utf-8")).get("reason") or "").strip()
+        guesses = server._guess_cache_path(p)
         reason = ""
         if any(k.endswith(f"/{name}/{p.name}") for k in flags):
             reason = "flagged"
-        elif scr.is_file() and (json.loads(scr.read_text(encoding="utf-8")).get("reason") or "").strip():
-            reason = "screen: " + json.loads(scr.read_text(encoding="utf-8"))["reason"]
-        elif not p.with_name(p.stem + "_guesses.json").is_file():
+        elif screen_reason:
+            reason = "screen: " + screen_reason
+        elif not guesses.is_file():
             reason = "no cached start guesses"
         elif not any(name.startswith(pk) for pk in picks):
             continue
         if reason:
             log(f"skip {name[:50]}: {reason}")
             continue
-        cands = json.loads(p.with_name(p.stem + "_guesses.json").read_text(encoding="utf-8"))["response"]["candidates"]
+        cands = json.loads(guesses.read_text(encoding="utf-8"))["response"]["candidates"]
         order = sorted(range(len(cands)), key=lambda i: (cands[i].get("source") != "title", i))[:3]
         items.append({"name": name, "path": p, "cands": [cands[i] for i in order], "f35": server.photo_focal_35mm(p)})
     return items

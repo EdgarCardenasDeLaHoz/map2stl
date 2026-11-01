@@ -1,6 +1,8 @@
 """photo-label tool: pano-pipeline seed frames (03_seeds) and panoview manifest frames."""
 import importlib.util
 import json
+import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +20,6 @@ def mod(monkeypatch):
     spec.loader.exec_module(m)
     import auto_pose
     monkeypatch.setattr(auto_pose, "_dem_sampler", lambda dem: (lambda la, lo: np.full(np.shape(la), 30.0)))
-    m._screen_state.clear()
     return m
 
 
@@ -91,14 +92,15 @@ def test_panoview_pose_and_candidates(mod, tmp_path):
 def test_screen_known_pose_is_screened_without_aspect_rule(mod, tmp_path, monkeypatch):
     d = _seed(tmp_path)
     Image.new("RGB", (480, 100), "gray").save(d / "7_090.png")                 # strip-like, but no pose entry
-    cfg = SimpleNamespace(region="r", dem=lambda: None, photo_roots={"seeds": tmp_path / "03_seeds"})
+    cfg = SimpleNamespace(region="r", dem=lambda: None, photo_roots={"seeds": tmp_path / "03_seeds"},
+                          screen_state={"r": {"state": "running", "done": 0, "total": 0, "flagged": [], "message": ""}},
+                          screen_lock=threading.Lock())
     seen = []
-    monkeypatch.setattr(mod.photo_screen, "screen_photo",
+    monkeypatch.setattr(sys.modules["screen"], "screen_photo",
                         lambda p, labels=True, **kw: seen.append((p.name, kw["known_pose"])) or {"reason": "auto: x"})
     flagged = []
-    monkeypatch.setattr(mod, "_set_flag", lambda cfg, rel, bad, reason="", keep=False: flagged.append(rel))
-    monkeypatch.setattr(mod, "load_flags", lambda cfg: {})
-    mod._screen_state["r"] = {"state": "running", "done": 0, "total": 0, "flagged": [], "message": ""}
+    monkeypatch.setattr(sys.modules["screening"], "_set_flag", lambda cfg, rel, bad, reason="", keep=False: flagged.append(rel))
+    monkeypatch.setattr(sys.modules["screening"], "load_flags", lambda cfg: {})
     mod._screen_region(cfg)
     names = dict(seen)
     assert names["7_090.png"] is False                                          # no pose entry: full screening

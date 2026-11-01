@@ -2,6 +2,27 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-11-01 — The photo-label server is split into modules; job state lives on Config
+- **Decision:** `tools/photo_label/server.py` keeps only the HTTP handler, `make_server` and `main`,
+  plus explicit re-exports for its importers (`app/server/core/photo_solve.py`, `claude/scripts`,
+  `register_model.py`). The work moved to `paths`, `footprints`, `regions`, `photos`, `seeds`,
+  `solve`, `screening`, `depth`, `tiles`, `modelapi` and `latlon` in the same folder. The screen and
+  depth job tables and their locks moved from module globals onto `regions.py::Config`. Distance and
+  bearing use one flat-earth helper (`latlon.py::dist_m`, `bearing_deg`); the server's bearing was
+  great-circle before (user approved the small change). `auto_pose.viewpoints_from_overpass` (no
+  callers) was deleted.
+- **Why:** an audit found a ~1500-line server with three copies of the distance helper and two of
+  the camera-from-dict code. Tests load `server.py` by file path for fresh state; sibling modules
+  imported by plain name are shared across those copies, so per-module job tables would have leaked
+  between test files. On `Config` each test's region gets its own.
+- **Rejected:** keeping the job tables in `server.py` — every route module would then reach back
+  into the handler module. Re-exporting the patched names (`urlopen`, the job tables) — a patch on a
+  re-export does not reach the module that looks the name up, so tests patch the owning module and
+  `server` deliberately does not re-export them.
+- **Supersedes / superseded by:** —
+- **Source:** photo-label audit 2026-11-01. Merge note: branch `tools-pages` adds
+  `google_usage.record("tiles_root")` in `LabelHandler._proxy_tiles`; that call is now `tiles.urlopen`.
+
 ### 2026-10-28 — Dead code removed in F-UNIFY step 7
 - **Decision:** removed, each off by default or with no user:
   - the `shadow_height` height provider and `tools/eval/eval_shadow_heights.py` (deprecated 2026-08-28; `satellite/measure.shadow_height()` stays);

@@ -33,9 +33,25 @@ Status: approved 2026-10-26, steps 1–2 first (import and list), then 3–6. Ol
 - **Granada:** `runs/panoview/granada/images/` holds 6 frames of 640×640, with pose in
   `manifest.json`.
 - **Why the tool misses them:** every one of these lies outside the photo roots in
-  `tools/photo_label/regions.json`. `server.py::pano_seed` only reads the
+  `tools/photo_label/regions.json`. `seeds.py::pano_seed` only reads the
   `02_streetview/<site>/<site>_<HHH>.png` layout. `screen.py` would flag 2688×540 strips as
   panoramas.
+
+## Progress (audit 2026-11-01)
+
+| Step | State |
+|---|---|
+| 1 Import (`pano_import.py`) | Superseded: the panoramic session exports seeds into `runs/cartagena/03_seeds/` itself; the module was never built. |
+| 2 List and seed | Done (`seeds` and `panoview` roots, `seeds.py::pano_seed`). A known pose no longer exempts a photo from screening; only the aspect rule is skipped. |
+| 3 Read-only strip | Superseded by extension A+B (cylindrical camera). |
+| 4 Mask overlay tab | Not done. |
+| 5 Heading re-run | Not done; in the GPU PC queue (low priority). |
+| 6 Per-building heights | Not done as a tool view; extension E covers the comparison. |
+| Ext. A, B | Done (`pano_camera.py`, strip listed with a `pano_cylindrical` pose). |
+| Ext. C depth | Done on the CPU (user, 2026-10-31) for 48 frames and 4 strips. |
+| Ext. D missing heights | Not started. |
+| Ext. E strip vs frames | Not started. |
+| Ext. F auto-correct | Coded (`mask_heights.py`); the Google 3D yardstick `mask_heights.py::google3d_yardstick` is a TODO stub. |
 
 ## Approach
 
@@ -46,13 +62,13 @@ Status: approved 2026-10-26, steps 1–2 first (import and list), then 3–6. Ol
    `sites/*.json`) and never writes there. The output is git-ignored. The import reruns when
    the pipeline reruns.
 2. **List and seed.** `regions.json` gets a `seeds` root (Cartagena) and a `panoview` root
-   (Granada). `server.py::pano_seed` gains a branch that reads `pose.json`/`views.json`, or
+   (Granada). `seeds.py::pano_seed` gains a branch that reads `pose.json`/`views.json`, or
    `manifest.json` for panoview. The camera source becomes `pano_anchor`, used as a
    registration anchor. `screen.py` exempts photos with a known pose.
 3. **Panorama overview.** On a frame, a strip view in `index.html` shows the stitched
    panorama with the frames' extents marked; clicking a frame opens it. This is read only: no
    cylindrical camera in the solver.
-4. **Mask overlay.** A new layer in the depth view tabs (`index.html::DV_TABS`) shows the
+4. **Mask overlay.** A new layer in the depth view tabs (`tools/photo_label/static/state.js::DV_TABS`) shows the
    pipeline's sky/building mask from the imported `_seg` images. It is cropped to the frame
    from `views.json`.
 5. **Heading calibration.** The heading recovered by the pipeline is shown per seed, next to
