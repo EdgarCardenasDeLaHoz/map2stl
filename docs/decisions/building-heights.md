@@ -7,6 +7,11 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-10-31 — Commons photo pipeline is a library; script 17 has no rival rule of its own
+- **Decision:** scripts 13-17 are thin wrappers over `city2stl/skyline/commons_pipeline/`. The search route's accept gate is `skyline_match.gate_margin`, nothing else.
+- **Why:** the plan (F-UNIFY Phase 2) listed "17's own 500 m rival rule" as work. Checking showed it was already replaced by `gate_margin` (T18); the 500 m is the `refine(radius_m=500)` search radius, which is not a gate. So no photo's outcome changes and no old-rule switch was kept.
+- **Rejected:** keeping the old rule behind a flag (there is no such rule in the code to keep).
+
 ### 2026-10-29 — F-SKY17 MS→OSM registration stays on: a small gain on US cities, not a fix for Cartagena's twins
 - **Decision:** `merge_satellite_into_osm(register_to_osm=True)` stays the default. F-SKY17's status is "helps a little; does not fix Cartagena's twin footprints", not "failed". (User, 2026-10-29: "Keep on, fix status".)
 - **Why:** on/off comparison on Miami, Chicago, Seattle (scratch, 2026-10-28):

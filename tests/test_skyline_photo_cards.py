@@ -89,9 +89,8 @@ def test_photos_html_shows_the_numbered_photo_and_map():
 def test_a_tower_hidden_behind_something_in_front_is_flagged_and_left_out(monkeypatch):
     """A tree in front of one tower makes the outline there low, so that tower reads below 0 m:
     it is flagged hidden, the others are refitted without it, and it stays out of the medians."""
-    import importlib
 
-    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    from city2stl.skyline.commons_pipeline import measure as pl
     towers = _city()
     cam, heading, fov = (-2400.0, 300.0), 95.0, 40.0
     prof = _photo(towers, cam, heading, fov)
@@ -129,9 +128,8 @@ def _results(readings):
 
 
 def test_cross_check_flags_a_reading_the_other_photos_contradict():
-    import importlib
 
-    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    from city2stl.skyline.commons_pipeline import readings as pl
     res = _results({"a": {1: 100.0, 2: 50.0, 3: 30.0}, "b": {1: 103.0, 2: 80.0},
                     "c": {1: 150.0}})
     pl._cross_check(res)
@@ -143,11 +141,9 @@ def test_cross_check_flags_a_reading_the_other_photos_contradict():
 
 
 def test_photo_groups_and_shared_buildings_page():
-    import importlib
 
     from city2stl.skyline.benchmark_report import _shared_html
-
-    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    from city2stl.skyline.commons_pipeline import readings as pl
     same = {i: 100.0 + i for i in range(1, 6)}
     res = _results({"a": same, "b": {i: h + 1 for i, h in same.items()}, "c": {9: 40.0}})
     pl._cross_check(res)

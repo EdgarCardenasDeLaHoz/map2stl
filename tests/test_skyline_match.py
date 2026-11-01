@@ -207,12 +207,11 @@ def test_untagged_table_skips_tagged_and_small():
 def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
     """17_photo_pipeline --untagged: workers store implied heights per photo; finish keeps
     the agreeing ones from kept photos and scores them (truth mocked: no network)."""
-    import importlib
     from types import SimpleNamespace
 
     from city2stl.skyline import photo_heights as ph
-
-    pl = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    from city2stl.skyline.commons_pipeline import finish as fin
+    from city2stl.skyline.commons_pipeline import measure as pl
     world, anchors, table = _c2_scene()
     monkeypatch.setitem(pl._W, "towers", anchors)
     monkeypatch.setitem(pl._W, "untagged", table)
@@ -231,13 +230,13 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
 
     osm = {"buildings": {"features": [feat(v) for v in table.verts]}}
     keys = ph.untagged_table(osm["buildings"]["features"], frame=anchors).keys
-    monkeypatch.setattr(pl.bm, "load_truth_cache",
+    monkeypatch.setattr(fin.bm, "load_truth_cache",
                         lambda region: {keys[0]: {"status": "confirmed", "truth_m": 228.0}})
 
     def no_fetch(*a, **k):
         raise AssertionError("cached truth must not fetch")
 
-    monkeypatch.setattr(pl.bm, "footprint_truth", no_fetch)
+    monkeypatch.setattr(fin.bm, "footprint_truth", no_fetch)
     def cam(x):
         lat, lon = anchors.to_ll(x, CAM_Y)
         return {"lat": lat, "lon": lon}
@@ -246,7 +245,7 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
     results = [{"kept": True, "camera": cam(-500.0), "untagged": {"0": 231.0, "1": 25.0}},
                {"kept": True, "camera": cam(450.0), "untagged": {"0": 229.0, "1": 80.0}},
                {"kept": False, "camera": cam(0.0), "untagged": {"1": 25.0}}]  # not kept
-    rows, summary = pl._untagged_rows(SimpleNamespace(region="miami"), results, anchors, osm)
+    rows, summary = fin._untagged_rows(SimpleNamespace(region="miami"), results, anchors, osm)
     assert [r["index"] for r in rows] == [0]
     assert rows[0]["photo_m"] == pytest.approx(230.0) and rows[0]["truth_m"] == 228.0
     assert summary["buildings"] == 1 and summary["confirmed"] == 1
@@ -255,9 +254,9 @@ def test_pipeline_untagged_rows_and_worker_step(monkeypatch):
 
     # --untagged-truth fetch: measured for the agreed footprints only
     asked = []
-    monkeypatch.setattr(pl.bm, "footprint_truth", lambda region, fps, prov: asked.append(
+    monkeypatch.setattr(fin.bm, "footprint_truth", lambda region, fps, prov: asked.append(
         set(fps)) or {k: {"status": "confirmed", "truth_m": 231.0} for k in fps})
-    rows, _ = pl._untagged_rows(SimpleNamespace(region="miami", untagged_truth="fetch"),
+    rows, _ = fin._untagged_rows(SimpleNamespace(region="miami", untagged_truth="fetch"),
                                 results, anchors, osm)
     assert asked == [{keys[0]}] and rows[0]["truth_m"] == 231.0
 

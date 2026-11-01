@@ -110,8 +110,13 @@ and the registration tools feed building heights into the city model automatical
     - `_pages.py` (1.2k).
   - The same applies to `city_model.py` (2.0k), `routers/terrain.py` (1.7k) and
     `app/session/terrain_session.py` (2.6k).
-- **Commons photo pipeline.** Scripts 13–17 become one library module. `17_photo_pipeline`'s
-  own 500 m rival rule moves onto `skyline_match.gate_margin`.
+- **Commons photo pipeline (part D done).**
+  - Scripts 13–17 are thin CLI wrappers over `city2stl/skyline/commons_pipeline/` (`cache`,
+    `profiles`, `groups`, `embed`, `placement`, `measure`, `readings`, `finish`, `pipeline`);
+    same arguments, same outputs (diffed on cached Cartagena). Helpers duplicated across the
+    scripts (cache folder, session, retry, thumbnail URL, profile load/save) live in `cache.py`.
+  - The "500 m rival rule" was already gone: 17's search route calls `skyline_match.gate_margin`
+    since T18; the 500 m is `refine`'s search radius. No outcome changes, no switch kept.
 
 ## Phase 3: registration family
 

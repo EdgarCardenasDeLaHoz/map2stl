@@ -169,9 +169,9 @@ def test_skyline_quality_edge_and_coverage():
 
 
 def test_pipeline_reuses_only_unchanged_outcomes(monkeypatch):
-    import importlib
 
-    pp = importlib.import_module("city2stl.skyline.scripts.17_photo_pipeline")
+    from city2stl.skyline.commons_pipeline import placement as pp
+
     monkeypatch.setattr(pp, "_REUSE", {
         "p1": {"key": "p1", "title": "A.jpg", "route": "search", "gate_ok": False},
         "p2": {"key": "p2", "title": "File:B.jpg", "route": "recorded", "gate_ok": False},
@@ -198,14 +198,9 @@ def test_low_light_needs_score_and_coverage():
 
 
 def test_rescue_needs_a_tight_upper_quartile():
-    import importlib.util
     from argparse import Namespace
-    from pathlib import Path
 
-    path = Path(cp.__file__).parent / "scripts" / "17_photo_pipeline.py"
-    spec = importlib.util.spec_from_file_location("photo_pipeline_17", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    from city2stl.skyline.commons_pipeline import placement as mod
     args = Namespace(rescue_anchor_dev=20.0, rescue_min_towers=12, rescue_max_p75=40.0,
                      max_anchor_dev=None, min_towers=4)
 
