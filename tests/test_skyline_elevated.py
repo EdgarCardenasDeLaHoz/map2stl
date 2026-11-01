@@ -8,6 +8,8 @@ from city2stl.skyline import footprint_detect as fd
 from city2stl.skyline._core.height import aggregate_building_heights
 from city2stl.skyline._core.types import BuildingRecord
 from city2stl.skyline._pano import elevated as el
+from city2stl.skyline._pano import elevated_behind as el_behind
+from city2stl.skyline._pano import elevated_measure as el_measure
 from city2stl.skyline.region_types import SkylinePoint
 
 H, W = 100, 360
@@ -230,7 +232,7 @@ def test_waterline_seed_fills_untrusted_footprints_with_trusted_roof_fits(monkey
     assert 4 not in got                                                   # past 1 km: not trusted
     assert fd.measurement_weight(got[1]) == pytest.approx(
         el.ROOF_FILL_WEIGHT * 0.8 / 500.0 ** 2)
-    monkeypatch.setattr(el, "ROOF_FILL_WEIGHT", None)                     # off
+    monkeypatch.setattr(el_measure, "ROOF_FILL_WEIGHT", None)                     # off
     assert [m.top_edge for m in el.measure_waterline(_pano(), fd.PanoPose(0, 80, 0, 0, W), [])] == \
         ["sky", "depth", "depth"]
 
@@ -302,7 +304,7 @@ def test_a_run_onto_a_tagged_tower_behind_is_not_trusted(monkeypatch):
     assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
     fps[1] = _fp_at("tower", 12.0, 18.0, 420.0, tag=180.0)           # not farther: kept
     assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
-    monkeypatch.setattr(el, "BEHIND_TOL_PX", None)                    # off
+    monkeypatch.setattr(el_behind, "BEHIND_TOL_PX", None)                    # off
     fps[1] = _fp_at("tower", 12.0, 18.0, 1000.0, tag=180.0)
     assert el.measure_waterline(pano, pose, fps, instances=inst)[0].top_edge == "sky"
 

@@ -115,8 +115,9 @@ def _start_dates(region: str) -> dict[str, str]:
     import json
 
     from . import benchmark as bm
+    from . import benchmark_geometry as bm_geo
 
-    path = bm.BENCHMARK_ROOT / "truth" / f"{bm.region_key(region)}.start_dates.json"
+    path = bm_geo.BENCHMARK_ROOT / "truth" / f"{bm.region_key(region)}.start_dates.json"
     try:
         return json.loads(path.read_text(encoding="utf-8")).get("start_dates") or {}
     except (OSError, ValueError):

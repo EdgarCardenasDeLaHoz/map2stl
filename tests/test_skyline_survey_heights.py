@@ -9,6 +9,8 @@ from rasterio.transform import from_bounds
 from city2stl.height.providers import survey
 from city2stl.height.providers._survey import SurveyError
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
+from city2stl.skyline import benchmark_truth as bm_truth
 from city2stl.skyline import survey_heights as sh
 
 # two 30 x 30 m blocks in Benidorm, ~200 m apart (one tile)
@@ -46,14 +48,14 @@ def _synthetic_ndsm(bbox, resolution_m=1.0):
 def _offline(tmp_path, monkeypatch):
     """Survey cache in tmp; any Google 3D Tiles use fails the test."""
     monkeypatch.setattr(sh, "SURVEY_ROOT", tmp_path / "survey")
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path / "benchmark")
 
     def no_tiles(*_a, **_k):
         raise AssertionError("Google3DProvider must never be constructed")
 
     from city2stl.height.providers import google_3d
     monkeypatch.setattr(google_3d.Google3DProvider, "__init__", no_tiles)
-    monkeypatch.setattr(bm, "tiles_ndsm", no_tiles)
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", no_tiles)
 
 
 def test_same_p95_as_the_benchmark_truth_and_cached(monkeypatch):
@@ -63,7 +65,7 @@ def test_same_p95_as_the_benchmark_truth_and_cached(monkeypatch):
         calls.append(provider)
         return _synthetic_ndsm(bbox, res)
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake)
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert calls == ["cnig_mdsn"]                                   # the region's provider
     truth = bm.footprint_truth("benidorm", FOOTPRINTS, "cnig_mdsn", use_tiles=False)
@@ -92,7 +94,7 @@ def test_fallback_provider_reads_only_where_the_first_shows_no_building(monkeypa
             arr[(lon <= ring[:, 0].max()) & (lat <= ring[:, 1].max())] = 0.0
         return arr, t
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake)
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS, "cnig_mdsn", fallback="rediam_mdhn")
     assert got["tall"]["provider"] == "cnig_mdsn" and 60.0 < got["tall"]["survey_m"] < 66.0
     assert got["low"]["provider"] == "rediam_mdhn" and 12.0 < got["low"]["survey_m"] < 15.0
@@ -103,17 +105,17 @@ def test_survey_error_is_returned_but_not_cached(monkeypatch):
     def down(*_a, **_k):
         raise SurveyError("IDEE WCS 503")
 
-    monkeypatch.setattr(bm, "survey_ndsm", down)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", down)
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert all(r["survey_m"] is None and "503" in r["error"] for r in got.values())
     assert not sh.cache_path("benidorm").exists() or sh.load_cache("benidorm") == {}
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _synthetic_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0: _synthetic_ndsm(b, r))
     again = sh.survey_footprint_heights("benidorm", FOOTPRINTS)    # re-read, not pinned
     assert all(r["survey_m"] is not None and "error" not in r for r in again.values())
 
 
 def test_not_covered_is_cached_as_none(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda *a, **k: None)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda *a, **k: None)
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert all(r["survey_m"] is None and r["years"] is None for r in got.values())
     assert set(sh.load_cache("benidorm")) == set(FOOTPRINTS)
@@ -160,7 +162,7 @@ def _field_ndsm(bbox, resolution_m=1.0):
 def test_a_footprint_reads_the_same_whatever_else_is_in_the_run(monkeypatch):
     # F-SKY26 2b finding: tiles were the union of the run's footprints, so the raster under a
     # footprint (cell size, phase) and its p95 changed with the others (Prague: 30 of 79 equal)
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
     target = {"t": _ring(37.3, 11.9, 23.0)}
     sets = [target,
             {**target, "w": _ring(-310.0, -150.0)},                     # widens the old tile
@@ -177,7 +179,7 @@ def test_a_footprint_reads_the_same_whatever_else_is_in_the_run(monkeypatch):
 
 
 def test_old_stat_records_are_re_measured(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0: _field_ndsm(b, r))
     sh.save_cache("benidorm", {k: {"survey_m": 1.0, "survey_cells": 9, "provider": "cnig_mdsn",
                                    "years": None} for k in FOOTPRINTS})
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
@@ -204,7 +206,7 @@ def test_ept_project_follows_the_footprint_not_the_tile(monkeypatch):
         return (arr * (0 if part == "COAST_2019" else 1)) + (0 if part else np.nan), t
 
     monkeypatch.setattr(ept, "projects_for_bbox", projects)
-    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake)
     got = sh.survey_footprint_heights("miami", FOOTPRINTS, "usgs_3dep_ept")
     assert sorted(reads) == ["CITY_2018", "COAST_2019"]          # one tile per project
     assert 12.0 < got["low"]["survey_m"] < 15.0                     # read from its own project
@@ -223,7 +225,7 @@ def _stat1_truth():
 
 
 def test_refresh_survey_truth_keeps_tiles_and_reclassifies(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
     old = _stat1_truth()
     bm.save_truth_cache("benidorm", old)
     out = bm.refresh_survey_truth("benidorm", FOOTPRINTS)
@@ -254,7 +256,7 @@ def test_refresh_survey_truth_never_constructs_google3d(monkeypatch):
             built.append(1)
 
     monkeypatch.setattr(google_3d, "Google3DProvider", Spy)
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
     bm.save_truth_cache("benidorm", _stat1_truth())
     bm.refresh_survey_truth("benidorm", FOOTPRINTS, refresh=True)
     assert built == []
@@ -264,7 +266,7 @@ def test_refresh_survey_truth_keeps_record_when_survey_fails(monkeypatch):
     def down(*_a, **_k):
         raise SurveyError("IDEE WCS 503")
 
-    monkeypatch.setattr(bm, "survey_ndsm", down)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", down)
     old = _stat1_truth()
     bm.save_truth_cache("benidorm", old)
     out = bm.refresh_survey_truth("benidorm", FOOTPRINTS)
@@ -273,7 +275,7 @@ def test_refresh_survey_truth_keeps_record_when_survey_fails(monkeypatch):
 
 
 def test_parallel_tile_reads_give_the_same_records(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _field_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0, part=None: _field_ndsm(b, r))
     fps = {**FOOTPRINTS, "far": _ring(900.0, 700.0), "farther": _ring(-1500.0, 300.0)}
     one = sh.survey_footprint_heights("benidorm_a", fps, "cnig_mdsn")
     four = sh.survey_footprint_heights("benidorm_b", fps, "cnig_mdsn", workers=4)
@@ -285,7 +287,7 @@ def test_parallel_tile_reads_give_the_same_records(monkeypatch):
 
 
 def test_roof_statistics_are_stored_and_p95_is_the_headline(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: _synthetic_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0: _synthetic_ndsm(b, r))
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     for k, (lo, hi) in (("low", (12.0, 15.0)), ("tall", (60.0, 66.0))):
         rec = got[k]
@@ -311,7 +313,7 @@ def test_ground_ring_reads_a_raised_plinth(monkeypatch):
         arr[near & (arr == 0)] = 3.0                              # a 3 m deck around 'low'
         return arr, t
 
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0: plinth(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0: plinth(b, r))
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert got["low"]["ground_p5_m"] == 3.0 and got["tall"]["ground_p5_m"] == 0.0
 
@@ -336,7 +338,7 @@ def test_records_without_roof_stats_are_kept_unless_asked(monkeypatch):
         reads.append(b)
         return _synthetic_ndsm(b, r)
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake)
     old = {k: {"survey_m": 13.5 if k == "low" else 64.0, "survey_cells": 784,
                "provider": "cnig_mdsn", "years": [2008, 2015], "stat": bm.STAT_VERSION}
            for k in FOOTPRINTS}                                    # cached before item 1
@@ -349,14 +351,14 @@ def test_records_without_roof_stats_are_kept_unless_asked(monkeypatch):
 
 
 def test_not_covered_records_carry_empty_roof_stats(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda *a, **k: None)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda *a, **k: None)
     got = sh.survey_footprint_heights("benidorm", FOOTPRINTS, roof_stats=True)
     assert all(r["roof_m"] is None and r["roof_stats"] == bm.ROOF_STATS_VERSION
                for r in got.values())
 
 
 def test_footprint_truth_stores_the_survey_roof_statistics(monkeypatch):
-    monkeypatch.setattr(bm, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda p, b, r=1.0, part=None: _synthetic_ndsm(b, r))
     truth = bm.footprint_truth("benidorm", FOOTPRINTS, "cnig_mdsn", use_tiles=False)
     for rec in truth.values():
         assert rec["survey_roof_m"]["p95"] == rec["survey_m"]
@@ -371,7 +373,7 @@ def test_a_concurrent_writers_records_survive_the_checkpoint(monkeypatch):
                                    "other": {"survey_m": 7.0, "provider": "cnig_mdsn"}})
         return _synthetic_ndsm(b, r)
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake)
     sh.survey_footprint_heights("benidorm", FOOTPRINTS)
     assert set(sh.load_cache("benidorm")) == {"low", "tall", "other"}
     assert not list(sh.cache_path("benidorm").parent.glob("*.tmp"))   # atomic write cleaned up

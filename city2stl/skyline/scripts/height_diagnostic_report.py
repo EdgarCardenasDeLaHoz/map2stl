@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 
 from city2stl.heights import height_from_tags
+from city2stl.skyline.report_render import page
 from geo2stl.geo import EARTH_RADIUS_M
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -628,15 +629,7 @@ def _generate_html(
             f"</div>"
         )
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Height Diagnostic — {region_name}</title>
-<style>{_CSS}</style>
-</head>
-<body>
-<div class="wrap">
+    body = f"""<div class="wrap">
   <h1>Height Diagnostic Report — {region_name.replace("_", " ").title()}</h1>
   <div class="meta">
     bbox N{north:.4f} S{south:.4f} E{east:.4f} W{west:.4f} &nbsp;·&nbsp;
@@ -671,9 +664,8 @@ def _generate_html(
     </tr>
     {rows_html}
   </table>
-</div>
-</body>
-</html>"""
+</div>"""
+    return page(f"Height Diagnostic — {region_name}", _CSS, body)
 
 
 # ---------------------------------------------------------------------------

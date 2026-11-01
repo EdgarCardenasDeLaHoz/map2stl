@@ -13,6 +13,7 @@ import pytest
 
 from app.server.core import benchmark_scores as bs
 from app.server.routers import benchmark as router_mod
+from city2stl.skyline import benchmark_geometry as bm_geo
 
 
 def _result(region, mae, n=40, **extra):
@@ -41,11 +42,11 @@ def _write_summary(root, stamp, results):
 @pytest.fixture
 def bench(tmp_path, monkeypatch):
     root = tmp_path / "benchmark"
-    monkeypatch.setattr(bs.bm, "BENCHMARK_ROOT", root)
-    monkeypatch.setattr(bs.bm, "BENCHMARK_RUNS", tmp_path / "local")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", root)
+    monkeypatch.setattr(bs.bm, "benchmark_runs", lambda: tmp_path / "local")
     monkeypatch.setattr(bs, "_RUNS", tmp_path)
     monkeypatch.setenv("MAP2STL_BENCHMARK_SCORES_DIR", str(tmp_path / "scores"))
-    monkeypatch.setattr(bs.bm, "REGIONS", {"miami": "usgs_3dep_ept", "boston": "usgs_3dep_ept"})
+    monkeypatch.setattr(bm_geo, "REGIONS", {"miami": "usgs_3dep_ept", "boston": "usgs_3dep_ept"})
     _write_summary(root, "2026-10-20_0900", [_result("miami", 9.0)])
     _write_summary(
         root, "2026-10-24_0900", [_result("miami", 5.5), {"region": "boston", "error": "no report"}]

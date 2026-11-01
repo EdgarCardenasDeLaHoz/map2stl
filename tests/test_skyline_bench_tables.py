@@ -6,6 +6,7 @@ import math
 import pytest
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 
 
 def _row(key, pred, tier, **kw):
@@ -167,7 +168,7 @@ def test_corroborated_tier_name_counts_too():
 def test_seed_positions_from_site_and_auto_proposals(tmp_path, monkeypatch):
     import json
 
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path / "benchmark")
     (tmp_path / "auto_proposals").mkdir()
     (tmp_path / "auto_proposals" / "miami.json").write_text(json.dumps(
         {"bbox_nsew": [0, 0, 0, 0], "points": [{"name": "auto_180_0900m", "lat": 25.76,
@@ -195,7 +196,7 @@ def test_published_scope_keeps_tag_only_rows_and_coverage_counts_footprints(tmp_
 
 
 def test_seed_positions_from_the_report_pages_win(tmp_path, monkeypatch):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path / "benchmark")
     rep = tmp_path / "rep"
     rep.mkdir()
     (rep / "seed_4.html").write_text("<tr><th>Lat / Lon</th><td>25.75242, -80.19027</td></tr>")

@@ -26,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .report_render import page as render_page
+
 LINK_MARK = "<!-- benchmark-link -->"
 
 
@@ -254,25 +256,22 @@ def write_benchmark_page(report_dir: str | Path, score: dict, buildings: list[di
     rel = score.get("relative", {})
     st = score.get("status", {})
     region = html.escape(str(score.get("region", "")))
-    page = f"""<!doctype html><html><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>{region} benchmark</title><style>
-:root{{--bg:#fff;--fg:#1d1d1f;--mut:#6e6e73;--card:#f5f5f7;--line:#d2d2d7;--acc:#0a66c2}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#111;--fg:#f2f2f2;--mut:#a1a1a6;--card:#1c1c1e;--line:#3a3a3c;--acc:#4ea1ff}}}}
-body{{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:16px}}
-a{{color:var(--acc)}} .mut{{color:var(--mut)}} h1{{font-size:24px}} h2{{margin-top:32px;font-size:19px}}
-table{{border-collapse:collapse;margin:8px 0;font-size:14px}} th,td{{border:1px solid var(--line);padding:4px 8px;text-align:right}}
-th{{background:var(--card)}} td:first-child,th:first-child{{text-align:left}}
-.kpis{{display:flex;gap:12px;flex-wrap:wrap}} .kpi{{background:var(--card);border-radius:10px;padding:10px 14px;min-width:120px}}
-.kpi b{{display:block;font-size:22px}} .plots{{display:flex;gap:12px;flex-wrap:wrap}} .plots img{{max-width:100%;background:#fff;border-radius:8px}}
-.cards{{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}}
-.card{{background:var(--card);border-radius:10px;padding:10px}} .card img{{width:100%;border-radius:6px}} .card h3{{font-size:15px;margin:8px 0 4px}}
-.card.wide{{grid-column:1/-1}} .pair{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;align-items:start}} .small{{font-size:13px}}
-.pair img{{background:#fff}} .towers td:nth-child(2),.towers th:nth-child(2){{text-align:left}} .towers tr.flag td{{color:var(--mut)}}
-.groups td.photos{{text-align:left;font-size:13px}} .groups s{{color:var(--mut)}}
-@media (max-width:760px){{.pair{{grid-template-columns:1fr}}}}
-</style></head><body>
-<p><a href="index.html">← {region} report</a></p>
+    css = """:root{--bg:#fff;--fg:#1d1d1f;--mut:#6e6e73;--card:#f5f5f7;--line:#d2d2d7;--acc:#0a66c2}
+@media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#f2f2f2;--mut:#a1a1a6;--card:#1c1c1e;--line:#3a3a3c;--acc:#4ea1ff}}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:16px}
+a{color:var(--acc)} .mut{color:var(--mut)} h1{font-size:24px} h2{margin-top:32px;font-size:19px}
+table{border-collapse:collapse;margin:8px 0;font-size:14px} th,td{border:1px solid var(--line);padding:4px 8px;text-align:right}
+th{background:var(--card)} td:first-child,th:first-child{text-align:left}
+.kpis{display:flex;gap:12px;flex-wrap:wrap} .kpi{background:var(--card);border-radius:10px;padding:10px 14px;min-width:120px}
+.kpi b{display:block;font-size:22px} .plots{display:flex;gap:12px;flex-wrap:wrap} .plots img{max-width:100%;background:#fff;border-radius:8px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border-radius:10px;padding:10px} .card img{width:100%;border-radius:6px} .card h3{font-size:15px;margin:8px 0 4px}
+.card.wide{grid-column:1/-1} .pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px;align-items:start} .small{font-size:13px}
+.pair img{background:#fff} .towers td:nth-child(2),.towers th:nth-child(2){text-align:left} .towers tr.flag td{color:var(--mut)}
+.groups td.photos{text-align:left;font-size:13px} .groups s{color:var(--mut)}
+@media (max-width:760px){.pair{grid-template-columns:1fr}}
+"""
+    body = f"""<p><a href="index.html">← {region} report</a></p>
 <h1>{region}: heights against surveyed truth</h1>
 <p class=mut>Truth per footprint = survey lidar and Google 3D Tiles agreeing within max(3 m, 10 %).
 Only confirmed buildings are scored. Run: {html.escape(str(score.get('report', '')))}</p>
@@ -296,8 +295,8 @@ dropped); untagged ones show the pipeline unaided.</p>
 <p class=mut>Wikimedia Commons skyline photos (F-WEB2). Camera from the photo's own location, a
 solved pose, or labels; towers measured by identify-then-measure, tilt and camera height fitted
 leave-one-out on the other towers' OSM heights.</p>
-{_photos_html(photos or [])}
-</body></html>"""
+{_photos_html(photos or [])}"""
+    page = render_page(f"{region} benchmark", css, body, lang=None, viewport=True)
     out = report_dir / "benchmark.html"
     out.write_text(page, encoding="utf-8")
     _link_from_index(report_dir)

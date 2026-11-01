@@ -75,7 +75,7 @@ def test_spin_params_match_what_the_pipeline_sends(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sv, "_streetview_get", lambda url: (None, False))
     monkeypatch.setattr(sv, "_negative_cache_hit", lambda k: False)
-    monkeypatch.setattr(sv, "_SV_IMAGE_CACHE_DIR", tmp_path / "img")
+    monkeypatch.setattr(sv, "_sv_image_cache_dir", lambda: tmp_path / "img")
     keys = []
     real = sv.image_cache_key
     monkeypatch.setattr(sv, "image_cache_key", lambda p: keys.append(p) or real(p))

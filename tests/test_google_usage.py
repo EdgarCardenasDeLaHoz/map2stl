@@ -89,7 +89,7 @@ def test_real_cache_hit_not_counted(monkeypatch, tmp_path):
     import numpy as np
 
     sv, calls = _fake_get(monkeypatch)
-    monkeypatch.setattr(sv, "_SV_IMAGE_CACHE_DIR", tmp_path / "img")
+    monkeypatch.setattr(sv, "_sv_image_cache_dir", lambda: tmp_path / "img")
     monkeypatch.setattr(sv, "_negative_cache_path", lambda k: tmp_path / f"{k}.none")
     noise = np.random.default_rng(1).integers(0, 255, (64, 64, 3), dtype=np.uint8)
     png = cv2.imencode(".png", noise)[1].tobytes()

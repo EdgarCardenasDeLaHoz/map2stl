@@ -8,6 +8,7 @@ import pytest
 from shapely.geometry import Polygon
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 from city2stl.skyline import survey_heights as sh
 from city2stl.skyline import survey_publish as sp
 from city2stl.skyline._core.types import BuildingRecord
@@ -39,7 +40,7 @@ def _survey(m, years=(2018, 2018), project=None, **kw):
 @pytest.fixture(autouse=True)
 def _tmp_caches(tmp_path, monkeypatch):
     monkeypatch.setattr(sh, "SURVEY_ROOT", tmp_path / "survey")
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path / "benchmark")
     monkeypatch.delenv("SKYLINE_SURVEY_HEIGHTS", raising=False)
 
 
@@ -50,7 +51,7 @@ def _overlay(recs, survey_by_fid, rows=(), truth=None, osm_data=None, start_date
     if truth:
         bm.save_truth_cache("testville", truth)
     if start_dates:
-        p = bm.BENCHMARK_ROOT / "truth" / "testville.start_dates.json"
+        p = bm_geo.BENCHMARK_ROOT / "truth" / "testville.start_dates.json"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"start_dates": start_dates}), encoding="utf-8")
     return sp.build_overlay("testville", list(rows), recs, osm_data, drone_seeds)
@@ -324,7 +325,7 @@ def test_score_report_headline_ignores_survey_rows(tmp_path, monkeypatch):
                                    "n_building_records": 2, "buildings": rows}), encoding="utf-8")
     truth = {key1: {"status": "confirmed", "truth_m": 30.0, "survey_m": 30.0, "tiles_m": 31.0},
              key2: {"status": "confirmed", "truth_m": 20.0, "survey_m": 20.0, "tiles_m": 20.0}}
-    monkeypatch.setattr(bm, "REGIONS", {**bm.REGIONS, "testville": "usgs_3dep_ept"})
+    monkeypatch.setattr(bm_geo, "REGIONS", {**bm_geo.REGIONS, "testville": "usgs_3dep_ept"})
     monkeypatch.setattr(bm, "load_truth_cache", lambda region: truth)
     monkeypatch.setattr(bm, "score_known", lambda *_a, **_k: None)
     res = bench.score_report(heights, "testville", use_tiles=False, cached_truth=True)

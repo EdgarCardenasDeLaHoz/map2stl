@@ -92,11 +92,11 @@ def _registration() -> dict:
 def _no_neural_masks(monkeypatch):
     """Force the contour path: no SegFormer in a unit test."""
     monkeypatch.setattr(
-        "city2stl.skyline._core.height._neural_sky_and_building_masks",
+        "city2stl.skyline._core.height_estimate._neural_sky_and_building_masks",
         lambda image: (None, None),
     )
     monkeypatch.setattr(
-        "city2stl.skyline._core.height._building_projected_x_range",
+        "city2stl.skyline._core.height_estimate._building_projected_x_range",
         lambda *a, **k: None,
     )
 

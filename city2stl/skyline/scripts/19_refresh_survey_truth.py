@@ -60,8 +60,9 @@ from pathlib import Path  # noqa: E402
 import numpy as np  # noqa: E402
 
 from city2stl.skyline import benchmark as bm  # noqa: E402
+from city2stl.skyline import benchmark_geometry as bm_geo  # noqa: E402
 
-RUNS = bm.BENCHMARK_ROOT.parent
+RUNS = bm_geo.BENCHMARK_ROOT.parent
 SITES = Path(bm.__file__).parent / "sites"
 
 #: Where survey-only truth is read, per city: ``area -> (south, north, west, east)``, in the
@@ -241,7 +242,7 @@ def stat_refresh(region: str, refresh: bool, workers: int) -> dict:
             if k in old and r.get("stat") == bm.STAT_VERSION and old[k].get("stat") != bm.STAT_VERSION]
     summary = {"region": region, "stat": bm.STAT_VERSION, "no_ring": len(out["no_ring"]),
                "failed": len(out["failed"]), **shift(old, out["new"], done)}
-    (bm.BENCHMARK_ROOT / "truth" / f"{region}.refresh.json").write_text(
+    (bm_geo.BENCHMARK_ROOT / "truth" / f"{region}.refresh.json").write_text(
         json.dumps(summary, indent=1), encoding="utf-8")
     return summary
 
@@ -269,7 +270,7 @@ def p95_agreement(before: dict, after: dict, tol_m: float = 0.01) -> dict:
 def roof_stats(region: str, workers: int) -> dict:
     from city2stl.skyline import survey_heights as sh
 
-    provider = bm.REGIONS.get(bm.region_key(region))
+    provider = bm_geo.REGIONS.get(bm.region_key(region))
     before = sh.load_cache(region)
     todo_keys = {k for k, r in before.items()
                  if r.get("stat") == bm.STAT_VERSION and r.get("roof_stats") != bm.ROOF_STATS_VERSION}
@@ -288,7 +289,7 @@ def roof_stats(region: str, workers: int) -> dict:
                "p95_vs_cached": p95_agreement({k: before[k] for k in todo_keys}, after),
                "with_roof_stats": sum(1 for r in after.values()
                                       if r.get("roof_stats") == bm.ROOF_STATS_VERSION)}
-    (bm.BENCHMARK_ROOT / "truth" / f"{region}.roofstats.json").write_text(
+    (bm_geo.BENCHMARK_ROOT / "truth" / f"{region}.roofstats.json").write_text(
         json.dumps(summary, indent=1), encoding="utf-8")
     return summary
 
@@ -326,7 +327,7 @@ def rebuild_with_fallback(region: str, workers: int, dry: bool = False,
     (once). Other fields (osm_id, temporal, ...) are kept; ``status`` / ``truth_m`` are re-derived."""
     from city2stl.skyline import survey_heights as sh
 
-    provider, fallback = bm.REGIONS[region], bm.FALLBACKS.get(region)
+    provider, fallback = bm_geo.REGIONS[region], bm.FALLBACKS.get(region)
     old = bm.load_truth_cache(region)
     if offline_rings:   # rings by osm_id from the cached Overpass responses, truth keys kept
         by_id = overpass_cache_rings({r["osm_id"] for r in old.values() if r.get("osm_id")})
@@ -430,7 +431,7 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
     from city2stl.skyline import survey_heights as sh
 
     ept._WORKERS = min(ept._WORKERS, 2)    # 2 node reads per tile (the CPU cap)
-    provider = bm.REGIONS[region]
+    provider = bm_geo.REGIONS[region]
     fps = pipeline_footprints(region)
     meta: dict[str, dict] = {}
     if report is not None:  # the report's own footprints, wherever they are
@@ -525,7 +526,7 @@ def new_truth(region: str, areas: list[str] | None, max_tiles: int, workers: int
 def _retire_full_precision_keys(region: str, truth: dict, metas: list[dict]) -> int:
     """Move truth records keyed by a full-precision ring (``key7``) to ``<region>.k7.json`` once
     the same footprint has its report-key record: a report never has the full-precision key."""
-    path = bm.BENCHMARK_ROOT / "truth" / f"{region}.k7.json"
+    path = bm_geo.BENCHMARK_ROOT / "truth" / f"{region}.k7.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     n = 0
     for m in metas:
@@ -546,7 +547,7 @@ def load_start_dates(region: str, refresh: bool = False) -> dict[str, str]:
     """``{osm_id: start_date}`` for the region's bbox, cached beside the truth cache."""
     from city2stl.skyline.region_data import _load_region_bbox
 
-    path = bm.BENCHMARK_ROOT / "truth" / f"{region}.start_dates.json"
+    path = bm_geo.BENCHMARK_ROOT / "truth" / f"{region}.start_dates.json"
     if path.exists() and not refresh:
         return json.loads(path.read_text(encoding="utf-8"))["start_dates"]
     b = _load_region_bbox(region)

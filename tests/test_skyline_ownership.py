@@ -156,7 +156,7 @@ def test_upper_heights_tag_then_cadastre_then_prior(monkeypatch):
 def test_estimates_drop_unowned_readings_and_take_the_re_credit():
     from city2stl.skyline.region_types import SkylinePoint
 
-    pano = el.fd.Pano("s", 10.4, -75.55, np.zeros((100, 360, 3), np.uint8),
+    pano = fd.Pano("s", 10.4, -75.55, np.zeros((100, 360, 3), np.uint8),
                       np.full((100, 360), fd.SKY_CLASS, np.int16), np.arange(360) * 1.0, 57.3, 0.0)
     pose = fd.PanoPose(0.0, 80.0, 0.0, 0.3, 360)
     pf = fd.PositionFit(0.0, 0.0, pose, 0.3, 0.3, 0.4, 0.4, "recorded")

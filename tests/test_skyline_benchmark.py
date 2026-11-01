@@ -8,6 +8,8 @@ import pytest
 from rasterio.transform import from_bounds
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
+from city2stl.skyline import benchmark_truth as bm_truth
 
 LAT, LON = 40.0, -3.0
 KX = bm.M_PER_DEG_LAT * math.cos(math.radians(LAT))
@@ -120,7 +122,7 @@ def test_tiles_are_a_fixed_world_grid_on_the_cell_lattice():
 
 
 def test_footprint_truth_cross_checks_and_caches(tmp_path, monkeypatch):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     survey, t, _ = _grid()
     _paint(survey, 20, 20, 30, 30, 50.0)     # A: both say 50
     _paint(survey, 100, 100, 30, 30, 80.0)   # B: tiles say 120 -> disputed
@@ -136,8 +138,8 @@ def test_footprint_truth_cross_checks_and_caches(tmp_path, monkeypatch):
         calls["tiles"] += 1
         return tiles, t
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
-    monkeypatch.setattr(bm, "tiles_ndsm", fake_tiles)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", fake_tiles)
     fps = {"A": _ring(20, 20, 30, 30), "B": _ring(100, 100, 30, 30)}
     truth = bm.footprint_truth("Testville", fps, "usgs_3dep")
     assert truth["A"]["status"] == "confirmed" and truth["A"]["truth_m"] == pytest.approx(50.0)
@@ -149,7 +151,7 @@ def test_footprint_truth_cross_checks_and_caches(tmp_path, monkeypatch):
 
 
 def _truth_fakes(monkeypatch, tmp_path, *, survey_fails=False, tiles_cover=True):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     survey, t, _ = _grid()
     _paint(survey, 20, 20, 30, 30, 50.0)
     calls = {"survey": 0, "tiles": 0}
@@ -164,8 +166,8 @@ def _truth_fakes(monkeypatch, tmp_path, *, survey_fails=False, tiles_cover=True)
         calls["tiles"] += 1
         return (survey, t) if tiles_cover else None
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
-    monkeypatch.setattr(bm, "tiles_ndsm", fake_tiles)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", fake_tiles)
     return calls, {"A": _ring(20, 20, 30, 30)}
 
 
@@ -560,12 +562,12 @@ def test_tiles_without_a_key_is_a_failed_source(tmp_path, monkeypatch):
     """T36: a missing key used to read as "not covered", so a survey-only record was
     cached for good. Now it raises, the tile counts as incomplete and nothing is cached."""
     with pytest.raises(bm.TilesUnavailable):
-        bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=_KeylessTiles())
+        bm_truth.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=_KeylessTiles())
 
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     survey, t, _ = _grid()
     _paint(survey, 20, 20, 30, 30, 50.0)
-    monkeypatch.setattr(bm, "survey_ndsm", lambda provider, bbox, res: (survey, t))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", lambda provider, bbox, res: (survey, t))
     truth = bm.footprint_truth("Testville", {"A": _ring(20, 20, 30, 30)}, "usgs_3dep",
                                tiles_provider=_KeylessTiles())
     assert truth["A"]["status"] == "survey_only"            # scored this time
@@ -579,7 +581,7 @@ def test_tiles_with_a_key_and_no_coverage_is_still_none():
         def covers(self, bbox):
             return False
 
-    assert bm.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=Uncovered()) is None
+    assert bm_truth.tiles_ndsm((1.0, 0.0, 1.0, 0.0), provider=Uncovered()) is None
 
 
 def test_a_published_height_goes_to_the_tower_not_the_podium_around_it():
@@ -631,11 +633,11 @@ def test_flat_mesh_rule():
 def test_flat_tiles_are_not_cached_as_truth(tmp_path, monkeypatch):
     """T40: a 3D Tiles area without a building mesh (Cartagena) reads every footprint near
     the ground. With the OSM tags, the tile is not covered: no tiles_only record."""
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     flat, t, _ = _grid()
     for x in (20, 60, 100, 140):
         _paint(flat, x, 20, 25, 25, 8.0)          # towers tagged 150 m, tiles say 8 m
-    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (flat, t))
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", lambda bbox, res, provider: (flat, t))
     fps = {k: _ring(x, 20, 25, 25) for k, x in zip("ABCD", (20, 60, 100, 140), strict=True)}
     tags = dict.fromkeys("ABC", 150.0)
     truth = bm.footprint_truth("Flatville", fps, None, tags_m=tags)
@@ -648,7 +650,7 @@ def test_flat_tiles_are_not_cached_as_truth(tmp_path, monkeypatch):
 def test_cached_flat_records_are_dropped_without_new_reads(tmp_path, monkeypatch):
     """Records cached before T40 (tiles_only from a flat mesh) are dropped on the next
     scoring with tags, from the cache too, without fetching anything."""
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     old = {k: {"survey_m": None, "survey_cells": 0, "tiles_m": v, "tiles_cells": 40,
                "status": "tiles_only", "truth_m": v}
            for k, v in zip("ABCD", (7.0, 12.0, 3.0, 9.0), strict=True)}
@@ -657,8 +659,8 @@ def test_cached_flat_records_are_dropped_without_new_reads(tmp_path, monkeypatch
     def no_fetch(*a, **k):
         raise AssertionError("cached records must not be fetched again")
 
-    monkeypatch.setattr(bm, "tiles_ndsm", no_fetch)
-    monkeypatch.setattr(bm, "survey_ndsm", no_fetch)
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", no_fetch)
+    monkeypatch.setattr(bm_truth, "survey_ndsm", no_fetch)
     fps = {k: _ring(20, 20, 25, 25) for k in "ABCD"}
     truth = bm.footprint_truth("Flatville", fps, None, tags_m=dict.fromkeys("ABC", 180.0))
     assert {r["status"] for r in truth.values()} == {"unmeasured"}
@@ -669,11 +671,11 @@ def test_cached_flat_records_are_dropped_without_new_reads(tmp_path, monkeypatch
 
 
 def test_real_mesh_is_kept_with_tags(tmp_path, monkeypatch):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     tall, t, _ = _grid()
     for x in (20, 60, 100):
         _paint(tall, x, 20, 25, 25, 150.0)
-    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (tall, t))
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", lambda bbox, res, provider: (tall, t))
     fps = {k: _ring(x, 20, 25, 25) for k, x in zip("ABC", (20, 60, 100), strict=True)}
     truth = bm.footprint_truth("Towerville", fps, None, tags_m=dict.fromkeys("ABC", 150.0))
     assert all(r["status"] == "tiles_only" for r in truth.values())
@@ -741,7 +743,7 @@ def _source_scene():
 
 
 def test_source_heights_read_and_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     arr, t, fps = _source_scene()
     calls = []
 
@@ -758,7 +760,7 @@ def test_source_heights_read_and_cache(tmp_path, monkeypatch):
 
 
 def test_failed_source_read_is_not_cached(tmp_path, monkeypatch):
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     arr, t, fps = _source_scene()
 
     def reader(src, bbox, res):
@@ -825,7 +827,7 @@ def _tile_fakes(monkeypatch, tmp_path, *, delay=0.0, fail_east=False):
     import threading
     import time
 
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path)
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path)
     grid, t, _ = _grid(size_m=4000)
     for i in range(4):
         _paint(grid, 100 + 1000 * i, 100, 30, 30, 10.0 * (i + 1))
@@ -844,8 +846,8 @@ def _tile_fakes(monkeypatch, tmp_path, *, delay=0.0, fail_east=False):
             raise RuntimeError("endpoint down")
         return grid, t
 
-    monkeypatch.setattr(bm, "survey_ndsm", fake_survey)
-    monkeypatch.setattr(bm, "tiles_ndsm", lambda bbox, res, provider: (grid, t))
+    monkeypatch.setattr(bm_truth, "survey_ndsm", fake_survey)
+    monkeypatch.setattr(bm_truth, "tiles_ndsm", lambda bbox, res, provider: (grid, t))
     fps = {f"F{i}": _ring(100 + 1000 * i, 100, 30, 30) for i in range(4)}
     return fps, state
 

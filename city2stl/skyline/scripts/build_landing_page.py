@@ -28,6 +28,7 @@ from city2stl.skyline.report_index import (
     seed_source,
     stat,
 )
+from city2stl.skyline.report_render import page
 
 _REPORTS = (Path(__file__).resolve().parent.parent
             / "runs" / "region_reports")
@@ -213,66 +214,57 @@ def main() -> None:
 
     # --- Write index.html -----------------------------------------------------
     out = _REPORTS / "index.html"
-    out.write_text(f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Skyline pipeline — all regions</title>
-<style>
-  body {{ font-family: -apple-system,"Segoe UI",Roboto,sans-serif;
-         margin: 2em auto; max-width: 1350px; color: #222; padding: 0 1.2em; }}
-  h1   {{ color: #0a3070; border-bottom: 2px solid #0a3070; padding-bottom:.2em; }}
-  .summary {{ color:#666; font-size:.9em; margin-bottom:1em; }}
+    css = """  body { font-family: -apple-system,"Segoe UI",Roboto,sans-serif;
+         margin: 2em auto; max-width: 1350px; color: #222; padding: 0 1.2em; }
+  h1   { color: #0a3070; border-bottom: 2px solid #0a3070; padding-bottom:.2em; }
+  .summary { color:#666; font-size:.9em; margin-bottom:1em; }
 
   /* Filter bar */
-  .filters {{ display:flex; gap:.5em; flex-wrap:wrap; margin-bottom:.8em;
-              align-items:center; font-size:.85em; }}
-  .filters label {{ color:#444; }}
-  .filters select, .filters input {{ padding:3px 7px; border:1px solid #bbb;
-              border-radius:4px; font-size:inherit; }}
-  .filters button {{ padding:3px 9px; border:1px solid #0a3070; border-radius:4px;
-              background:#0a3070; color:#fff; cursor:pointer; font-size:inherit; }}
-  .filters button:hover {{ opacity:.85; }}
+  .filters { display:flex; gap:.5em; flex-wrap:wrap; margin-bottom:.8em;
+              align-items:center; font-size:.85em; }
+  .filters label { color:#444; }
+  .filters select, .filters input { padding:3px 7px; border:1px solid #bbb;
+              border-radius:4px; font-size:inherit; }
+  .filters button { padding:3px 9px; border:1px solid #0a3070; border-radius:4px;
+              background:#0a3070; color:#fff; cursor:pointer; font-size:inherit; }
+  .filters button:hover { opacity:.85; }
 
-  table {{ border-collapse:collapse; width:100%; font-size:.88em; }}
-  th,td {{ padding:.35em .65em; border:1px solid #dde3ee; vertical-align:middle; }}
-  th    {{ background:#f4f6fa; font-weight:600; color:#333; position:sticky;
-           top:0; z-index:1; }}
-  .region-header td {{ background:#e8edf8; font-size:.9em; padding:.3em .65em; }}
-  .run-date {{ color:#999; font-size:.85em; }}
-  tr:hover td {{ background:#f0f5ff; }}
-  td a {{ color:#0a3070; text-decoration:none; font-weight:500; }}
-  td a:hover {{ text-decoration:underline; }}
+  table { border-collapse:collapse; width:100%; font-size:.88em; }
+  th,td { padding:.35em .65em; border:1px solid #dde3ee; vertical-align:middle; }
+  th    { background:#f4f6fa; font-weight:600; color:#333; position:sticky;
+           top:0; z-index:1; }
+  .region-header td { background:#e8edf8; font-size:.9em; padding:.3em .65em; }
+  .run-date { color:#999; font-size:.85em; }
+  tr:hover td { background:#f0f5ff; }
+  td a { color:#0a3070; text-decoration:none; font-weight:500; }
+  td a:hover { text-decoration:underline; }
 
   /* Source badges */
-  .badge-curated {{ background:#d4edda; color:#155724; border-radius:10px;
-                    padding:1px 8px; font-size:.8em; }}
-  .badge-seed    {{ background:#cce5ff; color:#004085; border-radius:10px;
-                    padding:1px 8px; font-size:.8em; }}
-  .badge-auto    {{ background:#fff3cd; color:#856404; border-radius:10px;
-                    padding:1px 8px; font-size:.8em; }}
-  .badge-web     {{ background:#f3e6ff; color:#5a0099; border-radius:10px;
-                    padding:1px 8px; font-size:.8em; }}
+  .badge-curated { background:#d4edda; color:#155724; border-radius:10px;
+                    padding:1px 8px; font-size:.8em; }
+  .badge-seed    { background:#cce5ff; color:#004085; border-radius:10px;
+                    padding:1px 8px; font-size:.8em; }
+  .badge-auto    { background:#fff3cd; color:#856404; border-radius:10px;
+                    padding:1px 8px; font-size:.8em; }
+  .badge-web     { background:#f3e6ff; color:#5a0099; border-radius:10px;
+                    padding:1px 8px; font-size:.8em; }
 
   /* Region-level badges (used in header rows) */
-  .badge-curated, .badge-auto {{ display:inline-block; }}
+  .badge-curated, .badge-auto { display:inline-block; }
 
   /* Feedback button */
-  .fb-btn {{ border:1px solid #bbb; border-radius:12px; background:#fff;
-             cursor:pointer; padding:2px 10px; font-size:.82em; white-space:nowrap; }}
-  .fb-btn:hover {{ opacity:.8; }}
-  .fb-good {{ border-color:#1a7a1a; color:#1a7a1a; background:#eafaee; }}
-  .fb-bad  {{ border-color:#cc0000; color:#cc0000; background:#faeeee; }}
-  .fb-none {{ border-color:#bbb;    color:#888;    background:#fff; }}
+  .fb-btn { border:1px solid #bbb; border-radius:12px; background:#fff;
+             cursor:pointer; padding:2px 10px; font-size:.82em; white-space:nowrap; }
+  .fb-btn:hover { opacity:.8; }
+  .fb-good { border-color:#1a7a1a; color:#1a7a1a; background:#eafaee; }
+  .fb-bad  { border-color:#cc0000; color:#cc0000; background:#faeeee; }
+  .fb-none { border-color:#bbb;    color:#888;    background:#fff; }
 
   /* Legend key */
-  .key {{ display:flex; gap:1.2em; font-size:.8em; color:#555;
-          margin-bottom:.8em; flex-wrap:wrap; }}
-</style>
-</head>
-<body>
-<h1>Skyline pipeline — all regions</h1>
+  .key { display:flex; gap:1.2em; font-size:.8em; color:#555;
+          margin-bottom:.8em; flex-wrap:wrap; }
+"""
+    body = f"""<h1>Skyline pipeline — all regions</h1>
 <p class="summary">
   {len(seen_regions)} regions &middot; {total_buildings:,} aggregated buildings &middot;
   {len(all_rows)} panos total.
@@ -392,10 +384,9 @@ function clearFilters(){{
   ['flt-region','flt-qual','flt-fb'].forEach(id=>document.getElementById(id).value='');
   applyFilters();
 }}
-</script>
-</body>
-</html>
-""", encoding="utf-8")
+</script>"""
+    out.write_text(page("Skyline pipeline — all regions", css, body, viewport=True),
+                   encoding="utf-8")
 
     print(f"landing page: {len(seen_regions)} regions, "
           f"{len(all_rows)} panos, "

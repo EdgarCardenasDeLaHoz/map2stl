@@ -7,6 +7,7 @@ import json
 import numpy as np
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 from city2stl.skyline import commons_photos as cp
 from city2stl.skyline import photo_heights as ph
 from city2stl.skyline import skyline_match as sm
@@ -41,7 +42,7 @@ def _truth(args, footprints: dict) -> dict:
     if getattr(args, "no_truth_fetch", False):
         cache = bm.load_truth_cache(args.region)
         return {k: cache[k] for k in footprints if k in cache}
-    return bm.footprint_truth(args.region, footprints, bm.REGIONS.get(args.region))
+    return bm.footprint_truth(args.region, footprints, bm_geo.REGIONS.get(args.region))
 
 
 def _score(pred, tru):
@@ -241,7 +242,7 @@ def _untagged_rows(args, results: list[dict], towers, osm: dict) -> tuple[list[d
     keys = {i: table.keys[i] for i in est}
     if getattr(args, "untagged_truth", "cached") == "fetch" and est:
         truth = bm.footprint_truth(args.region, {keys[i]: table.rings[i] for i in est},
-                                   bm.REGIONS.get(args.region))
+                                   bm_geo.REGIONS.get(args.region))
     else:
         truth = bm.load_truth_cache(args.region)
     rows = []

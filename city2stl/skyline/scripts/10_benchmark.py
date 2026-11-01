@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 
 ROOT = Path(__file__).resolve().parents[3]
 REPORTS = ROOT / "city2stl" / "skyline" / "runs" / "region_reports"
@@ -121,7 +122,7 @@ def _run_region(region: str, out_dir: Path, env: dict) -> Path | None:
 
 def _newest_report(region: str) -> Path | None:
     """Newest heights.json for ``region`` across benchmark runs and region_reports."""
-    found = list((bm.BENCHMARK_RUNS).glob(f"*/{region}_skyline_report/heights.json"))
+    found = list(bm.benchmark_runs().glob(f"*/{region}_skyline_report/heights.json"))
     found += [p for p in REPORTS.glob("*_skyline_report/heights.json")
               if p.parent.name.lower().startswith(region)]
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
@@ -132,7 +133,7 @@ def score_report(heights: Path, region: str | None = None, use_tiles: bool = Tru
                  sources: tuple[str, ...] = ()) -> dict:
     name, buildings = bm.load_report(heights)
     region = region or bm.region_key(name)
-    provider = bm.REGIONS.get(region)
+    provider = bm_geo.REGIONS.get(region)
     if provider is None:
         logging.warning("[bench] %s is not a benchmark region; scoring with 3D Tiles only",
                         region)
@@ -367,8 +368,8 @@ def print_known(region: str, known: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--regions", nargs="*", default=list(bm.REGIONS),
-                    help=f"benchmark regions (default: all of {', '.join(bm.REGIONS)})")
+    ap.add_argument("--regions", nargs="*", default=list(bm_geo.REGIONS),
+                    help=f"benchmark regions (default: all of {', '.join(bm_geo.REGIONS)})")
     ap.add_argument("--score-only", action="store_true",
                     help="no Street View: score the newest existing report per region")
     ap.add_argument("--report", action="append", default=[], type=Path,
@@ -390,7 +391,7 @@ def main() -> int:
     env = _region_env(args.keep_env)
 
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
-    out_dir = bm.BENCHMARK_RUNS / stamp
+    out_dir = bm.benchmark_runs() / stamp
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.report:

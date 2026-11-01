@@ -7,6 +7,7 @@ import json
 import pytest
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 
 
 @pytest.fixture
@@ -14,7 +15,7 @@ def script(monkeypatch, tmp_path):
     import city2stl.resources as res
 
     monkeypatch.setattr(res, "scratch_guard", lambda *a, **k: 1)   # no RAM wait in a test
-    monkeypatch.setattr(bm, "BENCHMARK_ROOT", tmp_path / "benchmark")
+    monkeypatch.setattr(bm_geo, "BENCHMARK_ROOT", tmp_path / "benchmark")
     return importlib.import_module("city2stl.skyline.scripts.19_refresh_survey_truth")
 
 
@@ -51,14 +52,14 @@ def test_full_precision_keys_retire_once_the_report_key_exists(script):
              {"key7": "same", "key6": "same"}]
     assert script._retire_full_precision_keys("san_juan", truth, metas) == 1
     assert set(truth) == {"k6a", "k7b"}                       # k7b has no report-key record yet
-    moved = json.loads((bm.BENCHMARK_ROOT / "truth" / "san_juan.k7.json").read_text())
+    moved = json.loads((bm_geo.BENCHMARK_ROOT / "truth" / "san_juan.k7.json").read_text())
     assert moved == {"k7a": {"truth_m": 1.0, "superseded_by": "k6a"}}
 
 
 def test_truth_areas_are_in_the_review_order(script):
     assert list(script.TRUTH_AREAS["san_juan"])[:3] == ["old_san_juan", "condado", "isla_verde"]
     assert list(script.TRUTH_AREAS["fort_lauderdale"])[0] == "ftl_beach"
-    assert set(script.TRUTH_AREAS) <= set(bm.REGIONS)
+    assert set(script.TRUTH_AREAS) <= set(bm_geo.REGIONS)
 
 
 def test_report_meta_reads_the_reports_own_rings_and_keys(script, tmp_path):

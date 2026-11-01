@@ -34,6 +34,8 @@ import logging
 from pathlib import Path
 
 from . import benchmark as bm
+from . import benchmark_geometry as bm_geo
+from . import benchmark_truth as bm_truth
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +56,8 @@ def _bbox_of(footprints: dict[str, list]) -> tuple[float, float, float, float]:
 def pick_provider(bbox, region: str | None = None) -> str | None:
     """The survey provider for ``bbox``: a benchmark region's own (``benchmark.REGIONS``), else
     the first available provider covering it (``PREFERRED`` first), else None."""
-    if region is not None and bm.region_key(region) in bm.REGIONS:
-        return bm.REGIONS[bm.region_key(region)]
+    if region is not None and bm.region_key(region) in bm_geo.REGIONS:
+        return bm_geo.REGIONS[bm.region_key(region)]
     from city2stl.height.providers import survey
 
     avail = [a["name"] for a in survey.available_for_bbox(bbox) if a["available"]]
@@ -202,8 +204,8 @@ def _primary_heights(region: str, footprints: dict[str, list], provider: str | N
 
     def read(tile):
         try:
-            grid = (bm.survey_ndsm(provider, tile.bbox, resolution_m, tile.part) if tile.part
-                    else bm.survey_ndsm(provider, tile.bbox, resolution_m))
+            grid = (bm_truth.survey_ndsm(provider, tile.bbox, resolution_m, tile.part) if tile.part
+                    else bm_truth.survey_ndsm(provider, tile.bbox, resolution_m))
         except Exception as exc:  # SurveyError above all; one bad tile must not lose the rest
             return tile, None, None, exc
         return tile, grid, (_years(provider, tile.bbox, tile.part) if grid is not None

@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from city2stl.skyline._core import height as core_height
+from city2stl.skyline._core import height_estimate as core_height
 from city2stl.skyline._core.height import estimate_heights_from_registration
 from city2stl.skyline._core.types import BuildingRecord, CapturedView, Viewpoint
 from city2stl.skyline.height_trace import (

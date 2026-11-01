@@ -29,6 +29,7 @@ import hashlib
 import json
 import math
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -37,7 +38,10 @@ from geo2stl import imagery
 
 from .local_dirs import local_dir
 
-_CACHE_DIR = local_dir("satellite_image_cache")
+
+def _cache_dir() -> Path:
+    """Satellite image cache folder, resolved at call time (see ``local_dirs.local_dir``)."""
+    return local_dir("satellite_image_cache")
 
 # Total-tile cap. At 256×256 px per tile the disk footprint is ~25 KB/tile
 # JPEG and ~200 KB/tile raw, so 400 tiles ≈ 10 MB cached / 80 MB in memory
@@ -105,9 +109,10 @@ def fetch_region_satellite(
     south, west, north, east = bbox
     zoom = _choose_zoom(bbox, target_m_per_px)
     cache_key = f"sat_{_bbox_hash(bbox)}_z{zoom}"
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    png_path = _CACHE_DIR / f"{cache_key}.png"
-    meta_path = _CACHE_DIR / f"{cache_key}.json"
+    cache_dir = _cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    png_path = cache_dir / f"{cache_key}.png"
+    meta_path = cache_dir / f"{cache_key}.json"
 
     if png_path.exists() and meta_path.exists():
         img = np.asarray(Image.open(png_path).convert("RGB"))

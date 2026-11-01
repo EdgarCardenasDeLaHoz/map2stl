@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 
 from city2stl.skyline import benchmark as bm
+from city2stl.skyline import benchmark_geometry as bm_geo
 from city2stl.skyline import tier_display as td
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,9 @@ logger = logging.getLogger(__name__)
 #: Google 3D Tiles free monthly cap on root requests.
 TILES_ROOT_CAP = 1000
 TIER_ORDER = ("survey", "corroborated", "tag", "single", "prior", "unlabelled")
-#: Regions with a truth cache that are not in ``bm.REGIONS`` (no survey; weak truth).
+#: Regions with a truth cache that are not in ``bm_geo.REGIONS`` (no survey; weak truth).
 EXTRA_REGIONS = {"cartagena": "3D Tiles (flat) · weak truth"}
-_RUNS = bm.BENCHMARK_ROOT.parent  # city2stl/skyline/runs
+_RUNS = bm_geo.BENCHMARK_ROOT.parent  # city2stl/skyline/runs
 
 _lock = threading.Lock()
 
@@ -49,11 +50,11 @@ _lock = threading.Lock()
 def scores_dir() -> Path:
     """Where the page's own scorings are kept (``MAP2STL_BENCHMARK_SCORES_DIR`` overrides)."""
     env = os.environ.get("MAP2STL_BENCHMARK_SCORES_DIR")
-    return Path(env) if env else bm.BENCHMARK_ROOT / "scores"
+    return Path(env) if env else bm_geo.BENCHMARK_ROOT / "scores"
 
 
 def summary_roots() -> list[Path]:
-    return [bm.BENCHMARK_ROOT, bm.BENCHMARK_RUNS]
+    return [bm_geo.BENCHMARK_ROOT, bm.benchmark_runs()]
 
 
 def report_url(heights: str | Path) -> str | None:
@@ -236,7 +237,7 @@ def history(region: str) -> list[dict]:
 
 
 def _all_region_ids() -> list[str]:
-    return [*bm.REGIONS, *(r for r in EXTRA_REGIONS if r not in bm.REGIONS)]
+    return [*bm_geo.REGIONS, *(r for r in EXTRA_REGIONS if r not in bm_geo.REGIONS)]
 
 
 def _sub(region: str, entry: dict | None) -> str:
@@ -244,7 +245,7 @@ def _sub(region: str, entry: dict | None) -> str:
         return EXTRA_REGIONS[region]
     if entry:
         return f"{entry['truth']} · {entry['buildings']} buildings"
-    return f"{_PROVIDERS.get(bm.REGIONS.get(region), 'survey')} · not scored yet"
+    return f"{_PROVIDERS.get(bm_geo.REGIONS.get(region), 'survey')} · not scored yet"
 
 
 def list_regions() -> list[dict]:
@@ -291,7 +292,7 @@ def region_detail(region: str) -> dict | None:
 
 
 def _report_files(region: str) -> list[Path]:
-    found = list(bm.BENCHMARK_RUNS.glob(f"*/{region}_skyline_report/heights.json"))
+    found = list(bm.benchmark_runs().glob(f"*/{region}_skyline_report/heights.json"))
     found += list(_RUNS.glob(f"region_reports/{region}*_skyline_report/heights.json"))
     return sorted(set(found), key=lambda p: p.stat().st_mtime, reverse=True)
 

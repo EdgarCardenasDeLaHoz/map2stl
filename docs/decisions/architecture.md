@@ -2,6 +2,23 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-11-01 — Skyline cache paths resolve at call time, reports share one shell, big skyline files split behind façades
+- **Decision:**
+  - Cache paths from `local_dir()` are functions, not import-time constants: `streetview_io._sv_image_cache_dir()`, `satellite_image._cache_dir()`, `benchmark_geometry.benchmark_runs()`. A per-run `SkylineConfig.local_dir` (`config.use`) reaches them.
+  - `city2stl/skyline/report_render.py` is the shared report shell: `page()` (doctype, head, style, body), `THEME_CSS`, `body_h1_css`, `BREADCRUMB_CSS`, `kv_rows`, `esc`. The skyline HTML report, the benchmark report, the height-diagnostic report, the landing page and the commons photo-groups page use it. The numpy2stl registration report does not (Phase 3).
+  - Seven skyline files are split by responsibility into sibling modules; the old file keeps its import path as a re-export façade with the same public names: `_pano/detect`, `html_report`, `benchmark`, `_pano/elevated`, `_report_plots/_pano_plots`, `_core/height`, `_region_render/_pages`.
+  - A name that tests or other modules overwrite (`BENCHMARK_ROOT`, `REGIONS`, `survey_ndsm`, `ROOF_FILL_WEIGHT`, ...) lives in one piece and its readers in other pieces go through that module (`_geo.BENCHMARK_ROOT`), so one patch reaches all of them. Patch the piece, not the façade.
+- **Why:**
+  - Import-time paths ignored the per-request `local_dir`, so two jobs would share one cache.
+  - Four report types each carried their own copy of the page shell and CSS; the oversized files (1.2k to 1.9k lines) were hard to navigate and to test.
+  - The proof of unchanged output is a before/after render of 30 pages from cached data: 27 byte-identical, 3 whitespace or attribute-quoting only.
+- **Rejected:**
+  - Pieces importing the façade at call time to keep patches on the façade working: circular and hides where the code is.
+  - Splitting `city_model.py`, `routers/terrain.py`, `terrain_session.py`: out of scope for this phase.
+  - Moving the numpy2stl registration report onto the shell now: numpy2stl belongs to Phase 3.
+- **Supersedes / superseded by:** none.
+- **Source:** F-UNIFY Phase 2 part B (`docs/plans/active/F-UNIFY-one-app.md`); `tests/test_skyline_report_render.py`, `tests/test_skyline_local_dirs.py`.
+
 ### 2026-10-31 — A skyline run is one library call with one SkylineConfig and a JSON report sidecar
 - **Decision:**
   - `city2stl/skyline/config.py::SkylineConfig` holds every run switch. It is built from site JSON, then env, then request overrides (`SkylineConfig.build`). An unknown override raises.

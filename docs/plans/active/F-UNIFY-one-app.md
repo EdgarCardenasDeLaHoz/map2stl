@@ -86,9 +86,22 @@ and the registration tools feed building heights into the city model automatical
   script 08 and the Heights page job are wrappers. Decision: architecture.md 2026-10-31.
 - Proof: madrid_cuatro_torres run offline before and after; the heights rows match (see the
   decision entry).
-- Left for part B: the shared report renderer, the file splits, and moving the import-time
-  `local_dir()` paths (`streetview_io._SV_IMAGE_CACHE_DIR` and the like) to call time so a
-  per-request `local_dir` override reaches them.
+- Part B done (2026-11-01, uncommitted on branch `p2b`):
+  - Call-time cache paths: `streetview_io._sv_image_cache_dir()`, `satellite_image._cache_dir()`,
+    `benchmark_geometry.benchmark_runs()`; callers and the tests that patched the old constants
+    follow. Test: `tests/test_skyline_local_dirs.py::test_cache_paths_follow_a_per_run_config`.
+  - One report shell: `city2stl/skyline/report_render.py` (`page`, `THEME_CSS`, `body_h1_css`,
+    `BREADCRUMB_CSS`, `kv_rows`, `esc`) used by `html_report*`, `benchmark_report`,
+    `scripts/height_diagnostic_report.py`, `scripts/build_landing_page.py` and
+    `commons_pipeline/groups.py`. Output identical or whitespace-only on 30 rendered pages.
+    The numpy2stl registration report is left for Phase 3.
+  - Splits behind the old import paths: `_pano/detect` (4 pieces), `html_report` (3),
+    `benchmark` (5), `_pano/elevated` (5), `_report_plots/_pano_plots` (3), `_core/height` (3),
+    `_region_render/_pages` (3). Each old file is now a re-export façade.
+  - Patch targets moved with the code: tests patch the module that holds the name
+    (`benchmark_geometry.BENCHMARK_ROOT`/`REGIONS`, `benchmark_truth.survey_ndsm`/`tiles_ndsm`,
+    `elevated_measure.ROOF_FILL_WEIGHT`, `elevated_behind.BEHIND_TOL_PX`,
+    `height_estimate._neural_sky_and_building_masks`).
 
 - **Config.** One `SkylineConfig` dataclass, built from site JSON + env + request, replaces
   the scattered `os.environ` reads. Env vars stay as overrides.

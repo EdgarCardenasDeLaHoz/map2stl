@@ -28,7 +28,10 @@ from .local_dirs import local_dir
 
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 STREETVIEW_IMAGE_URL = "https://maps.googleapis.com/maps/api/streetview"
-_SV_IMAGE_CACHE_DIR = local_dir("image_cache")
+def _sv_image_cache_dir() -> Path:
+    """The Street View image cache folder, resolved at call time so a per-run
+    ``SkylineConfig.local_dir`` override reaches it."""
+    return local_dir("image_cache")
 
 # Retry/backoff policy for the image endpoint. Previously any non-200 was
 # treated as "no imagery available" and returned None with no retry and no
@@ -48,7 +51,7 @@ _SV_NEGATIVE_TTL_S = 30 * 86400
 
 
 def _negative_cache_path(cache_key: str) -> Path:
-    return _SV_IMAGE_CACHE_DIR / f"{cache_key}.none"
+    return _sv_image_cache_dir() / f"{cache_key}.none"
 
 
 def _negative_cache_hit(cache_key: str) -> bool:
@@ -68,7 +71,7 @@ def _negative_cache_hit(cache_key: str) -> bool:
 def _write_negative_cache(cache_key: str) -> None:
     """Record that this request has no imagery. Never raises."""
     try:
-        _SV_IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _sv_image_cache_dir().mkdir(parents=True, exist_ok=True)
         _negative_cache_path(cache_key).write_text("", encoding="utf-8")
     except Exception:
         pass
@@ -342,7 +345,7 @@ def image_is_cached(params: dict) -> bool:
     """True when this image request would be answered without a paid fetch: a stored image,
     or a recent confirmed "no imagery" marker. Pure disk check, for the run estimate."""
     key = image_cache_key(params)
-    return (_SV_IMAGE_CACHE_DIR / f"{key}.png").exists() or _negative_cache_hit(key)
+    return (_sv_image_cache_dir() / f"{key}.png").exists() or _negative_cache_hit(key)
 
 
 def _streetview_image(
@@ -386,8 +389,8 @@ def _streetview_image(
         # part of the cache key — the same logical request signed with a
         # rotated secret returns the same image bytes.
         cache_key = image_cache_key(params)
-        _SV_IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_path = _SV_IMAGE_CACHE_DIR / f"{cache_key}.png"
+        _sv_image_cache_dir().mkdir(parents=True, exist_ok=True)
+        cache_path = _sv_image_cache_dir() / f"{cache_key}.png"
 
         if cache_path.exists():
             img = cv2.imread(str(cache_path), cv2.IMREAD_COLOR)

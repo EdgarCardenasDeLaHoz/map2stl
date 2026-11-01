@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from city2stl.skyline import photo_groups as pg
+from city2stl.skyline.report_render import page
 from geo2stl.geo import M_PER_DEG_SPHERE
 
 from .cache import ROOT, cache_dir, outlined, thumb_url
@@ -145,27 +146,25 @@ def gallery_page(region: str, meta: dict[str, dict], pairs: list[Pair], links: L
         for u, (loc, m) in sorted(links.items(), key=lambda kv: kv[1][1]))
     group_rows = "".join(_group_html(i, g, meta, mis) for i, g in enumerate(groups))
     n_unloc = len(set(meta) - located)
-    return f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>{region} photo groups</title><style>
-:root{{--bg:#fff;--fg:#1d1d1f;--mut:#6e6e73;--card:#f5f5f7;--acc:#0a66c2}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#111;--fg:#f2f2f2;--mut:#a1a1a6;--card:#1c1c1e;--acc:#4ea1ff}}}}
-body{{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;max-width:1300px;margin:0 auto;padding:16px}}
-h2{{margin-top:28px}} h3{{font-size:14px;color:var(--mut)}} .mut{{color:var(--mut)}}
-figure{{margin:0;background:var(--card);border-radius:8px;overflow:hidden;width:300px}}
-img{{width:100%;height:170px;object-fit:cover;display:block;background:#888}}
-figcaption{{padding:6px 8px;font-size:12px;color:var(--mut)}} figcaption b{{color:var(--fg)}}
-.pair{{display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap}} .mid{{text-align:center;color:var(--mut);min-width:80px}}
-.grid{{display:flex;gap:10px;flex-wrap:wrap}} .group{{margin:14px 0}}
-.tag,.tag2{{border-radius:4px;padding:0 5px;color:#fff}} .tag{{background:#d1495b}} .tag2{{background:#2e86ab}}
-</style></head><body>
-<h1>{html.escape(region)}: photos taken from the same spot</h1>
+    css = """:root{--bg:#fff;--fg:#1d1d1f;--mut:#6e6e73;--card:#f5f5f7;--acc:#0a66c2}
+@media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#f2f2f2;--mut:#a1a1a6;--card:#1c1c1e;--acc:#4ea1ff}}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;max-width:1300px;margin:0 auto;padding:16px}
+h2{margin-top:28px} h3{font-size:14px;color:var(--mut)} .mut{color:var(--mut)}
+figure{margin:0;background:var(--card);border-radius:8px;overflow:hidden;width:300px}
+img{width:100%;height:170px;object-fit:cover;display:block;background:#888}
+figcaption{padding:6px 8px;font-size:12px;color:var(--mut)} figcaption b{color:var(--fg)}
+.pair{display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap} .mid{text-align:center;color:var(--mut);min-width:80px}
+.grid{display:flex;gap:10px;flex-wrap:wrap} .group{margin:14px 0}
+.tag,.tag2{border-radius:4px;padding:0 5px;color:#fff} .tag{background:#d1495b} .tag2{background:#2e86ab}
+"""
+    body = f"""<h1>{html.escape(region)}: photos taken from the same spot</h1>
 <p class=mut>Skyline-outline similarity (zoom + shift + tilt), misfit &le; {max_misfit}. Located pairs at
 this threshold were all within 500 m of each other. No chaining: a photo links only to a photo it
 matches directly. {len(links)} of {n_unloc} unlocated photos link to a located photo; {len(groups)}
 groups of unlocated photos. Please check that each pair or group really is the same viewpoint.</p>
 <h2>Unlocated → located ({len(links)})</h2>{link_rows or '<p class=mut>none</p>'}
-<h2>Groups of unlocated photos ({len(groups)})</h2>{group_rows or '<p class=mut>none</p>'}
-</body></html>"""
+<h2>Groups of unlocated photos ({len(groups)})</h2>{group_rows or '<p class=mut>none</p>'}"""
+    return page(f"{region} photo groups", css, body, lang=None, viewport=True)
 
 
 def gallery_region(region: str, max_misfit: float = pg.SAME_SPOT_MISFIT, root: Path = ROOT) -> Path:
