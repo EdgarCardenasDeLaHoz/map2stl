@@ -1,11 +1,12 @@
 """photo_solve.py — the Photo solve page's service: regions, photos, pairs, camera solve, heights.
 
 One implementation, shared with the standalone pairing tool (``tools/photo_label/server.py``):
-this module loads that file and calls its ``api_*`` functions on a per-region ``Config``; it adds
-only what the page needs on top (a status per photo, an upload, the heights table, a footprint
+both call the ``city2stl.photo_label`` package (regions, photos, camera solve, start poses) on a
+per-region ``Config``; this module adds only what the page needs on top (a status per photo, an upload, the heights table, a footprint
 window for the map, the Commons search). No Google request is made from here: the tool's
 Google 3D proxy, its 3D map mode and the render-based ``api_register_step`` are not exposed, and
-the Config is built with no API key so none could be sent.
+the Config is built with no API key so none could be sent. Only the bad-photo screening still
+runs from the tool server (``tool()``), until ``screen.py`` moves into the package too.
 
 Environment overrides (scratch runs and tests):
 
@@ -26,6 +27,12 @@ import threading
 from pathlib import Path
 
 from app.paths import REPO_ROOT
+from city2stl.photo_label import candidates as _candidates
+from city2stl.photo_label import photos as _photos
+from city2stl.photo_label import regions as _regions_mod
+from city2stl.photo_label import solve as _solve
+from city2stl.skyline.camera_solver import M_PER_DEG_LAT
+from city2stl.skyline.photo_view import building_height
 
 TOOL_DIR = REPO_ROOT / "tools" / "photo_label"
 MAX_UPLOAD = 40 * 1024 * 1024
@@ -42,7 +49,7 @@ class UnknownRegion(LookupError):
 
 
 def tool():
-    """The photo_label server module, loaded once under the name ``photo_label_server``."""
+    """The photo_label server module, loaded once under the name ``photo_label_server`` (screening only)."""
     global _tool
     with _lock:
         if _tool is None:
@@ -58,21 +65,20 @@ def tool():
 
 
 def annotations_dir() -> Path:
-    return Path(os.environ.get("MAP2STL_PHOTO_ANNOTATIONS_DIR") or tool().ANNOTATIONS)
+    return Path(os.environ.get("MAP2STL_PHOTO_ANNOTATIONS_DIR") or _regions_mod.ANNOTATIONS)
 
 
 def regions_file() -> Path:
-    return Path(os.environ.get("MAP2STL_PHOTO_REGIONS_FILE") or tool().REGIONS_FILE)
+    return Path(os.environ.get("MAP2STL_PHOTO_REGIONS_FILE") or _regions_mod.REGIONS_FILE)
 
 
 def regions():
-    """The tool's ``Regions`` registry, built on first use, with no Google key (``api_key=""``)."""
+    """The ``Regions`` registry, built on first use, with no Google key (``api_key=""``)."""
     global _regions
-    t = tool()
     with _lock:
         if _regions is None:
-            specs = t.load_regions(regions_file())
-            _regions = t.Regions(specs, next(iter(specs)), annotations_dir=annotations_dir(),
+            specs = _regions_mod.load_regions(regions_file())
+            _regions = _regions_mod.Regions(specs, next(iter(specs)), annotations_dir=annotations_dir(),
                                  api_key="")
         return _regions
 
@@ -87,26 +93,25 @@ def reset() -> None:
 def cfg(region: str):
     try:
         return regions().get(region)
-    except tool().UnknownRegion as exc:
+    except _regions_mod.UnknownRegion as exc:
         raise UnknownRegion(str(exc)) from exc
 
 
 def list_regions() -> list[dict]:
     reg = regions()
-    t = tool()
     out = []
     for rid in reg.ids():
         c = reg.get(rid)
         out.append({"id": rid, "label": reg._specs[rid]["label"],
-                    "photos": len(t._photo_files(c)),
-                    "view": t.start_view(c)})
+                    "photos": len(_photos.photo_files(c)),
+                    "view": _regions_mod.start_view(c)})
     return out
 
 
 # ---------- photos -----------------------------------------------------------------------------
 
 def _label_doc(c, rel: str) -> dict | None:
-    p = tool().label_path(c, rel)
+    p = _photos.label_path(c, rel)
     if not p.is_file():
         return None
     try:
@@ -119,7 +124,7 @@ def list_photos(region: str) -> list[dict]:
     """Every photo of the region with its pair count and solve state, flagged ones included."""
     c = cfg(region)
     out = []
-    for ph in tool().list_photos(c, include_bad=True):
+    for ph in _photos.list_photos(c, include_bad=True):
         doc = _label_doc(c, ph["path"]) or {}
         cam = doc.get("camera") or {}
         out.append({**ph, "pairs": len(doc.get("labels") or []),
@@ -130,22 +135,22 @@ def list_photos(region: str) -> list[dict]:
 
 
 def photo_file(region: str, rel: str) -> Path | None:
-    return tool().safe_photo(cfg(region), rel)
+    return _photos.safe_photo(cfg(region), rel)
 
 
 def get_labels(region: str, rel: str) -> dict:
     c = cfg(region)
-    if tool().safe_photo(c, rel) is None:
+    if _photos.safe_photo(c, rel) is None:
         raise FileNotFoundError(f"no such photo: {rel}")
-    return tool().api_get_labels(c, rel)
+    return _photos.get_labels(c, rel)
 
 
 def save_labels(region: str, body: dict) -> dict:
-    return tool().api_save_labels(cfg(region), body)
+    return _photos.save_labels(cfg(region), body)
 
 
 def flag(region: str, rel: str, bad: bool, reason: str = "") -> dict:
-    return tool().api_photo_flag(cfg(region), {"photo": rel, "bad": bad, "reason": reason})
+    return _photos.photo_flag(cfg(region), {"photo": rel, "bad": bad, "reason": reason})
 
 
 def screen_start(region: str) -> dict:
@@ -192,8 +197,8 @@ def add_photo(region: str, filename: str, data: bytes) -> dict:
     folder.mkdir(parents=True)
     dest = folder / f"photo{'.jpg' if ext == '.jpeg' else ext}"
     dest.write_bytes(data)
-    rel = tool().photo_rel(key, root, dest)
-    w, h = tool().image_size(dest)
+    rel = _photos.photo_rel(key, root, dest)
+    w, h = _photos.image_size(dest)
     return {"path": rel, "w": w, "h": h, "pairs": 0, "solved": False}
 
 
@@ -202,7 +207,7 @@ def add_photo(region: str, filename: str, data: bytes) -> dict:
 def solve(region: str, body: dict) -> dict:
     """Camera fit on the pairs, with the heights table of the buildings the pairs sit on."""
     c = cfg(region)
-    res = tool().api_solve(c, body)
+    res = _solve.solve(c, body)
     if not res.get("ok"):
         return res
     res["heights"] = heights_table(c, body.get("labels") or [], res)
@@ -215,7 +220,6 @@ def heights_table(c, labels: list[dict], res: dict) -> list[dict]:
     h0 = res.get("h0_m") or []
     inside = res.get("in_footprint") or []
     fc = c.footprints()
-    t = tool()
     rows = []
     for i, lb in enumerate(labels):
         if i >= len(hs) or not (i < len(inside) and inside[i]):
@@ -224,7 +228,7 @@ def heights_table(c, labels: list[dict], res: dict) -> list[dict]:
         if h is None or not math.isfinite(float(h)):
             continue
         lat, lon = float(lb["lat"]), float(lb["lon"])
-        name = t.name_at(fc, lat, lon)
+        name = _regions_mod.name_at(fc, lat, lon)
         rows.append({"index": i, "building": name or str(lb.get("label") or f"Building {i + 1}"),
                      "lat": lat, "lon": lon, "photo_m": round(float(h), 1),
                      "osm_m": round(float(h0[i]), 1) if i < len(h0) and h0[i] else None})
@@ -232,7 +236,7 @@ def heights_table(c, labels: list[dict], res: dict) -> list[dict]:
 
 
 def project(region: str, body: dict) -> dict:
-    return tool().api_project(cfg(region), body)
+    return _solve.project(cfg(region), body)
 
 
 _cent_cache: dict[str, tuple] = {}
@@ -255,22 +259,20 @@ def footprints(region: str, lat: float, lon: float, radius_m: float, limit: int 
     """Footprints whose centre lies within ``radius_m`` of a point, nearest first (for the map)."""
     import numpy as np
     c = cfg(region)
-    t = tool()
     fc = c.footprints()
     pts = _centroids(c)
     if not len(pts):
         return {"features": [], "total": 0}
-    kx = t.M_PER_DEG_LAT * math.cos(math.radians(lat))
-    d = np.hypot((pts[:, 0] - lon) * kx, (pts[:, 1] - lat) * t.M_PER_DEG_LAT)
+    kx = M_PER_DEG_LAT * math.cos(math.radians(lat))
+    d = np.hypot((pts[:, 0] - lon) * kx, (pts[:, 1] - lat) * M_PER_DEG_LAT)
     idx = np.where(d <= radius_m)[0]
     idx = idx[np.argsort(d[idx])][:limit]
-    ts = t.ts
     feats = []
     for i in idx:
         f = fc["features"][int(i)]
         pr = f["properties"]
         feats.append({"id": pr.get("id"), "name": pr.get("name"),
-                      "height_m": round(float(ts.building_height(pr)), 1),
+                      "height_m": round(float(building_height(pr)), 1),
                       "ring": [[round(x, 6), round(y, 6)] for x, y in f["geometry"]["coordinates"][0]]})
     return {"features": feats, "total": int(len(idx))}
 
@@ -279,7 +281,7 @@ def candidates(region: str, rel: str, refresh: bool = False, progress=None) -> d
     """Start poses for a photo with no pairs: skyline vs the DEM horizon (no Google, no render)."""
     if progress:
         progress(10, "Matching the photo's skyline to the terrain")
-    return tool().api_register_candidates(cfg(region), {"photo": rel, "refresh": refresh})
+    return _candidates.register_candidates(cfg(region), {"photo": rel, "refresh": refresh})
 
 
 # ---------- heights ---------------------------------------------------------------------------
@@ -299,7 +301,7 @@ def load_heights(region: str) -> dict:
 def save_heights(region: str, rel: str, rows: list[dict]) -> dict:
     """Keep the heights read from one photo, source ``photo``. Never touches OSM tags, survey or LiDAR."""
     c = cfg(region)
-    if tool().safe_photo(c, rel) is None:
+    if _photos.safe_photo(c, rel) is None:
         raise FileNotFoundError(f"no such photo: {rel}")
     clean = [{"building": str(r.get("building") or ""), "lat": float(r["lat"]), "lon": float(r["lon"]),
               "height_m": float(r["photo_m"]),

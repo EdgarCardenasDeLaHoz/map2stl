@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -329,3 +330,200 @@ def measure(rgb, labels_photo, cam: PinholeCamera, footprints, bases_m, depth_ph
     ms = roof_fit.fit_roof_heights(pano, pose, footprints, depth=depth, instances=instances,
                                    cam_h=cam_h, **fit_kw)
     return ms, pano, grid, pose, cam_h
+
+
+# --------------------------------------------------------------------------- cameras as dicts
+# (moved from tools/photo_label/register.py, F-UNIFY Phase 3)
+
+def cam_from_dict(c: dict, w: int | None = None, h: int | None = None) -> PinholeCamera:
+    """A PinholeCamera from a dict with `elev_m`/`elev`, `heading_deg`/`heading`, `pitch_deg`/
+    `pitch`, `roll_deg`/`roll`, `f_px`/`f` (auto_pose spells the short forms)."""
+    def g(*keys, default=None):
+        for k in keys:
+            if c.get(k) is not None:
+                return float(c[k])
+        if default is None:
+            raise KeyError(keys[0])
+        return default
+    return PinholeCamera(g("lat"), g("lon"), g("elev_m", "elev"), g("heading_deg", "heading"),
+                         g("pitch_deg", "pitch", default=0.0), g("roll_deg", "roll", default=0.0),
+                         g("f_px", "f"), int(w or c["width"]), int(h or c["height"]))
+
+
+def cam_to_dict(cam: PinholeCamera) -> dict:
+    return {"lat": cam.lat, "lon": cam.lon, "elev_m": cam.elev_m, "heading_deg": cam.heading_deg,
+            "pitch_deg": cam.pitch_deg, "roll_deg": cam.roll_deg, "f_px": cam.f_px,
+            "hfov_deg": math.degrees(2 * math.atan(cam.width / 2 / cam.f_px)),
+            "width": cam.width, "height": cam.height}
+
+
+# --------------------------------------------------------------------------- OSM buildings in view
+# (moved from tools/photo_label/terrain_solve.py, F-UNIFY Phase 3). `project_buildings`
+# rasterises OSM footprints as prisms (base at the lowest terrain under the ring, top at base +
+# height) with a solved camera into an id buffer and returns only the visible outlines.
+
+DEFAULT_BUILDING_H = 9.0
+LEVEL_H = 3.0
+PROJECT_RADIUS_M = 2000.0
+_NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+
+def _num(v) -> float | None:
+    m = _NUM.search(str(v)) if v is not None else None
+    return float(m.group().replace(",", ".")) if m else None
+
+
+def building_height(props: dict) -> float:
+    """OSM `height`, else `building:levels` x 3 m, else 9 m."""
+    h = _num(props.get("height"))
+    if h is not None and h > 0:
+        return h
+    lv = _num(props.get("levels"))
+    if lv is not None and lv > 0:
+        return lv * LEVEL_H
+    return DEFAULT_BUILDING_H
+
+
+NEAR_M = 1.0            # near plane of the visibility raster, m
+MAX_VISIBLE = 2000      # nearest footprints in view that are rasterised (150 dropped the far hillside)
+MIN_VISIBLE_PX = 30     # a building with fewer visible pixels is dropped
+MIN_DIST_M = 30.0       # footprints closer than this to the camera (the one it stands on) are skipped
+_CLAMP = 30000.0
+
+
+def _clip_near(poly: np.ndarray) -> np.ndarray:
+    """Clip a polygon of camera-space points (n, 3: right, up, forward) to forward >= NEAR_M."""
+    out = []
+    for i in range(len(poly)):
+        a, b = poly[i - 1], poly[i]
+        ia, ib = a[2] >= NEAR_M, b[2] >= NEAR_M
+        if ia != ib:
+            t = (NEAR_M - a[2]) / (b[2] - a[2])
+            out.append(a + t * (b - a))
+        if ib:
+            out.append(b)
+    return np.array(out)
+
+
+def _prism_faces(pts_c: np.ndarray, zb: float, zt: float, e: np.ndarray, n: np.ndarray):
+    """Visible-side faces of a prism: (kind, camera-space polygon) with kind 1 roof, 2 wall.
+    `pts_c` (m, 2) ring in metres east/north of the camera, `zb`/`zt` base/top relative to the
+    camera. Back-facing walls are skipped, the roof only when the camera is above it."""
+    m = len(pts_c)
+    area = 0.5 * float(np.sum(pts_c[:, 0] * np.roll(pts_c[:, 1], -1) - np.roll(pts_c[:, 0], -1) * pts_c[:, 1]))
+    ring = pts_c if area >= 0 else pts_c[::-1]                      # counter-clockwise
+    faces = []
+    for i in range(m):
+        a, b = ring[i], ring[(i + 1) % m]
+        nx, ny = b[1] - a[1], a[0] - b[0]                           # outward normal
+        if -(a[0] * nx + a[1] * ny) <= 0:                           # camera at the origin
+            continue
+        faces.append((2, np.array([[a[0], a[1], zb], [b[0], b[1], zb], [b[0], b[1], zt], [a[0], a[1], zt]])))
+    if zt < 0:
+        faces.append((1, np.column_stack([ring, np.full(m, zt)])))
+    return faces
+
+
+def project_buildings(dem, fc: dict, cam: PinholeCamera, radius_m: float = PROJECT_RADIUS_M,
+                      limit: int = MAX_VISIBLE) -> dict:
+    """What the camera would see of the OSM footprints (prisms: base at the lowest terrain under
+    the ring, top at base + height). The `limit` nearest footprints in view are rasterised as
+    faces, far to near, into an id buffer (near plane `NEAR_M`; faces crossing it are clipped).
+    Returns {"buildings": [...], "ids": (h, w) uint16 array, index+1 of the building (0: none)}.
+    Each building: id, name, height_m, dist_m, visible_px, contours (visible outline rings, px),
+    roof (visible roof rings, px). Footprints within `MIN_DIST_M` of the camera and buildings under
+    `MIN_VISIBLE_PX` are dropped; the list is far
+    to near and the array indexes it."""
+    import cv2
+    from shapely.geometry import Point, Polygon
+
+    w, h = int(cam.width), int(cam.height)
+    kx = M_PER_DEG_LAT * math.cos(math.radians(cam.lat))
+    right, up, fwd = cam.axes()
+    cand = []
+    for f in fc["features"]:
+        ring = np.asarray(f["geometry"]["coordinates"][0], float)
+        if len(ring) < 4:
+            continue
+        pts = ring[:-1]
+        c = pts.mean(axis=0)
+        d = math.hypot((c[0] - cam.lon) * kx, (c[1] - cam.lat) * M_PER_DEG_LAT)
+        if d > radius_m:
+            continue
+        # The photographer's own terrace or rooftop would fill the frame from a few metres away.
+        loc = np.column_stack([(pts[:, 0] - cam.lon) * kx, (pts[:, 1] - cam.lat) * M_PER_DEG_LAT])
+        reach = float(np.hypot(*(loc - loc.mean(axis=0)).T).max())  # cheap test first
+        if d - reach >= MIN_DIST_M or Polygon(loc).buffer(0).distance(Point(0.0, 0.0)) >= MIN_DIST_M:
+            cand.append((d, pts, f["properties"]))
+    empty = {"buildings": [], "ids": np.zeros((h, w), np.uint16)}
+    if not cand:
+        return empty
+    cut = np.cumsum([0] + [len(c[1]) for c in cand])
+    allp = np.vstack([c[1] for c in cand])
+    z = np.asarray(dem(allp[:, 1], allp[:, 0]), float)
+    bx, by = cam.project_ll(allp[:, 1], allp[:, 0], z)               # cheap in-frame pre-cull
+    keep = []
+    for k, (d, _pts, _pr) in enumerate(cand):
+        zk = z[cut[k]:cut[k + 1]]
+        if not np.isfinite(zk).any():
+            continue
+        sx, sy = bx[cut[k]:cut[k + 1]], by[cut[k]:cut[k + 1]]
+        ok = np.isfinite(sx)
+        if not ok.any():
+            continue
+        if ok.all() and (sx.max() < 0 or sx.min() > w or sy.max() < 0 or sy.min() > h):
+            continue
+        keep.append((d, k))
+    keep.sort()
+    keep = keep[:limit]
+    ids = np.zeros((h, w), np.int32)
+    kind = np.zeros((h, w), np.uint8)
+    faces = []                                                      # (mean depth, building slot, kind, poly px)
+    for slot, (_d, k) in enumerate(keep):
+        _, pts, pr = cand[k]
+        zk = z[cut[k]:cut[k + 1]]
+        zb = float(zk[np.isfinite(zk)].min()) - cam.elev_m
+        zt = zb + building_height(pr)
+        pc = np.column_stack([(pts[:, 0] - cam.lon) * kx, (pts[:, 1] - cam.lat) * M_PER_DEG_LAT])
+        for kd, poly in _prism_faces(pc, zb, zt, None, None):
+            cc = np.column_stack([poly[:, 0] * right[0] + poly[:, 1] * right[1] + poly[:, 2] * right[2],
+                                  poly[:, 0] * up[0] + poly[:, 1] * up[1] + poly[:, 2] * up[2],
+                                  poly[:, 0] * fwd[0] + poly[:, 1] * fwd[1] + poly[:, 2] * fwd[2]])
+            cc = _clip_near(cc)
+            if len(cc) < 3:
+                continue
+            px = np.column_stack([w / 2 + cam.f_px * cc[:, 0] / cc[:, 2], h / 2 - cam.f_px * cc[:, 1] / cc[:, 2]])
+            faces.append((float(cc[:, 2].mean()), slot, kd, np.clip(px, -_CLAMP, _CLAMP)))
+    faces.sort(key=lambda t: -t[0])
+    for _, slot, kd, px in faces:
+        q = np.round(px * 16).astype(np.int32)                       # shift=4: sub-pixel edges
+        cv2.fillPoly(ids, [q], int(slot + 1), lineType=cv2.LINE_8, shift=4)
+        cv2.fillPoly(kind, [q], int(kd), lineType=cv2.LINE_8, shift=4)
+    counts = np.bincount(ids.ravel(), minlength=len(keep) + 1)
+    from scipy import ndimage
+    boxes = ndimage.find_objects(ids, max_label=len(keep))
+
+    def rings(mask, off):
+        cs, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        res = []
+        for c in cs:
+            c = cv2.approxPolyDP(c, 1.0, True)[:, 0, :] + off
+            if len(c) >= 3:
+                res.append(c.tolist())
+        return res
+
+    out, remap = [], np.zeros(len(keep) + 1, np.uint16)
+    for slot in range(len(keep) - 1, -1, -1):                        # far to near
+        if counts[slot + 1] < MIN_VISIBLE_PX or boxes[slot] is None:
+            continue
+        d, k = keep[slot]
+        pr = cand[k][2]
+        sl = boxes[slot]
+        sub, sk = ids[sl] == slot + 1, kind[sl]
+        off = np.array([sl[1].start, sl[0].start])
+        remap[slot + 1] = len(out) + 1
+        out.append({"id": pr.get("id"), "name": pr.get("name"),
+                    "height_m": float(building_height(pr)), "dist_m": float(d),
+                    "visible_px": int(counts[slot + 1]),
+                    "contours": rings(sub, off), "roof": rings(sub & (sk == 1), off)})
+    return {"buildings": out, "ids": remap[ids]}

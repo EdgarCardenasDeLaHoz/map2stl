@@ -9,6 +9,17 @@ Run: `~/.venvs/map2stl/Scripts/python.exe tools/photo_label/server.py [--port 87
 (the flags override the default region's entry in `regions.json`),
 then open `http://localhost:<port>/`. Endpoint list: the module docstring of `server.py`.
 
+- **Where the logic lives (F-UNIFY Phase 3):** the package `city2stl/photo_label/` —
+  `regions.py` (`Config`, `Regions`, `load_regions`, footprints, `name_at`, `start_view`),
+  `photos.py` (`photo_files`, `list_photos`, flags, `get_labels` / `save_labels`, `photo_rgb`),
+  `solve.py` (`solve`, `project`), `candidates.py` (`register_candidates`, `photo_hints`,
+  `pano_seed`, `start_geoid`, `GEOID_DEFAULT_M`), `auto_pose.py`. `server.py` keeps the HTTP
+  layer, screening, tiles, model, depth, orientation and `api_register_step`; its `api_solve`,
+  `api_project`, `api_get_labels`, `api_save_labels`, `api_photo_flag`, `api_register_candidates`
+  are one-line wrappers, and it re-exports the moved names. `tools/photo_label/terrain_solve.py`
+  and `auto_pose.py` are compatibility shims. Below, `server.py::X` for a moved name means the
+  package module that defines it.
+
 - **Regions (one server, several regions):** `tools/photo_label/regions.json` (label, osm, dem, photos
   key -> folder, optional view {lat, lon, ground_m}); `server.py::Regions` (lazy `Config` per region,
   shared key and tile session, `get`, `listing`, `tiles`), `load_regions`, `build_regions` (CLI
@@ -20,7 +31,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `saveLabels` (also after Solve / Auto register), restore in `index.html::loadPhoto`.
 - **Map lines toggle** (fov wedge, sight ray per pair, cyan auto rays, buildings in view recoloured
   to match the photo): `index.html::drawMapLines`, `fpBase`, checkbox `rayChk`.
-- **Buildings projected onto the photo:** `terrain_solve.py::project_buildings` (`MAX_VISIBLE`
+- **Buildings projected onto the photo:** `city2stl/skyline/photo_view.py::project_buildings` (`MAX_VISIBLE`
   nearest in view, `MIN_DIST_M`, `MIN_VISIBLE_PX`).
 - **Server, routes, config:** `tools/photo_label/server.py` — `Config` (paths, cached DEM and
   footprints, model build state), `LabelHandler.do_GET` / `do_POST` (route table), `make_server`,
@@ -28,10 +39,10 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `safe_photo`; footprints `overpass_to_geojson` (building ways plus building multipolygon relations, outer
   rings stitched by `_stitch_rings`, ids `r<relation>`), `geojson_footprints`; start of the 3D view
   outside Granada `start_view` (the region's `view`, else the DEM centre).
-- **Camera solve from pairs:** `server.py::api_solve` (terrain fit seeded by
-  `city2stl/skyline/camera_solver.py::solve_pose`), `server.py::api_project`;
-  `tools/photo_label/terrain_solve.py` — `solve_terrain`, `project_buildings`, `label_priors`,
-  `building_height`.
+- **Camera solve from pairs:** `city2stl/photo_label/solve.py::solve` (column-only
+  `city2stl/skyline/camera_solver.py::solve_pose`, then the terrain fit
+  `camera_solver.py::solve_terrain` with `label_priors`, `is_named`), `solve.py::project`
+  (`photo_view.py::project_buildings`, `building_height`).
 - **Google 3D tiles proxy (key stays on the server):** `server.py::LabelHandler._proxy_tiles`,
   `tiles_upstream_url`, `rewrite_tile_uris`, `load_api_key`. Do not change without reason: the
   key must never reach the browser. Speed (a view is ~1,000 tile requests): upstream keep-alive
@@ -40,7 +51,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   wait ~300 ms per connection for the IPv4 fallback.
 - **Auto registration against Google 3D renders:** `tools/photo_label/register.py` — `match`
   (SIFT), `lift` (render depth to lat/lon/h), `estimate_geoid` (low percentile of mesh minus
-  DEM), `solve_pose`, `register_step`; routes `server.py::api_register_candidates`,
+  DEM), `solve_pose` (= `camera_solver.py::solve_pnp`, the PnP over 3D points), `register_step`; routes `server.py::api_register_candidates`,
   `api_register_step`; page side `index.html::autoRegister`, `renderAt`, `settleTiles`.
   When the start guess scores below `SWEEP_IF_BELOW` inliers, `index.html::sweepHeadings` renders
   `SWEEP_HEADINGS` headings at `SWEEP_HFOV`, then narrows to `SWEEP_FOVS`, and iterates from the best.
@@ -78,7 +89,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   depth cell) and `autoRegister` re-renders once when the measured geoid moves > 3 m.
 - **Pano camera height:** `index.html::meshGround` (lowest Google mesh point within 8 m) + `PANO_CAM_HEIGHT_M`,
   applied in `autoRegister` to a `pano` start.
-- **Start pose without pairs (skyline vs DEM horizon):** `tools/photo_label/auto_pose.py` —
+- **Start pose without pairs (skyline vs DEM horizon):** `city2stl/photo_label/auto_pose.py` —
   `candidate_poses`, `photo_skyline`, `dem_horizon`, `horizon_rows`.
 - **Our city model over Google 3D** (opacity, Model/Google/Both, dz nudge, live geoid):
   `tools/photo_label/model_glb.py` — `build_or_load` (cache `runs/photo_label_model/<region>_<key>.glb`
@@ -106,12 +117,13 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
 - **Register a photo against our own model (edges, no textures):** `tools/photo_label/register_model.py` -- `refine`, `ModelScene`, `model_wireframe`, `render_depth`, `visible_samples`, `photo_features`, `evaluate`; CLI `--region R --eval-panos|--eval-labels`, overlays in `runs/photo_label_model_register/`.
 - **Tests:** `tests/test_photo_label_server.py`, `tests/test_photo_label_regions.py`, `tests/test_photo_label_register.py`,
   `tests/test_photo_label_model.py`, `tests/test_photo_label_auto_pose.py`, `tests/test_photo_label_depth.py`,
-  `tests/test_photo_label_orient.py`, `tests/test_photo_label_guesses.py`, `tests/test_photo_label_screen.py`.
+  `tests/test_photo_label_orient.py`, `tests/test_photo_label_guesses.py`, `tests/test_photo_label_screen.py`,
+  `tests/test_photo_label_pano_seeds.py`, `tests/test_skyline_camera_solver.py`.
 
 ## In the app: Tools > Photo solve (F-UNIFY Phase 4 part 3)
 - **Router and service:** `app/server/routers/photo.py` (routes under `/api/photo/`, list in its
-  docstring), `app/server/core/photo_solve.py` (`tool()` loads `tools/photo_label/server.py`,
-  `regions`, `solve`, `project`, `footprints`, `candidates`, `save_heights`, `commons_search`,
+  docstring), `app/server/core/photo_solve.py` (imports `city2stl.photo_label`; `tool()` loads
+  `tools/photo_label/server.py` for screening only, `screen_start` / `screen_state`; `regions`, `solve`, `project`, `footprints`, `candidates`, `save_heights`, `commons_search`,
   `commons_add`, `add_photo`). Env: `MAP2STL_PHOTO_REGIONS_FILE`, `MAP2STL_PHOTO_ANNOTATIONS_DIR`.
 - **Page:** `app/client/static/js/vue/components/views/PhotoSolvePage.vue`; pure logic
   `modules/ui/photo-solve-format.js` (`stepHint`, `cameraRows`, `fovWedge`, `llToScreen`,

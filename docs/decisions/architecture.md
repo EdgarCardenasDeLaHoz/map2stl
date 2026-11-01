@@ -2,6 +2,37 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-11-01 — One camera-solve module and a photo_label package; the align tool keeps only its CLI-specific code
+- **Decision:**
+  - `city2stl/skyline/camera_solver.py` holds every camera solve:
+    - `solve_pose`: the columns-only solve.
+    - `solve_terrain`: the full camera on the DEM with roof-height priors (was `tools/photo_label/terrain_solve.py`).
+    - `solve_pnp`: RANSAC PnP over 3D points (was `tools/photo_label/register.py::solve_pose`).
+  - `city2stl/skyline/photo_view.py` holds `cam_from_dict`, `cam_to_dict`, `project_buildings` and `building_height`.
+  - The logic of `tools/photo_label/server.py` moved to the package `city2stl/photo_label/`:
+    - `regions.py::Regions`
+    - `photos.py`
+    - `solve.py::solve` / `project`
+    - `candidates.py::register_candidates`
+    - `auto_pose.py`
+  - Shims and wrappers keep the old names working:
+    - `server.py` keeps its HTTP routes and `api_*` names as one-line wrappers, and re-exports the moved names.
+    - `terrain_solve.py` and `tools/photo_label/auto_pose.py` are shims. `auto_pose` replaces itself in `sys.modules`, so a monkeypatch on either name hits one module.
+  - `app/server/core/photo_solve.py` imports the package. `tool()` remains for the screening job only.
+  - Align tool: `eval_registration.invert_affine` is now `city2stl/registration/align_edit.py::invert_affine` (`_invert2x3` kept as an alias).
+- **Why:**
+  - The app loaded a tool's HTTP server file with importlib to reach the solve, so the app depended on the tool.
+  - photo_label and the skyline photo path each had their own camera code next to `camera_solver`.
+  - The moves are code-for-code, so behaviour is unchanged. Checked before and after on real data:
+    - The 4 labelled Granada photos (solve + project) and a synthetic PnP: every value identical.
+    - `eval_registration` on the 6 ground-truth plates: every value identical.
+- **Rejected:**
+  - Merging the align tool's near duplicates into the package: `locate_buildings.ncc_surface` (local sums for crop voting), `locate.correlate_with` (whole-frame zero mean), `refine_guess._warp` / `pearson_at` / `iou_at` (support-masked, strict IoU), and `decompose`. Each differs in a way its callers' scores depend on.
+  - Moving `screen.py` and the screening jobs now: another session has uncommitted edits to `server.py` / `screen.py`.
+  - Folding `solve_pnp` into `skyline_match`: it matches 3D points, not skylines.
+- **Supersedes / superseded by:** supersedes the "app loads `tools/photo_label/server.py`" note in the Phase 4 part 3 entry of `docs/index/photo-label.md`.
+- **Source:** F-UNIFY Phase 3 (`docs/plans/active/F-UNIFY-one-app.md`). Tests: `tests/test_photo_label_*.py`, `tests/test_skyline_camera_solver.py`, `tests/test_registration_*.py`.
+
 ### 2026-10-31 — A skyline run is one library call with one SkylineConfig and a JSON report sidecar
 - **Decision:**
   - `city2stl/skyline/config.py::SkylineConfig` holds every run switch. It is built from site JSON, then env, then request overrides (`SkylineConfig.build`). An unknown override raises.

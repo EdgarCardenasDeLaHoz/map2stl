@@ -55,6 +55,8 @@ from numpy2stl.raster import building_mask  # noqa: E402
 from numpy2stl.registration.align.metrics import score_alignment  # noqa: E402
 from numpy2stl.registration.align.transform import apply_transform  # noqa: E402
 
+from city2stl.registration.align_edit import invert_affine  # noqa: E402,F401 - moved there
+
 # Follows the same override the exporter reads, so a set exported into a scratch
 # directory can be scored without disturbing the one the align tool serves.
 DATA_DIR = paths.DATA
@@ -63,12 +65,6 @@ TRUTH_DIR = paths.GROUND_TRUTH
 # score_alignment keys worth printing, in the order they appear in the table.
 # 'overlap_iou' is the pipeline's own gate metric.
 SCORE_KEYS = ("overlap_iou", "footprint_iou", "edge_iou", "edge_lift", "height_corr")
-
-
-def invert_affine(M: np.ndarray) -> np.ndarray:
-    """Inverse of a 2x3 affine, in the same cv2 convention."""
-    full = np.vstack([M, [0.0, 0.0, 1.0]])
-    return np.linalg.inv(full)[:2, :]
 
 
 def decompose(M: np.ndarray) -> tuple[float, float]:

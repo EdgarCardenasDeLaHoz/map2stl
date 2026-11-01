@@ -7,6 +7,7 @@ view depth); this module does the rest, with no network and no GPU:
     lift(pts_render, depth, cam)    render pixels -> lat, lon, ellipsoidal h from the depth grid
     estimate_geoid(...)             mesh height minus DEM, low percentile -> geoid undulation
     solve_pose(pts, lla, cam0)      solvePnPRansac over a grid of focal lengths, then least_squares
+                                    (= camera_solver.solve_pnp; cam_from_dict/cam_to_dict are in photo_view)
     register_step(...)              the three above in sequence: one render -> new camera
 
 Datums: the DEM and every camera `elev_m` are orthometric (DEM datum); the mesh and the
@@ -28,52 +29,38 @@ from dataclasses import replace
 
 import numpy as np
 
-from city2stl.skyline.photo_view import M_PER_DEG_LAT, PinholeCamera
+from city2stl.photo_label.candidates import (
+    GEOID_DEFAULT_M,  # 50 m (Granada): the first render guess
+)
+from city2stl.skyline.camera_solver import (  # noqa: F401 - re-exported: the PnP solve moved there
+    F_GRID,
+    MIN_INLIERS,
+    RANSAC_PX,
+    _cam_from_rt,
+    _enu,
+    _err,
+    _resid,
+    _rt,
+)
+from city2stl.skyline.camera_solver import solve_pnp as solve_pose
+from city2stl.skyline.photo_view import (  # noqa: F401
+    M_PER_DEG_LAT,
+    PinholeCamera,
+    cam_from_dict,
+    cam_to_dict,
+)
 
-GEOID_DEFAULT_M = 50.0        # Granada; the first render needs a guess, later ones use the estimate
 GEOID_PERCENTILE = 20.0       # ground sits at the low end of (mesh - DEM): roofs and trees add to it
 MAX_PAIRS = 200
-RANSAC_PX = 8.0               # render vs photo differ in light, season and mesh blur
-F_GRID = (0.80, 0.85, 0.90, 0.95, 1.0, 1.05, 1.10, 1.15, 1.20, 1.25)
-MIN_INLIERS = 12
 DEPTH_STEP = 0.08             # relative depth jump across a grid cell that marks a silhouette
 
 
 # --------------------------------------------------------------------------- cameras
 
-def cam_from_dict(c: dict, w: int | None = None, h: int | None = None) -> PinholeCamera:
-    """A PinholeCamera from a dict with `elev_m`/`elev`, `heading_deg`/`heading`, `pitch_deg`/
-    `pitch`, `roll_deg`/`roll`, `f_px`/`f` (auto_pose spells the short forms)."""
-    def g(*keys, default=None):
-        for k in keys:
-            if c.get(k) is not None:
-                return float(c[k])
-        if default is None:
-            raise KeyError(keys[0])
-        return default
-    return PinholeCamera(g("lat"), g("lon"), g("elev_m", "elev"), g("heading_deg", "heading"),
-                         g("pitch_deg", "pitch", default=0.0), g("roll_deg", "roll", default=0.0),
-                         g("f_px", "f"), int(w or c["width"]), int(h or c["height"]))
-
-
-def cam_to_dict(cam: PinholeCamera) -> dict:
-    return {"lat": cam.lat, "lon": cam.lon, "elev_m": cam.elev_m, "heading_deg": cam.heading_deg,
-            "pitch_deg": cam.pitch_deg, "roll_deg": cam.roll_deg, "f_px": cam.f_px,
-            "hfov_deg": math.degrees(2 * math.atan(cam.width / 2 / cam.f_px)),
-            "width": cam.width, "height": cam.height}
-
-
 def render_camera(cam: PinholeCamera, rw: int, rh: int, geoid_m: float) -> PinholeCamera:
     """The camera that made a render of size ``rw`` x ``rh``: same pose, f scaled with the
     width, height ellipsoidal."""
     return replace(cam, elev_m=cam.elev_m + geoid_m, f_px=cam.f_px * rw / cam.width, width=rw, height=rh)
-
-
-def _enu(cam: PinholeCamera, lat, lon, h):
-    kx = M_PER_DEG_LAT * math.cos(math.radians(cam.lat))
-    return np.stack([(np.asarray(lon, float) - cam.lon) * kx,
-                     (np.asarray(lat, float) - cam.lat) * M_PER_DEG_LAT,
-                     np.asarray(h, float) - cam.elev_m], axis=-1)
 
 
 # --------------------------------------------------------------------------- decoding
@@ -201,128 +188,6 @@ def geoid_from_render(depth, rcam: PinholeCamera, dem, default: float = GEOID_DE
 
 
 # --------------------------------------------------------------------------- pose
-
-def _rt(cam: PinholeCamera):
-    right, up, fwd = cam.axes()
-    r = np.stack([right, -up, fwd])
-    return r, -r @ np.array([0.0, 0.0, cam.elev_m])
-
-
-def _cam_from_rt(r: np.ndarray, c: np.ndarray, base: PinholeCamera, f: float) -> PinholeCamera:
-    """Camera at ENU position ``c`` (origin at ``base``'s lat/lon) with world-to-camera rotation ``r``."""
-    right, fwd = r[0], r[2]
-    heading = math.degrees(math.atan2(fwd[0], fwd[1]))
-    pitch = math.degrees(math.asin(max(-1.0, min(1.0, fwd[2]))))
-    hh = math.radians(heading)
-    right0 = np.array([math.cos(hh), -math.sin(hh), 0.0])
-    up0 = np.cross(right0, fwd)
-    roll = math.degrees(math.atan2(float(right @ up0), float(right @ right0)))
-    kx = M_PER_DEG_LAT * math.cos(math.radians(base.lat))
-    return replace(base, lat=base.lat + c[1] / M_PER_DEG_LAT, lon=base.lon + c[0] / kx,
-                   elev_m=float(c[2]), heading_deg=heading % 360.0, pitch_deg=pitch, roll_deg=roll, f_px=float(f))
-
-
-def _resid(cam: PinholeCamera, lat, lon, h, xy):
-    x, y = cam.project_ll(lat, lon, h)
-    return np.concatenate([x - xy[:, 0], y - xy[:, 1]])
-
-
-def _err(cam: PinholeCamera, lat, lon, h, xy) -> np.ndarray:
-    r = _resid(cam, lat, lon, h, xy)
-    n = len(xy)
-    e = np.hypot(r[:n], r[n:])
-    return np.where(np.isfinite(e), e, np.inf)
-
-
-def solve_pose(pts_photo, lla, cam0: PinholeCamera, *, weights=None, thresh_px: float = RANSAC_PX,
-               f_grid=F_GRID, seed: int = 0) -> dict:
-    """Camera from 2D-3D matches. ``pts_photo`` (n, 2) photo pixels, ``lla`` (n, 3) lat, lon and
-    orthometric h of the same points, ``cam0`` the starting camera (its width/height/f set the
-    intrinsics' start). ``weights`` (n,) scale the final refinement's residuals (user pairs > 1).
-
-    PnP RANSAC runs once per focal length in ``f_grid * cam0.f_px``; the best (most inliers,
-    then lowest median) seeds a ``least_squares`` over lat, lon, elev, heading, pitch, roll, f on
-    its inliers (soft_l1, then the inliers are re-taken and it runs again).
-    Returns ``{"camera", "inliers" (bool n), "n_inliers", "median_px", "residuals_px"}``; the
-    camera is ``cam0`` and ``n_inliers`` 0 when no pose has MIN_INLIERS."""
-    import cv2
-    from scipy.optimize import least_squares
-
-    xy = np.asarray(pts_photo, float).reshape(-1, 2)
-    lla = np.asarray(lla, float).reshape(-1, 3)
-    n = len(xy)
-    w = np.ones(n) if weights is None else np.asarray(weights, float)
-    fail = {"camera": cam0, "inliers": np.zeros(n, bool), "n_inliers": 0, "median_px": float("nan"),
-            "residuals_px": np.full(n, np.nan)}
-    good = np.isfinite(xy).all(1) & np.isfinite(lla).all(1)
-    if good.sum() < MIN_INLIERS:
-        return fail
-    pe = _enu(cam0, lla[:, 0], lla[:, 1], lla[:, 2])
-    pe[:, 2] = lla[:, 2]                                  # absolute height; the camera sits at cam0.elev_m
-    r0, t0 = _rt(cam0)
-    rv0, _ = cv2.Rodrigues(r0)
-    cv2.setRNGSeed(seed)
-    best = None
-    idx = np.where(good)[0]
-    for k in f_grid:
-        f = cam0.f_px * k
-        K = np.array([[f, 0, cam0.width / 2.0], [0, f, cam0.height / 2.0], [0, 0, 1.0]])
-        try:
-            ok, rv, tv, inl = cv2.solvePnPRansac(
-                pe[idx].astype(np.float64), xy[idx].astype(np.float64), K, None, iterationsCount=1500,
-                reprojectionError=float(thresh_px), confidence=0.999, flags=cv2.SOLVEPNP_EPNP)
-        except cv2.error:
-            continue
-        if not ok or inl is None or len(inl) < MIN_INLIERS:
-            continue
-        sel = idx[inl.ravel()]
-        try:
-            rv, tv = cv2.solvePnPRefineLM(pe[sel].astype(np.float64), xy[sel].astype(np.float64), K, None, rv, tv)
-        except cv2.error:
-            pass
-        rm, _ = cv2.Rodrigues(rv)
-        cam = _cam_from_rt(rm, (-rm.T @ tv).ravel(), cam0, f)
-        e = _err(cam, lla[:, 0], lla[:, 1], lla[:, 2], xy)
-        e[~good] = np.inf
-        inliers = e < thresh_px
-        cnt = int(inliers.sum())
-        score = (cnt, -float(np.median(e[inliers])) if cnt else -np.inf)
-        if best is None or score > best[0]:
-            best = (score, cam, inliers)
-    if best is None:
-        return fail
-    _, cam, inliers = best
-
-    names = ("lat", "lon", "elev_m", "heading_deg", "pitch_deg", "roll_deg", "f_px")
-    scale = np.array([1e-4, 1e-4, 1.0, 1.0, 1.0, 1.0, max(cam0.f_px * 0.02, 1.0)])
-    roll_ref = cam0.roll_deg
-
-    def refine(cam, inl):
-        sel = np.where(inl)[0]
-        p0 = np.array([getattr(cam, nm) for nm in names], float)
-
-        def fun(p):
-            c = replace(cam, **{nm: float(v) for nm, v in zip(names, p, strict=True)})
-            r = _resid(c, lla[sel, 0], lla[sel, 1], lla[sel, 2], xy[sel])
-            m = len(sel)
-            r = np.concatenate([r[:m] * w[sel], r[m:] * w[sel]])
-            r = np.where(np.isfinite(r), r, 1e3)
-            return np.concatenate([r, [(p[5] - roll_ref) * 0.5]])      # weak pull of roll toward the start
-
-        sol = least_squares(fun, p0, loss="soft_l1", f_scale=3.0, x_scale=scale, max_nfev=200)
-        return replace(cam, **{nm: float(v) for nm, v in zip(names, sol.x, strict=True)})
-
-    for _ in range(2):
-        cam = refine(cam, inliers)
-        e = _err(cam, lla[:, 0], lla[:, 1], lla[:, 2], xy)
-        e[~good] = np.inf
-        inliers = e < thresh_px
-        if inliers.sum() < MIN_INLIERS:
-            return fail
-    cam = replace(cam, heading_deg=cam.heading_deg % 360.0)
-    return {"camera": cam, "inliers": inliers, "n_inliers": int(inliers.sum()),
-            "median_px": float(np.median(e[inliers])), "residuals_px": e}
-
 
 # --------------------------------------------------------------------------- one iteration
 
