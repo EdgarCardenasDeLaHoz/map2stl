@@ -263,7 +263,7 @@ is `city2stl/skyline/scripts/10_benchmark.py::score_report`. Score history is ke
 | GET | `/api/skyline/regions/{region}/reports` | Region reports for the Heights page: dir, version, title, mtime, n_buildings, tier_counts, index_url (newest version first); plus `next_report` |
 | GET | `/api/skyline/reports/{dir}/map` | Footprints with tier, height, panoramas and OSM tag for the map, plus tier colours and counts |
 | GET | `/api/skyline/estimate?region=` | Panoramas and cached vs paid Street View images: seeds plus auto points, floored at the newest report's panoramas (unverifiable ones count as paid); `basis`, `rough`, `basis_report`, `note`, month count, cap, `over_warn` (past 80 %) |
-| POST | `/api/skyline/runs` | Job `{region, allow_paid_fetches=false}`; cache-only unless the flag is set; 409 while another region runs; poll `GET /api/skyline/runs/{id}` (step 1-4, done/total, gpu) or cancel with `POST /api/jobs/{id}/cancel` (stops at the next stage boundary) |
+| POST | `/api/skyline/runs` | Job `{region, allow_paid_fetches=false}`; cache-only unless the flag is set; 409 while another region runs; poll `GET /api/skyline/runs/{id}` (step 1-4, done/total, gpu) or cancel with `POST /api/jobs/{id}/cancel` (stops at the next stage boundary). The finished job's `result` is `{report, summary, skipped_paid, cost}`; `cost` (2026-10-31) = `{paid_images, cached_hits, paid, cached, skipped_paid}` |
 
 Env overrides: `MAP2STL_REGION_REPORTS_DIR` (region reports root), `MAP2STL_GOOGLE_USAGE_FILE` (usage counter file).
 

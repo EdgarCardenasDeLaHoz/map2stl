@@ -1,73 +1,26 @@
-"""city2stl.skyline.region_config - shared skyline feature flags + palette.
+"""city2stl.skyline.region_config - shared skyline constants + palette.
 
 Split out of region_pdf.py (F-CLEAN14, 2026-06-07) so region_render and
-pano_registration can read the F-SKY env toggles without importing the
-orchestrator (which would be circular). region_pdf re-imports these.
+pano_registration can share them without importing the orchestrator (which
+would be circular). The feature flags moved to ``config.SkylineConfig``.
 """
 
 import os
 
-# F-SKY12: enable Depth Anything V2 verifier on each view. Off by default
-# while Phase A is validated. Set env var SKYLINE_CV_F_SKY12=1 to turn on.
-_F_SKY12_ENABLED = os.environ.get("SKYLINE_CV_F_SKY12", "0").strip().lower() in (
-    "1", "true", "yes", "on"
-)
-
-# F-SKY13: draw OSM coastline + 1 km consideration window on per-view minimap.
-# OSM is the primary coastline ground truth (see feedback memory
-# feedback_satellite_coastline_hsv_unreliable). Default ON; set
-# SKYLINE_CV_F_SKY13=0 to disable the overlay.
-_F_SKY13_ENABLED = os.environ.get("SKYLINE_CV_F_SKY13", "1").strip().lower() in (
-    "1", "true", "yes", "on"
-)
+# The F-SKY feature flags that lived here as import-time env reads are fields of
+# ``config.SkylineConfig`` since F-UNIFY Phase 2 (2026-10-31), read at call time through
+# ``config.current()``; the env vars (SKYLINE_CV_F_SKY1/5/11_1/12/13/13_SAT_BG,
+# SKYLINE_CV_PHASE_C) still override. What each one does:
+# - f_sky12 (default off): Depth Anything V2 verifier on each view.
+# - f_sky13 (on): OSM coastline + 1 km consideration window on the per-view minimap (OSM is
+#   the coastline ground truth; feedback_satellite_coastline_hsv_unreliable).
+# - phase_c (off): OSM-primary registration, OSM as the heading-sweep keypoint source.
+# - f_sky13_sat_bg (off): ESRI satellite image as the minimap background (one fetch per seed).
+# - f_sky5 (on since 2026-10-06): MobileSAM instance head that splits merged blobs with OSM
+#   centroid prompts; a no-op without MobileSAM or its checkpoint.
+# - f_sky11_1 (off): pano-recovered heading offset seeds the joint anchor optimizer when sharp.
+# - f_sky1 (on): floor-strip facade periodicity (one autocorrelation per building per view).
 _F_SKY13_RADIUS_M = 1000.0
-
-# F-SKY13 Phase C: OSM-primary registration — make OSM the source for the
-# heading-sweep keypoints (was satellite HSV). The sweep's peak then IS the
-# pano↔OSM IoU directly, no separate Phase B verifier step needed. Default
-# OFF until validated on Cartagena; opt in with SKYLINE_CV_PHASE_C=1.
-_PHASE_C_ENABLED = os.environ.get("SKYLINE_CV_PHASE_C", "0").strip().lower() in (
-    "1", "true", "yes", "on"
-)
-# Optional: also render the ESRI satellite image as the minimap background.
-# Costs one network fetch per seed on first run (then disk-cached). Off by
-# default; enable with SKYLINE_CV_F_SKY13_SAT_BG=1. Independent of the
-# F-SKY11.1 satellite HSV path — purely visual, no algorithmic role.
-_F_SKY13_SAT_BG_ENABLED = os.environ.get(
-    "SKYLINE_CV_F_SKY13_SAT_BG", "0"
-).strip().lower() in ("1", "true", "yes", "on")
-
-# F-SKY5: MobileSAM instance head — splits merged blobs using SAM point prompts
-# sourced from OSM centroids. Fires only on segments with ≥ 2 contained OSM
-# markers (the cases F-SKY2 gap-splitting does not resolve). Default ON since
-# 2026-10-06 (user: MobileSAM for all segmentation; the drone seeds use it through
-# ``building_instances``); SKYLINE_CV_F_SKY5=0 turns it off. Without MobileSAM or the
-# checkpoint at MOBILESAM_CHECKPOINT_PATH (default ~/.cache/mobile_sam/vit_t.pth) it is a no-op.
-_F_SKY5_ENABLED = os.environ.get("SKYLINE_CV_F_SKY5", "1").strip().lower() in (
-    "1", "true", "yes", "on"
-)
-
-# F-SKY11.1 Phase B: wire the pano-recovered heading offset into the joint
-# anchor optimizer as its seed when the peak is sharp (sigma ≤ 0.10, peak >
-# 0.40). Default OFF until validated on a second region (Miami). Set
-# SKYLINE_CV_F_SKY11_1=1 to opt in. Falls back gracefully when no coastline
-# is visible (flat peak → quality gate fails → coarse sweep runs as before).
-_F_SKY11_1_ENABLED = os.environ.get("SKYLINE_CV_F_SKY11_1", "0").strip().lower() in (
-    "1", "true", "yes", "on"
-)
-
-# F-SKY1: floor-strip facade periodicity. Detects the per-floor horizontal
-# banding in a building's mask region (1D autocorrelation on a row-mean
-# intensity profile), reports the dominant pixel period, and back-derives
-# floor count + an OSM-independent height/distance estimate. This is the
-# "striations ≈ 1 storey" signal — a distance/height cue that does NOT
-# depend on the depth model (so it sidesteps DA2's far-distance
-# saturation). Default ON now (was diagnostic-only); set
-# SKYLINE_CV_F_SKY1=0 to disable. Cost: one autocorrelation per building
-# per view.
-_F_SKY1_ENABLED = os.environ.get("SKYLINE_CV_F_SKY1", "1").strip().lower() in (
-    "1", "true", "yes", "on"
-)
 
 
 # Flickr REST API key for web skyline image seeds (F-WEB1).

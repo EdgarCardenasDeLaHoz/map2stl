@@ -12,9 +12,12 @@ region, the map of one report, the cost estimate of a run, and the run itself.
   marker) answers it. Paid fetches = images not cached. It leaves out the pitch-corrected
   re-fetch of a panorama and the screening thumbnails, and is unknown (``known=False``) for a
   region with no seeds yet (the run proposes them from OSM).
-* **Run** (``run_region``): ``city2stl.skyline.region_pdf.run_region_pdf_report`` in a job,
-  inside ``google_usage.cache_only()`` unless the caller allowed paid fetches, so nothing
-  Google bills can be sent without the flag. Cancel stops at the next step or panorama.
+* **Run** (``run_region``): ``city2stl.skyline.service.run_region`` in a job, with
+  ``SkylineConfig.cache_only`` set unless the caller allowed paid fetches (the service then runs
+  inside ``google_usage.cache_only()``), so nothing Google bills can be sent without the flag.
+  Cancel stops at the next step or panorama. The result carries the run's cost counters.
+* The report header comes from the report sidecar (``report_index.read_sidecar``) when the run
+  wrote one, else from ``heights.json``.
 """
 
 from __future__ import annotations
@@ -23,7 +26,6 @@ import json
 import re
 import threading
 import time
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,7 +74,8 @@ def region_key(name: str) -> str:
 
 
 def _header(heights: Path) -> dict | None:
-    """Tier counts and building count of a ``heights.json`` (cached by mtime)."""
+    """Tier counts and building count of a report: its sidecar, else its ``heights.json``
+    (cached by mtime)."""
     try:
         mtime = heights.stat().st_mtime
     except OSError:
@@ -82,6 +85,16 @@ def _header(heights: Path) -> dict | None:
         hit = _header_cache.get(key)
         if hit and hit[0] == mtime:
             return hit[1]
+    from city2stl.skyline.report_index import read_sidecar
+
+    side = read_sidecar(heights.parent)
+    if side is not None and isinstance(side.get("tier_counts"), dict):
+        head = {"n_buildings": int(side.get("n_buildings") or 0),
+                "tier_counts": side["tier_counts"],
+                "bbox_nsew": side.get("bbox_nsew"), "region": side.get("region")}
+        with _header_lock:
+            _header_cache[key] = (mtime, head)
+        return head
     try:
         data = json.loads(heights.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -346,11 +359,11 @@ def gpu_state(running: bool, step: int) -> str:
 def run_region(job, region: str, name: str, *, allow_paid: bool, runner=None) -> dict:
     """Run the region's pipeline into ``<reports root>/<name>/``; progress goes to ``job``.
 
-    ``runner`` replaces ``run_region_pdf_report`` (tests). Returns the job result; a cancel
-    ends the job as cancelled and returns ``{}``.
+    ``runner`` replaces the pipeline (``region_pdf._run_pipeline``; tests). Returns the job
+    result; a cancel ends the job as cancelled and returns ``{}``.
     """
-    if runner is None:
-        from city2stl.skyline.region_pdf import run_region_pdf_report as runner
+    from city2stl.skyline.config import SkylineConfig
+    from city2stl.skyline.service import run_region as _run
 
     def cb(label, done, total):
         if job.cancel_event.is_set():
@@ -370,11 +383,11 @@ def run_region(job, region: str, name: str, *, allow_paid: bool, runner=None) ->
 
     out_pdf = reports_root() / f"{name}.pdf"
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    config = SkylineConfig.build(region, overrides={"cache_only": not allow_paid})
     try:
-        with (nullcontext({}) if allow_paid else google_usage.cache_only()) as skipped:
-            summary = runner(region, out_pdf, skip_pdf=True, progress_cb=cb)
+        result = _run(region, config, cb, output_pdf=out_pdf, skip_pdf=True, pipeline=runner)
     except RunCancelled:
         job.finish("cancelled", "Cancelled")
         return {}
-    return {"report": name, "summary": summary,
-            "skipped_paid": dict(skipped)}
+    return {"report": name, "summary": result.summary,
+            "skipped_paid": result.cost["skipped_paid"], "cost": result.cost}

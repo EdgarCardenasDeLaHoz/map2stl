@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -63,28 +62,16 @@ from ._core.timing import _StepTimer
 from ._core.types import BuildingRecord
 from ._pano.orchestrator import _seed_multiview_registration
 from ._region_render._pages import _load_known_heights, _render_pdf
-from .region_config import _PHASE_C_ENABLED
+from .config import current as _cfg
 from .region_data import (
     _drop_buildings_in_water,
     _extract_high_rises,
     _load_osm_for_region,
     _load_region_bbox,
     _load_site_anchor_overrides,
-    _load_site_drive_pano_recovery_anchor,
     _load_site_elevated_seeds,
-    _load_site_max_plausible_height_m,
     _load_site_negative_seeds,
-    _load_site_ownership_flags,
-    _load_site_pano_only_pdf,
-    _load_site_render_pdf,
     _load_site_seed_urls,
-    _load_site_use_cadastre_band,
-    _load_site_use_commons_photos,
-    _load_site_use_cross_view_scoring,
-    _load_site_use_pano_coastline_recovery,
-    _load_site_use_satellite_footprints,
-    _load_site_use_satellite_heights,
-    _load_site_use_survey_heights,
     _osm_to_building_records,
 )
 from .region_types import SkylinePoint
@@ -323,6 +310,28 @@ def run_region_pdf_report(
     skip_pdf: bool = False,
     progress_cb=None,
 ) -> dict:
+    """The region run, as before F-UNIFY Phase 2: a thin wrapper over
+    :func:`city2stl.skyline.service.run_region` (config from the site file and env) that
+    returns its ``summary`` dict."""
+    from .service import run_region  # noqa: PLC0415
+    return run_region(
+        region_name, output_pdf=output_pdf, seed_urls=seed_urls, api_key=explicit_api_key,
+        trace=trace, skip_pdf=skip_pdf, progress_cb=progress_cb).summary
+
+
+def _run_pipeline(
+    region_name: str,
+    output_pdf: Path,
+    seed_urls: list[str] | None = None,
+    explicit_api_key: str | None = None,
+    *,
+    bbox=None,
+    trace=None,
+    skip_pdf: bool = False,
+    progress_cb=None,
+) -> dict:
+    """The region pipeline. Switches come from the active ``SkylineConfig``
+    (``config.current()``, set by ``service.run_region``); ``bbox`` None loads the region's."""
     # Wall-clock timing per pipeline step, surfaced in the HTML report so
     # contributors can see where a run spends its time without re-instrumenting
     # by hand. ``timer`` accumulates sub-steps (level=1) across loop iterations
@@ -332,8 +341,10 @@ def run_region_pdf_report(
     timer = _StepTimer(progress_cb)
     _timed = timer.timed
 
+    cfg = _cfg()
     api_key = _resolve_api_key(explicit_api_key)
-    bbox = _load_region_bbox(region_name)
+    if bbox is None:
+        bbox = _load_region_bbox(region_name)
     with _timed("OSM fetch"):
         osm_data, osm_source = _load_osm_for_region(bbox)
 
@@ -343,7 +354,7 @@ def run_region_pdf_report(
     # F-SKY8: optionally enrich with Microsoft Buildings (satellite-derived)
     # polygons. Gated on per-site flag because the first run downloads
     # ~10–50 MB per quadkey tile; opt-in keeps default behaviour unchanged.
-    if _load_site_use_satellite_footprints(region_name):
+    if cfg.use_satellite_footprints:
         from .satellite_footprints import (
             fetch_microsoft_buildings_for_bbox,
             merge_satellite_into_osm,
@@ -371,7 +382,7 @@ def run_region_pdf_report(
     # the per-view matcher closure. Failures degrade gracefully — the
     # matcher just runs without the cross-view rerank.
     cross_view_state: dict | None = None
-    if _load_site_use_cross_view_scoring(region_name):
+    if cfg.use_cross_view_scoring:
         try:
             from .satellite_image import fetch_region_satellite
             with _timed("F-SKY10 cross-view satellite image"):
@@ -395,7 +406,7 @@ def run_region_pdf_report(
     # joint anchor optimizer. Reuses cross_view_state's satellite image
     # when present to avoid a duplicate fetch.
     pano_recovery_state: dict | None = None
-    if _load_site_use_pano_coastline_recovery(region_name):
+    if cfg.use_pano_coastline_recovery:
         _pano_precompute_t0 = time.perf_counter()
         try:
             # OSM coastline + water polygons — extracted at region scope
@@ -418,7 +429,7 @@ def run_region_pdf_report(
             # F-SKY13 Phase C: skip the satellite HSV path entirely.
             # OSM is the trusted keypoint source; the satellite mask
             # provides no information we need when Phase C is on.
-            if _PHASE_C_ENABLED:
+            if cfg.phase_c:
                 if not osm_coastline_features:
                     logger.info("[pano_recovery] Phase C: no OSM coastline "
                                 "for this region — recovery skipped")
@@ -435,7 +446,7 @@ def run_region_pdf_report(
                         "osm_water_features": osm_water_features,
                         "osm_green_features": osm_green_features,
                         "drive_anchor": bool(
-                            _load_site_drive_pano_recovery_anchor(region_name)),
+                            cfg.drive_pano_recovery_anchor),
                     }
                     logger.info(f"[pano_recovery] Phase C ACTIVE  "
                                 f"osm_coastline_features={len(osm_coastline_features)} "
@@ -469,7 +480,7 @@ def run_region_pdf_report(
                         "osm_water_features": osm_water_features,
                         "osm_green_features": osm_green_features,
                         "drive_anchor": bool(
-                            _load_site_drive_pano_recovery_anchor(region_name)),
+                            cfg.drive_pano_recovery_anchor),
                     }
                     logger.info(f"[pano_recovery] region satellite water "
                                 f"{water_frac:.1%} — keypoints will be computed "
@@ -516,7 +527,7 @@ def run_region_pdf_report(
             (bbox.north + bbox.south) * 0.5,
             (bbox.east + bbox.west) * 0.5,
         )
-        if _load_site_use_commons_photos(region_name):
+        if cfg.use_commons_photos:
             from .web_image_seed import commons_skyline_seeds  # noqa: PLC0415
             _web_out, web_image_cache = commons_skyline_seeds(
                 city_name=region_name,
@@ -616,14 +627,12 @@ def run_region_pdf_report(
                     f"through pipeline in addition to {len(seeds)} user seeds")
         seeds = list(seeds) + additional_seeds
 
-    max_plausible_height_m = _load_site_max_plausible_height_m(region_name)
+    max_plausible_height_m = cfg.max_plausible_height_m
     if anchor_overrides:
         logger.info(f"[anchor_overrides] {anchor_overrides}")
     if negative_seeds:
         logger.info(f"[negative_seeds] {sorted(negative_seeds)}")
     logger.info(f"[max_plausible_height_m] {max_plausible_height_m:.0f}")
-    from ._pano import ownership as _own  # noqa: PLC0415
-    _own.set_site_flags(*_load_site_ownership_flags(region_name))
     elevated_state = None
     if elevated_seeds:
         logger.info(f"[elevated_seeds] {sorted(elevated_seeds)}")
@@ -633,7 +642,7 @@ def run_region_pdf_report(
     # F-SKY26 step 7: offline satellite readings (site flag use_satellite_heights); the run
     # only reads runs/satellite/<region>/readings.json
     satellite = None
-    if _load_site_use_satellite_heights(region_name):
+    if cfg.use_satellite_heights:
         from .satellite_fusion import load_region  # noqa: PLC0415
         satellite = load_region(region_name, building_records) or None
         if satellite and elevated_state is not None:
@@ -643,11 +652,11 @@ def run_region_pdf_report(
     # 2026-10-10 (site flag use_cadastre_band): the cadastre's floor count bounds a single image
     # reading in place of the 2x rule; the cadastre never publishes a height
     cadastre_band = None
-    if _load_site_use_cadastre_band(region_name):
+    if cfg.cadastre_band:
         from .cadastre_heights import load_band  # noqa: PLC0415
         cadastre_band = load_band(region_name, building_records) or None
     # T21: the screening thumbnails are read only by the PDF's screening page.
-    if skip_pdf or not _load_site_render_pdf(region_name):
+    if skip_pdf or not cfg.render_pdf:
         for _row in screened:
             if isinstance(_row, dict):
                 _row["image"] = None
@@ -698,7 +707,7 @@ def run_region_pdf_report(
     survey = None
     from . import survey_publish  # noqa: PLC0415
     survey_publish.set_active(None)
-    if survey_publish.enabled(_load_site_use_survey_heights(region_name)):
+    if survey_publish.enabled():
         survey = survey_publish.build_overlay(
             region_name, building_heights, building_records, osm_data,
             drone_seeds=set(elevated_seeds or ()))
@@ -712,7 +721,7 @@ def run_region_pdf_report(
     # Load surveyed ground-truth heights from sites/<region>.json if present.
     known_heights = _load_known_heights(region_name, building_records)
 
-    if not skip_pdf and _load_site_render_pdf(region_name):
+    if not skip_pdf and cfg.render_pdf:
         with _timed("Render PDF"):
             _render_pdf(
                 output_pdf,
@@ -727,7 +736,7 @@ def run_region_pdf_report(
                 building_records=building_records,
                 known_heights=known_heights or None,
                 pano_results=pano_results,
-                pano_only=_load_site_pano_only_pdf(region_name),
+                pano_only=cfg.pano_only_pdf,
             )
 
     # F-SKY15: parallel HTML diagnostic report. Default ON because the
@@ -735,9 +744,7 @@ def run_region_pdf_report(
     # set SKYLINE_CV_HTML_REPORT=0 to disable. Failures are swallowed
     # rather than allowed to break the PDF path — HTML is a diagnostic
     # tool, not the canonical output.
-    if os.environ.get("SKYLINE_CV_HTML_REPORT", "1").strip().lower() in (
-        "1", "true", "yes", "on"
-    ):
+    if cfg.html_report:
         try:
             from .html_report import write_region_report  # noqa: PLC0415
             html_out_dir = output_pdf.parent / output_pdf.stem

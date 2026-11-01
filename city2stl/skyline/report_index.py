@@ -1,14 +1,19 @@
-"""Parse the per-seed statistics back out of a rendered region report ``index.html``.
+"""The per-seed statistics of a rendered region report: its JSON sidecar, or ``index.html``.
 
-The pano summary table written by the region report is the only machine-readable
-copy of these numbers (no sidecar carries them), so both readers — the static
-landing page (``scripts/build_landing_page.py``) and the app's ``/api/reports/index``
-— parse it with this one definition of the row format.
+Since F-UNIFY Phase 2 (2026-10-31) ``city2stl.skyline.service.run_region`` writes
+``report_summary.json`` (:data:`SIDECAR`) beside ``heights.json``: summary, tier counts, the pano
+summary rows and the stat cards. The readers (the static landing page
+``scripts/build_landing_page.py``, the app's ``/api/reports/index`` and the Heights page) read it
+through :func:`read_sidecar` and fall back to parsing ``index.html`` (:func:`parse_pano_rows`,
+:func:`stat`) for older reports that have none. The sidecar's rows are themselves parsed from the
+page just written, so both paths give the same numbers and there is one row format.
 """
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 #: Regions whose seeds were hand-picked; other seeds are "seed" / "auto" / "web".
 CURATED_REGIONS = {"cartagena", "chicago", "miami"}
@@ -83,3 +88,35 @@ def parse_pano_rows(txt: str) -> list[dict]:
             "quality_label": qlabel.strip(),
         })
     return rows
+
+
+#: The sidecar file name in a report folder, and its schema version.
+SIDECAR = "report_summary.json"
+SCHEMA = 1
+
+
+def sidecar_stats(txt: str) -> dict:
+    """The stat cards of ``index.html`` as the sidecar stores them."""
+    return {"seeds": stat(txt, "seeds"), "aggregated_buildings": stat(txt, "aggregated buildings")}
+
+
+def write_sidecar(report_dir: Path, doc: dict) -> Path:
+    """Write ``doc`` (``schema`` added) to ``<report_dir>/report_summary.json``."""
+    path = Path(report_dir) / SIDECAR
+    path.write_text(json.dumps({"schema": SCHEMA, **doc}, indent=2), encoding="utf-8")
+    return path
+
+
+def read_sidecar(report_dir: Path) -> dict | None:
+    """The report's sidecar, or None: absent (a report from before 2026-10-31), unreadable, of
+    another schema, or older than its ``heights.json`` (a later run rewrote the heights without
+    one). The caller then parses ``index.html`` / ``heights.json`` as before."""
+    path = Path(report_dir) / SIDECAR
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        heights = Path(report_dir) / "heights.json"
+        if heights.is_file() and heights.stat().st_mtime > path.stat().st_mtime:
+            return None
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) and doc.get("schema") == SCHEMA else None

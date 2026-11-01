@@ -13,7 +13,6 @@ stay under ``runs/`` and are not routed through here. The stage cache has its ow
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 ENV = "SKYLINE_LOCAL_DIR"
@@ -22,5 +21,6 @@ RUNS = Path(__file__).resolve().parent / "runs"
 
 def local_dir(name: str) -> Path:
     """The folder for the single-use cache ``name`` (not created)."""
-    root = os.environ.get(ENV, "").strip()
+    from .config import current  # noqa: PLC0415
+    root = current().local_dir
     return (Path(root) if root else RUNS) / name

@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
@@ -23,9 +22,7 @@ from .._core.segmentation import (
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
 from .._region_render._draw import _negative_seed_views
-from ..region_config import (
-    _F_SKY1_ENABLED,
-)
+from ..config import current as _cfg
 from ..region_data import _fetch_elevations
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 from ..streetview_io import _meta_location, _streetview_image, _streetview_metadata
@@ -49,13 +46,10 @@ logger = logging.getLogger(__name__)
 #: Drone seeds captured at 30 deg in two pitch rows (``elevated.capture_sphere_pano``, 24
 #: images per seed instead of 12) for ~2.5x the angular resolution. Opt-in (=1) until the
 #: pixel thresholds of measure_footprints are scaled for it (2026-10-06: seed_1 got worse).
-_ELEVATED_HIRES_ENABLED = os.environ.get("SKYLINE_ELEVATED_HIRES", "0").strip().lower() in (
-    "1", "true", "yes", "on")
 #: Headings of that capture: the spin headings (12 at 30 deg) unless set to a count N
 #: (headings i x 360 / N). The truth-city spheres (San Juan, Fort Lauderdale, Honolulu, Sunny
 #: Isles; 2026-10-10) are cached at 15 headings: a region run reuses them without a fetch with
 #: SKYLINE_ELEVATED_HIRES_HEADINGS=15 (``capture_sphere_pano`` gives up on the first miss).
-_ELEVATED_HIRES_HEADINGS = int(os.environ.get("SKYLINE_ELEVATED_HIRES_HEADINGS", "0") or 0)
 
 #: Pano screen, second measure (T35): a pano whose best view has a building meeting the sky in
 #: at least this share of its columns passes even below the building-coverage cut. A far skyline
@@ -306,11 +300,11 @@ def _seed_multiview_registration(
         if elevated_seeds and seed.name in elevated_seeds and elevated_state:
             with _phase("elevated seed (F-DET6 footprint-first)"):
                 try:
-                    hi_headings = (tuple(i * 360.0 / _ELEVATED_HIRES_HEADINGS
-                                         for i in range(_ELEVATED_HIRES_HEADINGS))
-                                   if _ELEVATED_HIRES_HEADINGS > 0 else spin_headings)
+                    _n_hi = _cfg().elevated_hires_headings
+                    hi_headings = (tuple(i * 360.0 / _n_hi for i in range(_n_hi))
+                                   if _n_hi > 0 else spin_headings)
                     hi = (capture_sphere_pano(seed, api_key, hi_headings, is_photosphere)
-                          if _ELEVATED_HIRES_ENABLED else None)
+                          if _cfg().elevated_hires else None)
                     got = measure_elevated_seed(seed, prefetch, effective_pitch, spin_step_deg,
                                                 seed_buildings, elevated_state, pano=hi)
                 except Exception as exc:          # never lose the run to the new path
@@ -512,7 +506,7 @@ def _seed_multiview_registration(
     # gives a feel for its reliability before it feeds the aggregate.
     if web_image_cache is not None:
         web_image_cache.clear()                 # T21: every web seed is done
-    if _F_SKY1_ENABLED and all_estimates:
+    if _cfg().f_sky1 and all_estimates:
         fp = [e for e in all_estimates
               if getattr(e, "floor_period_px", None) is not None]
         if fp:

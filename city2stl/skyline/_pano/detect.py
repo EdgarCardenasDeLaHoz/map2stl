@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -30,11 +29,7 @@ from .._core.skyline import (
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
 from .._region_render._draw import overlay_spec
-from ..region_config import (
-    _F_SKY1_ENABLED,
-    _F_SKY5_ENABLED,
-    _F_SKY12_ENABLED,
-)
+from ..config import current as _cfg
 from ..region_data import _bearing_deg, _distance_m
 from ..region_types import SeedViewRegistration, SkylinePoint, StitchedPanoResult
 
@@ -128,9 +123,9 @@ def _register_views(
                     camera_elev_m=float(seed_elev),
                     trace=trace,
                     max_plausible_height_m=max_plausible_height_m,
-                    compute_floor_period=_F_SKY1_ENABLED,
+                    compute_floor_period=_cfg().f_sky1,
                 )
-            if _F_SKY12_ENABLED and est_for_view:
+            if _cfg().f_sky12 and est_for_view:
                 # camera_ground - building_ground, per building. Zero unless
                 # per-building terrain was actually fetched; the depth path
                 # then matches the geometric path's own datum assumption.
@@ -183,7 +178,7 @@ def _register_views(
                     segments, all_proj_list, building_mask=_bmask)
             # F-SKY5: SAM instance head for segments F-SKY2 did not already
             # split (requires MobileSAM installed + checkpoint present).
-            if _F_SKY5_ENABLED:
+            if _cfg().f_sky5:
                 with _sub("Stage 8: osm_sam_instance_silhouettes (F-SKY5)"):
                     segments = osm_sam_instance_silhouettes(
                         image, segments, all_proj_list, building_mask=_bmask)
@@ -771,10 +766,7 @@ def _multires_sam_instances(
         from mobile_sam import SamPredictor, sam_model_registry  # noqa: PLC0415
     except Exception:
         return [], 0.0
-    ckpt = os.environ.get(
-        "MOBILESAM_CHECKPOINT_PATH",
-        str(Path.home() / ".cache" / "mobile_sam" / "vit_t.pth"),
-    )
+    ckpt = _cfg().mobilesam_checkpoint
     if not Path(ckpt).is_file():
         return [], 0.0
 
@@ -1397,8 +1389,7 @@ def _build_and_detect_pano(
                 f"img={pano_img.shape[1]} mask={pano_bmask.shape[1]}")
         # F-SKY19 multires refinement (opt-in).
         sam_instances: list[dict] = []
-        if os.environ.get("SKYLINE_CV_MULTIRES", "0").strip() in (
-                "1", "true", "yes", "on"):
+        if _cfg().multires:
             refined, clusters, band_y, fine_t = _multires_pano_refine(
                 pano_img, pano_bmask, pano_wmask)
             logger.info(f"[multires] seed={seed.name} clusters={len(clusters)} "
@@ -1411,7 +1402,7 @@ def _build_and_detect_pano(
             # ``MAX_PROMPTS_PER_CLUSTER`` nearest-by-distance candidates
             # per cluster — without this, a 3000-building region produces
             # 200+ s of SAM inference (run validated this empirically).
-            if _F_SKY5_ENABLED and clusters:
+            if _cfg().f_sky5 and clusters:
                 MAX_PROMPTS_PER_CLUSTER = 15
                 _pano_projs_for_sam = project_buildings_to_pano(
                     seed_buildings, seed.lat, seed.lon, pano_headings)

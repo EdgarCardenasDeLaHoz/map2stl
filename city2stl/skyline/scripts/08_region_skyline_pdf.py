@@ -51,7 +51,8 @@ except RuntimeError:
 import argparse  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-from city2stl.skyline.region_pdf import run_region_pdf_report  # noqa: E402
+from city2stl.skyline.config import SkylineConfig  # noqa: E402
+from city2stl.skyline.service import run_region  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -76,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Google Maps API key (optional if GOOGLE_MAPS_API_KEY env var is set)",
     )
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Send no paid Google request: answer from the caches, count what was skipped",
+    )
     return parser
 
 
@@ -88,13 +94,15 @@ def main() -> int:
     from city2stl.resources import wait_for_ram
 
     wait_for_ram()                              # a region run is a heavy job (CLAUDE.md)
-    result = run_region_pdf_report(
-        region_name=args.region,
+    config = SkylineConfig.build(args.region, overrides={"cache_only": args.cache_only})
+    result = run_region(
+        args.region, config,
         output_pdf=out,
         seed_urls=list(args.seed_url),
-        explicit_api_key=args.api_key,
+        api_key=args.api_key,
     )
-    print(result)
+    print(result.summary)
+    print(f"cost: {result.cost}")
     return 0
 
 

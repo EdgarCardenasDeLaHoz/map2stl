@@ -78,6 +78,18 @@ and the registration tools feed building heights into the city model automatical
 
 ## Phase 2: skyline package as a service
 
+**Progress (2026-10-31, part A done, uncommitted on branch `p2-service`):**
+- Done: `city2stl/skyline/config.py::SkylineConfig` (site < env < overrides; `ENV` holds the
+  env inventory), `service.py::run_region` -> `RegionResult` with cost counters
+  (`google_usage.tally` / `note_cached`), the `report_summary.json` sidecar read by
+  `report_index.read_sidecar` (fallback to `index.html` for older reports). `region_pdf`,
+  script 08 and the Heights page job are wrappers. Decision: architecture.md 2026-10-31.
+- Proof: madrid_cuatro_torres run offline before and after; the heights rows match (see the
+  decision entry).
+- Left for part B: the shared report renderer, the file splits, and moving the import-time
+  `local_dir()` paths (`streetview_io._SV_IMAGE_CACHE_DIR` and the like) to call time so a
+  per-request `local_dir` override reaches them.
+
 - **Config.** One `SkylineConfig` dataclass, built from site JSON + env + request, replaces
   the scattered `os.environ` reads. Env vars stay as overrides.
 - **Library entry.** `city2stl.skyline.run_region(bbox | region, config, progress_cb) ->

@@ -215,16 +215,18 @@ def test_site_flags_default_and_env_override(monkeypatch):
     from city2stl.skyline._pano import ownership as o
     monkeypatch.delenv("SKYLINE_OWNERSHIP", raising=False)
     monkeypatch.delenv("SKYLINE_CADASTRE_OCCLUDERS", raising=False)
-    try:
-        o.set_site_flags(True, True)
+    from city2stl.skyline import config as c
+    site = {"use_ownership": True, "use_cadastre_occluders": True}
+    with c.use(c.SkylineConfig.build(None, site=site)):
         assert o.enabled() and o.cadastre_enabled()
-        monkeypatch.setenv("SKYLINE_OWNERSHIP", "0")
+    monkeypatch.setenv("SKYLINE_OWNERSHIP", "0")
+    with c.use(c.SkylineConfig.build(None, site=site)):
         assert not o.enabled() and o.cadastre_enabled()
-        o.set_site_flags(None, None)
-        monkeypatch.delenv("SKYLINE_OWNERSHIP")
-        assert not o.enabled()
-    finally:
-        o.set_site_flags(None, None)
+    monkeypatch.setenv("SKYLINE_OWNERSHIP", "")             # empty keeps the site value
+    with c.use(c.SkylineConfig.build(None, site=site)):
+        assert o.enabled()
+    monkeypatch.delenv("SKYLINE_OWNERSHIP")
+    assert o.enabled() is o.OWNERSHIP                       # outside a run: defaults + env
 
 
 def test_cartagena_site_flags():

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections import OrderedDict as _OrderedDict
 from pathlib import Path
 
@@ -38,10 +37,8 @@ def _segformer_model_id() -> str:
     call downloads the weights to HuggingFace's local cache; subsequent
     runs reuse them.
     """
-    size = os.environ.get("SKYLINE_CV_SEGFORMER_SIZE", "b3").strip().lower()
-    if size not in {"b0", "b1", "b2", "b3", "b4", "b5"}:
-        size = "b3"
-    return f"nvidia/segformer-{size}-finetuned-ade-512-512"
+    from ..config import current  # noqa: PLC0415
+    return f"nvidia/segformer-{current().segformer_size}-finetuned-ade-512-512"
 
 def _segformer_input_size() -> int:
     """Resolve the SegFormer processor input resolution (square).
@@ -54,12 +51,8 @@ def _segformer_input_size() -> int:
     Default 512 (the size the model was finetuned at). Override with
     ``SKYLINE_CV_SEGFORMER_INPUT_SIZE`` (integer ≥ 128).
     """
-    raw = os.environ.get("SKYLINE_CV_SEGFORMER_INPUT_SIZE", "512").strip()
-    try:
-        n = int(raw)
-    except ValueError:
-        return 512
-    return max(128, n)
+    from ..config import current  # noqa: PLC0415
+    return current().segformer_input_size
 
 _SEGFORMER_MODEL_ID: str = _segformer_model_id()
 
@@ -148,7 +141,8 @@ def _ensure_segformer() -> bool:
             print(f"[segformer] failed to set input size to {_input_n}: {_e_size}")
         # Device selection: respect the override env var, otherwise pick CUDA
         # if it's available, falling back to CPU.
-        override = os.environ.get("SKYLINE_CV_SEGFORMER_DEVICE", "").strip().lower()
+        from ..config import current  # noqa: PLC0415
+        override = current().segformer_device
         if override:
             _segformer_device = override
         elif torch.cuda.is_available():
@@ -185,10 +179,8 @@ def _ensure_mobilesam() -> bool:
     if _MOBILESAM_LOADED:
         return _MOBILESAM_OK
     _MOBILESAM_LOADED = True
-    ckpt = os.environ.get(
-        "MOBILESAM_CHECKPOINT_PATH",
-        str(Path.home() / ".cache" / "mobile_sam" / "vit_t.pth"),
-    )
+    from ..config import current  # noqa: PLC0415
+    ckpt = current().mobilesam_checkpoint
     try:
         from mobile_sam import SamPredictor, sam_model_registry  # noqa: PLC0415
         if not Path(ckpt).is_file():
@@ -332,12 +324,9 @@ def _segformer_batch_size() -> int:
     and 5.5 GB at batch 12, which spills into shared memory and runs 9x slower
     (0.20 -> 1.82 s/image); b0 fits batch 8 in 1.3 GB.
     """
-    raw = os.environ.get("SKYLINE_CV_SEGFORMER_BATCH", "").strip()
-    if raw:
-        try:
-            return max(1, int(raw))
-        except ValueError:
-            pass
+    from ..config import current  # noqa: PLC0415
+    if current().segformer_batch is not None:
+        return current().segformer_batch
     if _segformer_device == "cuda":
         size = _SEGFORMER_MODEL_ID.split("segformer-")[-1][:2]
         return _CUDA_BATCH.get(size, 4)

@@ -19,6 +19,10 @@ active :func:`paid_allowed` is False, and the send points skip the request and c
 :func:`note_blocked` instead. It is per job: a ``ContextVar``, so a cache-only run does not block
 a paid job running at the same time (and the reverse). Worker threads do not inherit a
 context: submit their work through :func:`bind` (``pool.map(bind(fn), ...)``).
+
+``tally()`` counts, per job, what the run spent and what it got from the cache: :func:`record`
+adds to ``paid`` and the cache-hit points call :func:`note_cached` (F-UNIFY Phase 2, the cost
+counters of ``city2stl.skyline.run_region``). It is a ``ContextVar`` too.
 """
 
 from __future__ import annotations
@@ -48,6 +52,9 @@ _state_lock = threading.Lock()
 _scope: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "google_usage_scope", default=None)
 _blocked: dict[str, int] = {}
+#: The active per-job tally (``{"paid": {kind: n}, "cached": {kind: n}}``), or None.
+_tally: contextvars.ContextVar[dict[str, dict[str, int]] | None] = contextvars.ContextVar(
+    "google_usage_tally", default=None)
 
 
 def usage_path() -> Path:
@@ -75,6 +82,7 @@ def record(kind: str, n: int = 1, *, month: str | None = None) -> int:
     """
     if kind not in CAPS:
         raise ValueError(f"unknown Google usage kind {kind!r}")
+    _add_tally("paid", kind, n)
     month = month or current_month()
     path = usage_path()
     try:
@@ -123,19 +131,48 @@ def paid_allowed(kind: str | None = None) -> bool:  # noqa: ARG001 - kind reserv
 
 
 def bind(fn):
-    """``fn`` that runs with the caller's cache-only scope, for pool worker threads (a thread
-    does not inherit contextvars). Call it in the submitting thread: ``pool.map(bind(fn), xs)``."""
-    scope = _scope.get()
+    """``fn`` that runs in the caller's context (its cache-only scope, tally and any other
+    ``ContextVar``, e.g. the active ``SkylineConfig``), for pool worker threads (a thread does not
+    inherit contextvars). Call it in the submitting thread: ``pool.map(bind(fn), xs)``.
+
+    Each call runs in its own copy of the captured context (one context cannot be entered by two
+    threads at once); the scope and tally dicts are shared by reference, so counts add up."""
+    ctx = contextvars.copy_context()
 
     @functools.wraps(fn)
     def run(*args, **kwargs):
-        token = _scope.set(scope)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            _scope.reset(token)
+        return ctx.copy().run(fn, *args, **kwargs)
 
     return run
+
+
+@contextmanager
+def tally():
+    """Count this job's paid requests and cache hits. Yields ``{"paid": {kind: n}, "cached":
+    {kind: n}}``, filled while the block runs. Nested uses share the outer tally."""
+    t = _tally.get()
+    token = None
+    if t is None:
+        t = {"paid": {}, "cached": {}}
+        token = _tally.set(t)
+    try:
+        yield t
+    finally:
+        if token is not None:
+            _tally.reset(token)
+
+
+def _add_tally(bucket: str, kind: str, n: int) -> None:
+    t = _tally.get()
+    if t is not None:
+        with _state_lock:
+            t[bucket][kind] = t[bucket].get(kind, 0) + int(n)
+
+
+def note_cached(kind: str, n: int = 1) -> None:
+    """A fetch point answered from its cache (an image or a negative marker) instead of
+    sending a paid request. Counted only inside :func:`tally`."""
+    _add_tally("cached", kind, n)
 
 
 def note_blocked(kind: str, n: int = 1) -> None:

@@ -1695,13 +1695,9 @@ def write_region_report(
     for pr in (pano_results or []):
         pano_by_seed[getattr(pr, "seed_name", "")] = pr
 
-    import os as _os  # noqa: PLC0415
-    _depth_enabled = _os.environ.get(
-        "SKYLINE_CV_HTML_DEPTH", "1").strip().lower() in (
-            "1", "true", "yes", "on")
-    _pano_layered = _os.environ.get(
-        "SKYLINE_CV_PANO_LAYERED", "1").strip().lower() in (
-            "1", "true", "yes", "on")
+    from .config import current as _cfg  # noqa: PLC0415
+    _depth_enabled = _cfg().html_depth
+    _pano_layered = _cfg().pano_layered
 
     for seed_name, sv_list in views_by_seed.items():
         primary = sv_list[0]
@@ -1837,10 +1833,7 @@ def write_region_report(
         # Gate it behind an env var so the default report ships fast and
         # users can opt in for a deeper inspection. The reconstruction
         # subtab also requires depth, so both share the same gate.
-        import os as _os  # noqa: PLC0415
-        _depth_enabled = _os.environ.get(
-            "SKYLINE_CV_HTML_DEPTH", "1").strip().lower() in (
-                "1", "true", "yes", "on")
+        _depth_enabled = _cfg().html_depth
         for i, vsv in enumerate(sv_list):
             view_png = views_dir / f"{slug}_view_{i}.png"
             if _save_view_image_png(view_png, vsv):

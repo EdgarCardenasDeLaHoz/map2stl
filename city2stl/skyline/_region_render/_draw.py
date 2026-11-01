@@ -10,10 +10,9 @@ import numpy as np
 
 from geo2stl.geo import M_PER_DEG_LAT, m_per_deg_lon
 
+from ..config import current as _cfg
 from ..region_config import (
-    _F_SKY13_ENABLED,
     _F_SKY13_RADIUS_M,
-    _F_SKY13_SAT_BG_ENABLED,
     _SEGMENT_PALETTE,
 )
 from ..region_data import _feature_rings
@@ -687,7 +686,7 @@ def _draw_view_minimap(
     # coastline_registration.py is unreliable — see feedback memory). Drawn
     # underneath the camera marker but on top of the building polygons, so
     # the user can verify pano↔OSM coastline agreement visually.
-    if _F_SKY13_ENABLED:
+    if _cfg().f_sky13:
         _draw_osm_coastline_overlay(
             ax,
             seed_lon=seed_lon,
@@ -697,7 +696,7 @@ def _draw_view_minimap(
             osm_data=osm_data,
             radius_m=_F_SKY13_RADIUS_M,
             satellite_bg=(
-                _F_SKY13_SAT_BG_ENABLED if satellite_bg is None
+                _cfg().f_sky13_sat_bg if satellite_bg is None
                 else bool(satellite_bg)),
             pano_projected_coastline=pano_projected_coastline,
             pano_projected_vegetation=pano_projected_vegetation,

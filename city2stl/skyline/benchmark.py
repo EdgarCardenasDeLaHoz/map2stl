@@ -531,12 +531,11 @@ TRUTH_WORKERS = 4
 
 def truth_workers(workers: int | None = None) -> int:
     """``workers`` if given, else env ``MAP2STL_TRUTH_WORKERS``, else ``TRUTH_WORKERS``; >= 1."""
-    import os
+    from .config import current  # noqa: PLC0415
 
     if workers is None:
-        try:
-            workers = int(os.environ.get("MAP2STL_TRUTH_WORKERS", ""))
-        except ValueError:
+        workers = current().truth_workers
+        if workers is None:
             workers = TRUTH_WORKERS
     return max(1, int(workers))
 

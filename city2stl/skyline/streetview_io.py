@@ -21,6 +21,8 @@ import cv2
 import numpy as np
 import requests
 
+from geo2stl import google_usage
+
 from ._core.util import _load_env_file_if_present
 from .local_dirs import local_dir
 
@@ -222,8 +224,8 @@ def _default_streetview_image_size() -> tuple[int, int]:
     """
     if _streetview_signing_enabled():
         return 1280, 720
-    if os.environ.get("SKYLINE_SV_TALL_FRAME", "").strip().lower() in (
-            "1", "true", "yes", "on"):
+    from .config import current  # noqa: PLC0415
+    if current().sv_tall_frame:
         return 640, 640
     return 960, 540
 
@@ -390,9 +392,11 @@ def _streetview_image(
         if cache_path.exists():
             img = cv2.imread(str(cache_path), cv2.IMREAD_COLOR)
             if img is not None:
+                google_usage.note_cached("streetview_image")
                 return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if _negative_cache_hit(cache_key):
+            google_usage.note_cached("streetview_image")
             return None
 
         url = f"{STREETVIEW_IMAGE_URL}?{urlencode(params)}"

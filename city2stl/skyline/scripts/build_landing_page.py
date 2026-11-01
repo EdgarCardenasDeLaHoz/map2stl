@@ -1,8 +1,9 @@
 """build_landing_page.py — master landing page linking every region report.
 
-One row per SEED/PANO across all regions. Parses each region's pano
-summary table (already rendered in index.html) so no pipeline re-run is
-needed — just re-run this script after any batch of city runs.
+One row per SEED/PANO across all regions. Reads each region's report
+sidecar (``report_summary.json``, ``report_index.read_sidecar``), or for an
+older report parses the pano summary table rendered in index.html, so no
+pipeline re-run is needed — just re-run this script after any batch of city runs.
 
 Each row has a three-state feedback toggle (Unreviewed / Good / Bad)
 stored in browser localStorage, keyed by "region:seed_name".
@@ -23,6 +24,7 @@ from pathlib import Path
 from city2stl.skyline.report_index import (
     CURATED_REGIONS,
     parse_pano_rows,
+    read_sidecar,
     seed_source,
     stat,
 )
@@ -35,9 +37,10 @@ _BACKLINK = ('<nav class="breadcrumb" style="font-size:0.9em;margin-bottom:1em;"
 
 # --- parsers ------------------------------------------------------------------
 
-def _parse_pano_rows(txt: str, region: str, report_dir: Path
-                     ) -> list[dict]:
-    """Extract per-pano stats from a region's rendered index.html."""
+def _parse_pano_rows(txt: str, region: str, report_dir: Path,
+                     parsed: list[dict] | None = None) -> list[dict]:
+    """Per-pano stats of a region: ``parsed`` (the sidecar's rows), else parsed from its
+    rendered index.html."""
     return [dict(
         region=region,
         seed=r["seed"],
@@ -49,7 +52,7 @@ def _parse_pano_rows(txt: str, region: str, report_dir: Path
         ncov=r["coverage"],
         qual=r["quality"],
         qlabel=r["quality_label"],
-    ) for r in parse_pano_rows(txt)]
+    ) for r in (parsed if parsed is not None else parse_pano_rows(txt))]
 
 
 def _web_images(report_dir: Path) -> list[Path]:
@@ -140,8 +143,14 @@ def main() -> None:
             idx.write_text(txt, encoding="utf-8")
 
         region = idx.parent.name.replace("_skyline_report", "")
-        total_buildings += stat(txt, "aggregated buildings")
-        all_rows.extend(_parse_pano_rows(txt, region, idx.parent))
+        side = read_sidecar(idx.parent)
+        if side is not None and isinstance(side.get("stats"), dict) \
+                and isinstance(side.get("panoramas"), list):
+            total_buildings += int(side["stats"].get("aggregated_buildings") or 0)
+            all_rows.extend(_parse_pano_rows(txt, region, idx.parent, side["panoramas"]))
+        else:
+            total_buildings += stat(txt, "aggregated buildings")
+            all_rows.extend(_parse_pano_rows(txt, region, idx.parent))
 
         for img in _web_images(idx.parent):
             web_gallery.append((region.replace("_", " ").title(), img))

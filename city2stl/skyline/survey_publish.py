@@ -46,7 +46,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from collections import Counter
 from collections.abc import Iterable, Sequence
 
@@ -64,15 +63,16 @@ NESTED_REASON = "nested part: the survey sees only the top of the stack"
 _ENV = "SKYLINE_SURVEY_HEIGHTS"
 
 
-def enabled(site_flag: bool) -> bool:
+def enabled(site_flag: bool | None = None) -> bool:
     """Whether survey heights are published: the env var ``SKYLINE_SURVEY_HEIGHTS`` (1 / 0) when
-    set, else the site flag ``use_survey_heights``."""
-    env = os.environ.get(_ENV, "").strip().lower()
-    if env in ("1", "true", "yes", "on"):
-        return True
-    if env in ("0", "false", "no", "off"):
-        return False
-    return bool(site_flag)
+    set, else the site flag ``use_survey_heights``.
+
+    ``site_flag`` None: the active ``SkylineConfig.survey_heights`` (site, then env). A given
+    ``site_flag`` replaces the config's site value; the env var still wins over it."""
+    from .config import SkylineConfig, current  # noqa: PLC0415
+    if site_flag is None:
+        return current().survey_heights
+    return SkylineConfig.build(None, site={"use_survey_heights": bool(site_flag)}).survey_heights
 
 
 def _ring_of(rec) -> list | None:

@@ -124,7 +124,7 @@ def _wait(client, tid, status, timeout=10):
 def test_run_is_cache_only_without_the_flag(client, root, monkeypatch):
     seen = {}
 
-    def fake(region, out_pdf, *, skip_pdf, progress_cb):
+    def fake(region, out_pdf, *, skip_pdf, progress_cb, **_):
         seen["paid"] = gu.paid_allowed()
         seen["skip_pdf"] = skip_pdf
         progress_cb("OSM fetch", None, None)
@@ -135,7 +135,7 @@ def test_run_is_cache_only_without_the_flag(client, root, monkeypatch):
         (d / "heights.json").write_text(json.dumps({"buildings": []}))
         return {"region": region}
 
-    monkeypatch.setattr("city2stl.skyline.region_pdf.run_region_pdf_report", fake)
+    monkeypatch.setattr("city2stl.skyline.region_pdf._run_pipeline", fake)
     r = client.post("/api/skyline/runs", json={"region": "Cartagena"})
     assert r.status_code == 200
     j = _wait(client, r.json()["task_id"], "done")
@@ -147,7 +147,7 @@ def test_run_is_cache_only_without_the_flag(client, root, monkeypatch):
 
 def test_run_with_flag_allows_paid(client, root, monkeypatch):
     seen = {}
-    monkeypatch.setattr("city2stl.skyline.region_pdf.run_region_pdf_report",
+    monkeypatch.setattr("city2stl.skyline.region_pdf._run_pipeline",
                         lambda region, out, **k: seen.update(paid=gu.paid_allowed()) or {})
     r = client.post("/api/skyline/runs", json={"region": "Cartagena", "allow_paid_fetches": True})
     _wait(client, r.json()["task_id"], "done")
@@ -157,7 +157,7 @@ def test_run_with_flag_allows_paid(client, root, monkeypatch):
 def test_progress_and_cancel_stop_at_the_next_boundary(client, root, monkeypatch):
     go, reached, stopped = threading.Event(), threading.Event(), threading.Event()
 
-    def fake(region, out, *, skip_pdf, progress_cb):
+    def fake(region, out, *, skip_pdf, progress_cb, **_):
         progress_cb("OSM fetch", None, None)
         progress_cb("Multiview registration (per-seed)", None, None)
         progress_cb("panoramas", 3, 12)
@@ -169,7 +169,7 @@ def test_progress_and_cancel_stop_at_the_next_boundary(client, root, monkeypatch
             stopped.set()
         raise AssertionError("ran past the cancel")
 
-    monkeypatch.setattr("city2stl.skyline.region_pdf.run_region_pdf_report", fake)
+    monkeypatch.setattr("city2stl.skyline.region_pdf._run_pipeline", fake)
     tid = client.post("/api/skyline/runs", json={"region": "Cartagena"}).json()["task_id"]
     assert reached.wait(5)
     j = client.get(f"/api/skyline/runs/{tid}").json()
@@ -250,14 +250,14 @@ def test_cache_only_run_does_not_block_a_paid_job_started_meanwhile(client, root
     still may spend, and the run itself stays cache-only the whole time."""
     go, reached, seen = threading.Event(), threading.Event(), {}
 
-    def fake(region, out_pdf, *, skip_pdf, progress_cb):
+    def fake(region, out_pdf, *, skip_pdf, progress_cb, **_):
         seen["before"] = gu.paid_allowed()
         reached.set()
         go.wait(5)
         seen["after"] = gu.paid_allowed()
         return {"region": region}
 
-    monkeypatch.setattr("city2stl.skyline.region_pdf.run_region_pdf_report", fake)
+    monkeypatch.setattr("city2stl.skyline.region_pdf._run_pipeline", fake)
     tid = client.post("/api/skyline/runs", json={"region": "Cartagena"}).json()["task_id"]
     assert reached.wait(5)
     other = []

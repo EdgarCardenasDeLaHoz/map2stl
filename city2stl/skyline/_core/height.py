@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -36,8 +35,8 @@ def _tag_filter_enabled() -> bool:
     ``SKYLINE_TAG_FILTER=0`` to measure the pipeline's unaided error, e.g. when
     scoring against an independent source such as a registered vendor plate.
     """
-    return os.environ.get("SKYLINE_TAG_FILTER", "1").strip().lower() not in (
-        "0", "false", "no", "off")
+    from ..config import current  # noqa: PLC0415
+    return current().tag_filter
 
 
 def _ground_elev_m(building: BuildingRecord, camera_elev_m: float) -> float:
@@ -682,7 +681,8 @@ def untagged_fallback(records: Sequence[BuildingRecord], region: str | None = No
     (``untagged_prior.fallback_for``) unless ``SKYLINE_UNTAGGED_FALLBACK=constant``; the
     constant also when the prior cannot run (no scikit-learn). Returns None for the
     constant."""
-    if os.environ.get("SKYLINE_UNTAGGED_FALLBACK", "model").strip().lower() == "constant":
+    from ..config import current  # noqa: PLC0415
+    if current().untagged_fallback == "constant":
         return None
     try:
         from ..untagged_prior import fallback_for  # noqa: PLC0415
@@ -702,9 +702,8 @@ def _prefer_tags_enabled() -> bool:
     25 % from its tag wrong far more often than the tag. ``SKYLINE_PREFER_TAGS=0`` publishes
     the measurement again.
     """
-    import os
-
-    return os.environ.get("SKYLINE_PREFER_TAGS", "1") != "0"
+    from ..config import current  # noqa: PLC0415
+    return current().prefer_tags
 
 
 def _withhold_untagged_enabled() -> bool:
@@ -715,8 +714,8 @@ def _withhold_untagged_enabled() -> bool:
     building in front (roof-to-building assignment). Set ``SKYLINE_WITHHOLD_UNTAGGED=0``
     to publish the Street View value again, e.g. once assignment is fixed.
     """
-    return os.environ.get("SKYLINE_WITHHOLD_UNTAGGED", "1").strip().lower() not in (
-        "0", "false", "no", "off")
+    from ..config import current  # noqa: PLC0415
+    return current().withhold_untagged
 
 
 def _high_rise_height(prior_m, info) -> float | None:
@@ -746,8 +745,8 @@ def _withhold_single_enabled() -> bool:
     Refined by the user on 2026-10-09 (``tiers.single_support``): only an unsupported single is
     withheld. ``SKYLINE_WITHHOLD_SINGLE=0`` publishes the single reading again.
     """
-    return os.environ.get("SKYLINE_WITHHOLD_SINGLE", "1").strip().lower() not in (
-        "0", "false", "no", "off")
+    from ..config import current  # noqa: PLC0415
+    return current().withhold_single
 
 
 def withhold_untagged_street_view(rows: list[dict], records: Sequence[BuildingRecord],

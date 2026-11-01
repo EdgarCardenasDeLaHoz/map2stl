@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -676,10 +675,8 @@ def _load_site_use_cadastre_band(region_name: str) -> bool:
     2026-10-10): the cadastre's floor count bounds a single image reading in place of the "2x the
     prior" rule; it never publishes a height. Default False; the env var ``SKYLINE_CADASTRE_BAND``
     overrides."""
-    env = os.environ.get("SKYLINE_CADASTRE_BAND")
-    if env is not None:
-        return env.strip().lower() not in ("0", "false", "no", "off", "")
-    return bool(_read_site_config(region_name).get("use_cadastre_band", False))
+    from .config import SkylineConfig  # noqa: PLC0415
+    return SkylineConfig.build(region_name).cadastre_band
 
 def _load_site_use_survey_heights(region_name: str) -> bool:
     """Per-region opt-in for publishing survey LiDAR heights as tier ``survey`` (F-SKY26 step 2d,
@@ -717,14 +714,8 @@ def _load_site_max_plausible_height_m(region_name: str) -> float:
     Bounds both the contour-override glass-facade implied-height sanity
     check and the per-building geometric y gate.
     """
-    raw = _read_site_config(region_name).get("max_plausible_height_m")
-    try:
-        v = float(raw) if raw is not None else 300.0
-    except (TypeError, ValueError):
-        return 300.0
-    if not math.isfinite(v) or v <= 0.0:
-        return 300.0
-    return v
+    from .config import max_plausible_height  # noqa: PLC0415
+    return max_plausible_height(_read_site_config(region_name).get("max_plausible_height_m"))
 
 def _load_site_anchor_overrides(region_name: str) -> dict[str, float]:
     """Optional manual anchor-offset overrides keyed by seed name (e.g.

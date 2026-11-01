@@ -103,12 +103,8 @@ _STAGE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 def mode() -> str:
     """``on`` (default), ``off`` or ``refresh``, from ``SKYLINE_STAGE_CACHE``."""
-    v = os.environ.get(ENV_SWITCH, "on").strip().lower()
-    if v in ("0", "off", "false", "no", "disabled", "none"):
-        return "off"
-    if v in ("refresh", "rebuild", "overwrite"):
-        return "refresh"
-    return "on"
+    from ..config import current  # noqa: PLC0415
+    return current().stage_cache
 
 
 def enabled() -> bool:
@@ -118,7 +114,8 @@ def enabled() -> bool:
 def cache_root(root: str | Path | None = None) -> Path:
     if root is not None:
         return Path(root)
-    env = os.environ.get(ENV_ROOT, "").strip()
+    from ..config import current  # noqa: PLC0415
+    env = current().stage_cache_dir
     return Path(env) if env else DEFAULT_ROOT
 
 
@@ -130,7 +127,8 @@ def depth_float16() -> bool:
     against ratios (``depth_ratio``, ``stop_ratio``) and floors, so a few edge columns could
     end a run one row earlier or later: not bit-identical to a fresh run. Lossless float32
     already brings a depth map from 62 MB to ~24 MB."""
-    return os.environ.get(ENV_DEPTH_F16, "").strip().lower() in ("1", "on", "true", "yes")
+    from ..config import current  # noqa: PLC0415
+    return current().stage_cache_depth_f16
 
 
 # --------------------------------------------------------------------------- keys

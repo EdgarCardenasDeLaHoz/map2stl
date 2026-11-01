@@ -17,10 +17,10 @@ Serves three things under ``/reports``:
 
 Everything here is read-only: nothing under any root is written, moved or deleted.
 
-The per-seed statistics are parsed back out of each region's rendered ``index.html`` by
-``city2stl.skyline.report_index``, which ``build_landing_page`` uses too. Those numbers are not
-written to a sidecar anywhere, so the rendered page is the only machine-readable copy, and one
-parser keeps one definition of the row format instead of two that drift apart.
+The per-seed statistics come from each report's sidecar ``report_summary.json``
+(``city2stl.skyline.report_index.read_sidecar``, written by ``city2stl.skyline.run_region`` since
+2026-10-31). A report without one (older runs) is parsed from its rendered ``index.html`` by the
+same module, which ``build_landing_page`` uses too: one definition of the row format.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from city2stl.skyline.report_index import parse_pano_rows, seed_source, stat
+from city2stl.skyline.report_index import parse_pano_rows, read_sidecar, seed_source, stat
 from city2stl.skyline.tier_display import (
     TIER_COLORS,
     TIER_HINTS,
@@ -164,11 +164,13 @@ def _view_assets(report_dir: Path, slug: str, url_base: str) -> list[dict]:
     return sorted(out, key=lambda e: e["index"])
 
 
-def _region_rows(report_dir: Path, region: str, text: str) -> list[dict]:
-    """Per-seed rows for one region, each carrying its own artifact URLs."""
+def _region_rows(report_dir: Path, region: str, text: str | None = None,
+                 parsed: list[dict] | None = None) -> list[dict]:
+    """Per-seed rows for one region, each carrying its own artifact URLs. ``parsed``: the
+    sidecar's rows; else they are parsed from ``text`` (``index.html``)."""
     url_base = f"/reports/files/region/{report_dir.name}"
     rows = []
-    for r in parse_pano_rows(text):
+    for r in (parsed if parsed is not None else parse_pano_rows(text or "")):
         slug = _seed_slug(r["seed"])
         rows.append({
             "region": region,
@@ -282,7 +284,15 @@ def _region_entry(report_dir: Path) -> dict:
     names |= set(_packed_names(report_dir, "web_images"))
     entry["web_images"] = [f"{url_base}/web_images/{n}" for n in sorted(names)]
 
-    if index_path.is_file():
+    side = read_sidecar(report_dir)
+    if side is not None and isinstance(side.get("stats"), dict) \
+            and isinstance(side.get("panoramas"), list):
+        entry["seeds"] = int(side["stats"].get("seeds") or 0)
+        entry["buildings"] = int(side["stats"].get("aggregated_buildings") or 0)
+        entry["rows"] = _region_rows(report_dir, region, parsed=side["panoramas"])
+        for row in entry["rows"]:
+            entry["quality"][row["quality"]] = entry["quality"].get(row["quality"], 0) + 1
+    elif index_path.is_file():
         try:
             text = index_path.read_text(encoding="utf-8", errors="replace")
         except OSError as e:

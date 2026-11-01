@@ -19,7 +19,9 @@ Layout:
   - ``region_pdf.py``        — region orchestration; ``region_config``,
     ``region_data`` and ``region_types`` hold its flags, I/O and dataclasses
 
-Entry point: ``city2stl/skyline/scripts/08_region_skyline_pdf.py``.
+Entry point: ``run_region`` (``service.py``; F-UNIFY Phase 2) with its ``SkylineConfig``
+(``config.py``), returning a ``RegionResult``. ``scripts/08_region_skyline_pdf.py``, the app's
+Heights page and ``region_pdf.run_region_pdf_report`` wrap it.
 
 This is the cross-view research pipeline. The ML height stack and the external
 height providers it builds on are general-purpose and live in
@@ -30,4 +32,15 @@ current strengths, weaknesses, and known failure modes.
 from ._core.height import aggregate_building_heights
 from ._core.skyline import detect_skyline_contour
 
-__all__ = ["aggregate_building_heights", "detect_skyline_contour"]
+__all__ = ["RegionResult", "SkylineConfig", "aggregate_building_heights",
+           "detect_skyline_contour", "run_region"]
+
+_LAZY = {"run_region": "service", "RegionResult": "service", "SkylineConfig": "config"}
+
+
+def __getattr__(name):
+    # lazy: importing the package must not pull in the pipeline (torch, cv2) for a config read
+    if name in _LAZY:
+        import importlib  # noqa: PLC0415
+        return getattr(importlib.import_module(f".{_LAZY[name]}", __name__), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

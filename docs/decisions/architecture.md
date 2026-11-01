@@ -2,6 +2,25 @@
 
 Package layering (numpy2stl / geo2stl / city2stl / app), where shared constants live, and what is and is not the pipeline. Related: [mesh-pipeline.md](mesh-pipeline.md), [repo-tooling-docs.md](repo-tooling-docs.md).
 
+### 2026-10-31 — A skyline run is one library call with one SkylineConfig and a JSON report sidecar
+- **Decision:**
+  - `city2stl/skyline/config.py::SkylineConfig` holds every run switch. It is built from site JSON, then env, then request overrides (`SkylineConfig.build`). An unknown override raises.
+  - The env vars still override. `config.py::ENV` maps each one to a field and a parser that keeps the old parse, and it is the inventory of the env reads.
+  - The active config is a ContextVar (`config.use`, `config.current`), so concurrent jobs do not share switches; `geo2stl/google_usage.py::bind` carries it into thread pools.
+  - `city2stl/skyline/service.py::run_region` -> `RegionResult` (summary, heights rows, report paths, cost = paid / cached counts from `google_usage.tally`, skipped paid fetches).
+    - `region_pdf.py::run_region_pdf_report`, `scripts/08_region_skyline_pdf.py` and `app/server/core/skyline_runs.py::run_region` are wrappers over it.
+  - Each report writes `report_summary.json` (`report_index.py::write_sidecar`, `SCHEMA` 1). `report_index.py::read_sidecar` is read by `app/server/routers/reports.py::_region_entry`, `skyline_runs.py::_header` and `scripts/build_landing_page.py`. A missing, invalid or stale sidecar falls back to the `index.html` parse.
+- **Why:**
+  - The env vars were read at import time in a dozen modules, so the app could not set them per request, and two jobs in one process would share them.
+  - The app needs the cost counters and the skipped paid fetches per job, not from the global usage file.
+  - Parsing the report HTML for the stats was fragile.
+- **Rejected:**
+  - Module-level env constants (the old `region_config._F_SKY*`): fixed at import.
+  - A mutable global setter (`ownership.set_site_flags`): it leaks between concurrent jobs.
+  - Keeping the stats only in the HTML: every reader has to re-parse it.
+- **Supersedes / superseded by:** supersedes `ownership.set_site_flags` and the `region_config` flag constants.
+- **Source:** F-UNIFY Phase 2 part A (`docs/plans/active/F-UNIFY-one-app.md`); `tests/test_skyline_service.py`.
+
 ### 2026-10-28 — Dead code removed in F-UNIFY step 7
 - **Decision:** removed, each off by default or with no user:
   - the `shadow_height` height provider and `tools/eval/eval_shadow_heights.py` (deprecated 2026-08-28; `satellite/measure.shadow_height()` stays);

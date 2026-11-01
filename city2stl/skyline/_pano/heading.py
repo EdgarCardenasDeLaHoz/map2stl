@@ -9,9 +9,7 @@ import numpy as np
 from .._core.segmentation import _neural_sky_and_building_masks
 from .._core.timing import _StepTimer
 from .._core.types import BuildingRecord
-from ..region_config import (
-    _F_SKY11_1_ENABLED,
-)
+from ..config import current as _cfg
 from ..region_types import SkylinePoint
 
 logger = logging.getLogger(__name__)
@@ -547,7 +545,7 @@ def _recover_anchor_offset(
     # F-SKY11.1 Phase B: env flag enables automatic pano-seeding when peak is
     # sharp. Falls back to per-site "drive_anchor" config key for opt-in
     # without the global flag.
-    allow_drive = _F_SKY11_1_ENABLED or bool(
+    allow_drive = _cfg().f_sky11_1 or bool(
         (pano_recovery_state or {}).get("drive_anchor", False)
     )
     use_pano_seed = (
