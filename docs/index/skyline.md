@@ -48,7 +48,7 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
 - Heights from Wikimedia Commons skyline photos (F-WEB2):
   - Finder: `map2stl/city2stl/skyline/commons_photos.py::find_skyline_photos` (`usable`, `is_dark`, `hfov_from_35mm`).
   - Camera from OSM towers: `map2stl/city2stl/skyline/skyline_match.py::locate_and_solve` (`refine`, `identify`).
-  - Accept gate (T18): `skyline_match.py::gate_margin` (margin over the best rival that `identify`s a different tower set; `_tower_set`, `SAME_TOWERS_JACCARD`, `APART_M`). `scripts/17_photo_pipeline.py` still uses its own 500 m rival rule.
+  - Accept gate (T18): `skyline_match.py::gate_margin` (margin over the best rival that `identify`s a different tower set; `_tower_set`, `SAME_TOWERS_JACCARD`, `APART_M`). The pipeline's search route calls it (`commons_pipeline/measure.py::_job`); the "500 m" in script 17 is the `refine` search radius, not a rival rule.
   - Camera roll (T19): `skyline_match.py::refine` (`max_roll_deg`; `_fit_roll`, `_grid_best`, `ROLL_MIN_GAIN`), `_unroll`, `_score_all_headings(roll_deg=)`, `Hit.roll_deg`; solver side `camera_solver.py::solve_pose` (`roll_deg`, `fit_roll`; `Obs.up_px`, `Pose.roll_deg`, `unroll_columns`, `MAX_ROLL_DEG`).
   - Labelled photos: `photo_localize.py::solve_from_labels`, with `camera_solver.py::solve_pose`. A label with `lat`/`lon` is used directly.
   - Elevated single photo to roof heights (F-PHOTOVIEW): `map2stl/city2stl/skyline/photo_view.py` — camera `PinholeCamera` (`project_ll`), resample onto the Pano row model `pano_grid` / `reproject` / `photo_pano`, camera from labels' full pixel positions `solve_from_rows`, terrain `Dem` / `footprint_bases`, feet refinement `refine_from_bases`, heights `measure` (depth-break switch `depth_break` / `DEPTH_BREAK_KW`); tests `tests/test_photo_view.py`.
@@ -57,8 +57,14 @@ Everything is in `map2stl/city2stl/skyline/README.md` (overview, pipeline shape,
   - Tower heights: `photo_heights.py::loo_heights` (`top="peak"` reads the tallest step; `measure_towers` records `peak_row`);
     stepped tops (T17): `photo_heights.py::choose_top` picks peak or median per tower across photos;
     photo weighting (T30): `photo_heights.py::combine_photo_heights` (`weighted_median`, `photo_weight`),
-    wired in `scripts/17_photo_pipeline.py::_building_row` (`--photo-weighting`, `--top`); untagged buildings from 2+ photos (C2, `17_photo_pipeline --untagged`): `photo_heights.py::agreed_with_occlusion` (`agreed_heights`, `viewpoints`, `view_spread_deg`, `implied_heights`, `untagged_table`).
-  - Pipeline: `scripts/13_photo_profiles.py` through `scripts/17_photo_pipeline.py`.
+    wired in `commons_pipeline/readings.py::_building_row` (`--photo-weighting`, `--top`); untagged buildings from 2+ photos (C2, `17_photo_pipeline --untagged`; table `commons_pipeline/measure.py::_untagged_table`): `photo_heights.py::agreed_with_occlusion` (`agreed_heights`, `viewpoints`, `view_spread_deg`, `implied_heights`, `untagged_table`).
+  - Pipeline library `map2stl/city2stl/skyline/commons_pipeline/` (scripts 13-17 are thin CLI wrappers over it):
+    - `cache.py` (shared: `cache_dir`, `new_session`, `get_with_retry`, `thumb_url`, `load_site`, `read_profiles`, `outlined`, `load_profiles`, `save_profiles`).
+    - `profiles.py` (13: `profile_region`, `rescreen`, `region_photos`, `screen_row`, `fetch_and_outline`, `outline_into`).
+    - `groups.py` (14, 15: `group_region`, `score_pairs`, `group_photos`, `gallery_region`, `gallery_page`).
+    - `embed.py` (16: `embed_region`, `cache_thumbnails`, `embed_images`).
+    - `pipeline.py` (17: `PipelineArgs`, `add_arguments`, `run_pipeline`); stages `placement.py::place` (routes, `_keep`), `measure.py::_job` (towers, `gate_margin`), `readings.py` (per-building rows, cross-check), `finish.py::finish` (score, report, cards).
+    - Tests: `tests/test_commons_pipeline.py`.
 - Drone Photo Sphere seeds, footprint first (F-DET6):
   - Camera from the waterline: `map2stl/city2stl/skyline/footprint_detect.py::fit_pose_from_waterline`.
   - Per-footprint heights with depth gating: `measure_footprints`.

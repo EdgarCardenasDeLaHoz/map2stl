@@ -16,34 +16,9 @@ cameras against the misfit. Photos from the same spot should be close.
 from __future__ import annotations
 
 import argparse
-import json
-import math
-from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
-
-import numpy as np
 
 from city2stl.skyline import photo_groups as pg
-from city2stl.skyline.local_dirs import local_dir  # noqa: E402
-from geo2stl.geo import M_PER_DEG_SPHERE  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[1]
-_P: dict = {}
-
-
-def _init(path):
-    global _P
-    _P = dict(np.load(path))
-
-
-def _row(args):
-    ka, wa, rest = args
-    out = []
-    for kb, wb in rest:
-        s = pg.outline_similarity(_P[ka], wa, _P[kb], wb)
-        if s is not None and s.misfit <= 0.5:
-            out.append((ka, kb, s.misfit, s.scale, s.shift, s.overlap))
-    return out
+from city2stl.skyline.commons_pipeline.groups import group_region
 
 
 def main() -> int:
@@ -52,42 +27,7 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-misfit", type=float, default=pg.SAME_SPOT_MISFIT)
     args = ap.parse_args()
-    d = local_dir("commons_cache") / args.region
-    meta = [m for m in json.loads((d / "profiles.json").read_text(encoding="utf-8")) if "px" in m]
-    by = {m["key"]: m for m in meta}
-    keys = [m["key"] for m in meta]
-    jobs = [(ka, by[ka]["px"][0], [(kb, by[kb]["px"][0]) for kb in keys[i + 1:]])
-            for i, ka in enumerate(keys)]
-    pairs = []
-    with ProcessPoolExecutor(args.workers, initializer=_init, initargs=(d / "profiles.npz",)) as ex:
-        for rows in ex.map(_row, jobs, chunksize=4):
-            pairs.extend(rows)
-    (d / "pairs.json").write_text(json.dumps(pairs), encoding="utf-8")
-
-    # direct links to located photos and complete-linkage groups (no chaining)
-    located = {k for k in keys if by[k]["lat"] is not None}
-    links = pg.link_to_located(pairs, located, args.max_misfit)
-    groups = pg.cliques(pairs, set(keys) - located, args.max_misfit)
-    (d / "groups.json").write_text(json.dumps({
-        "max_misfit": args.max_misfit,
-        "links": {u: {"located": loc, "misfit": m} for u, (loc, m) in links.items()},
-        "groups": [sorted(g) for g in groups]}, indent=0), encoding="utf-8")
-
-    # the check: camera distance vs misfit for located pairs
-    def dist(a, b):
-        return math.hypot((a["lat"] - b["lat"]) * M_PER_DEG_SPHERE,
-                          (a["lon"] - b["lon"]) * M_PER_DEG_SPHERE * math.cos(math.radians(a["lat"])))
-
-    loc = [(mis, dist(by[a], by[b])) for a, b, mis, *_ in pairs
-           if by[a]["lat"] is not None and by[b]["lat"] is not None]
-    print(f"{len(keys)} photos, {len(pairs)} pairs with misfit <= 0.5")
-    for lo, hi in [(0, 0.05), (0.05, 0.1), (0.1, 0.15), (0.15, 0.25), (0.25, 0.5)]:
-        ds = [x for m, x in loc if lo <= m < hi]
-        if ds:
-            print(f"  misfit {lo:.2f}-{hi:.2f}: {len(ds):4d} located pairs, camera distance median "
-                  f"{np.median(ds):6.0f} m, share under 500 m {np.mean(np.array(ds) < 500):.0%}")
-    print(f"at misfit <= {args.max_misfit}: {len(links)} unlocated photos linked to a located one; "
-          f"{len(groups)} groups of unlocated photos (sizes {[len(g) for g in groups][:8]})")
+    group_region(args.region, args.workers, args.max_misfit)
     return 0
 
 

@@ -1,8 +1,6 @@
 """T17 stepped tops and T30 photo weighting in ``photo_heights``, on synthetic photos and poses."""
 
-import importlib.util
 import math
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -138,11 +136,9 @@ def test_deviation_floor_and_missing():
 
 
 def _pipeline():
-    path = Path(__file__).resolve().parents[1] / "city2stl" / "skyline" / "scripts" / "17_photo_pipeline.py"
-    spec = importlib.util.spec_from_file_location("photo_pipeline_17", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    from city2stl.skyline.commons_pipeline import readings
+
+    return readings
 
 
 def test_building_row_weights_and_keeps_median_result():
