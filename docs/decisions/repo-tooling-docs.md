@@ -2,6 +2,19 @@
 
 Repo names and layout, venvs, test markers, agent scripts, where docs and plans live, and the align tool's pack lookup. Related: [architecture.md](architecture.md).
 
+### 2026-11-01 — The pre-push hook tests a clean checkout of the pushed commit
+- **Decision:** `.githooks/pre-push` runs pytest, vitest and eslint in a temporary detached
+  worktree of each pushed commit (`~/worktrees/prepush-<sha>/map2stl`, junctions to
+  `node_modules`, `cache`, `runs`, `city2stl/skyline/runs` and `../numpy2stl`), not in the
+  working folder.
+- **Why:** several agent sessions share one working folder, so the hook was testing other
+  sessions' uncommitted work. On 2026-11-01 an untracked skyline test from the panoramic
+  session blocked a photo-label push (1 failed, 3115 passed); the same commit passed 3308 tests
+  in a clean checkout. GitHub CI also tests a clean checkout, so the two now agree.
+- **Rejected:** skipping untracked tests only (misses uncommitted edits to tracked files);
+  smoke-only hook relying on CI (failures land after the push); `--no-verify`.
+- **Supersedes / superseded by:** —
+
 ### 2026-10-05 — Cloud sessions work on small branches from master and never merge
 - **Decision:** cloud (claude.ai/code) sessions take tasks from `docs/agents/TASKS.md` (Owner
   `cloud`, Status `todo`) and follow CLAUDE.md › "Cloud agents":

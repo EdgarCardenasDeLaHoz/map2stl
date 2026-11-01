@@ -3,11 +3,21 @@
 # pytest.ini) with 6 workers, and at the same time the JS unit tests and eslint.
 # Enabled by scripts/setup-venv.ps1 (core.hooksPath .githooks).
 #
+# The suites run on a clean checkout of each commit being pushed, not on the working
+# folder: several agent sessions share this folder, and one session's uncommitted work
+# used to fail another session's push (2026-11-01, an untracked skyline test). The
+# checkout is a temporary detached worktree under ~/worktrees/prepush-<sha>/map2stl, with
+# junctions to the large untracked folders (node_modules, cache, runs,
+# city2stl/skyline/runs) and a sibling junction to ../numpy2stl, whose tests run from its
+# working folder as before. Junctions are removed with rmdir (which never follows them)
+# before the worktree is removed.
+#
 # The JS checks (~20 s) used to run after pytest; overlapping them saves that time.
 # More pytest workers does not help on a 12-core PC: 10 workers measured slower than 6
 # (2026-10-02), because each worker pays the import cost and they compete for the cores.
 set -e
-cd "$(git rev-parse --show-toplevel)"
+REPO="$(git rev-parse --show-toplevel)"
+cd "$REPO"
 
 PYTHON="$HOME/.venvs/map2stl/Scripts/python.exe"
 if [ ! -f "$PYTHON" ]; then
@@ -15,30 +25,99 @@ if [ ! -f "$PYTHON" ]; then
     exit 1
 fi
 
+JUNCTIONS="node_modules cache runs city2stl/skyline/runs"
+ZERO=0000000000000000000000000000000000000000
+
+# Commits being pushed, from stdin (<local ref> <local sha> <remote ref> <remote sha>);
+# deletions (local sha all zeros) have nothing to test.
+SHAS=""
+while read -r _lref lsha _rref _rsha; do
+    [ "$lsha" = "$ZERO" ] && continue
+    case " $SHAS " in *" $lsha "*) ;; *) SHAS="$SHAS $lsha" ;; esac
+done
+[ -n "$SHAS" ] || exit 0
+
+junction() {  # junction <link> <target>
+    cmd //c mklink /J "$(cygpath -w "$1")" "$(cygpath -w "$2")" > /dev/null
+}
+
+unjunction() {  # rmdir removes the junction, never the target
+    [ -e "$1" ] || [ -L "$1" ] || return 0
+    cmd //c rmdir "$(cygpath -w "$1")" > /dev/null 2>&1 || true
+}
+
+cleanup() {
+    [ -n "$BASE" ] || return 0
+    for j in $JUNCTIONS; do unjunction "$BASE/map2stl/$j"; done
+    unjunction "$BASE/numpy2stl"
+    # Never delete through a junction that is still there: it would empty the real folder.
+    for j in $JUNCTIONS; do
+        if [ -e "$BASE/map2stl/$j" ] || [ -e "$BASE/numpy2stl" ]; then
+            echo "pre-push: a junction under $BASE could not be removed; leaving the checkout" >&2
+            BASE=""
+            return 0
+        fi
+    done
+    git -C "$REPO" worktree remove --force "$BASE/map2stl" > /dev/null 2>&1 || true
+    rm -rf "$BASE"
+    BASE=""
+}
+
 LOG_DIR="$(mktemp -d)"
-trap 'rm -rf "$LOG_DIR"' EXIT
+BASE=""
+trap 'cleanup; rm -rf "$LOG_DIR"' EXIT
 
-echo "Running JS tests and eslint in the background..."
-# eslint also catches JS syntax errors (it replaced tests/js/syntaxCheck.test.js).
-( npx vitest run > "$LOG_DIR/vitest.log" 2>&1; echo $? > "$LOG_DIR/vitest.rc" ) &
-( npx eslint app/client/static/js > "$LOG_DIR/eslint.log" 2>&1; echo $? > "$LOG_DIR/eslint.rc" ) &
+run_suites() {  # run_suites <sha>
+    sha="$1"
+    BASE="$HOME/worktrees/prepush-$(echo "$sha" | cut -c1-12)"
+    cleanup  # a crashed earlier run may have left this checkout behind
+    BASE="$HOME/worktrees/prepush-$(echo "$sha" | cut -c1-12)"
+    mkdir -p "$BASE"
+    echo "pre-push: testing a clean checkout of $(echo "$sha" | cut -c1-12) in $BASE"
+    git -C "$REPO" worktree add --detach "$BASE/map2stl" "$sha" > /dev/null
+    for j in $JUNCTIONS; do
+        [ -e "$REPO/$j" ] && junction "$BASE/map2stl/$j" "$REPO/$j"
+    done
+    junction "$BASE/numpy2stl" "$REPO/../numpy2stl"
 
-echo "Running Python test suite..."
-# -n 6 needs pytest-xdist (requirements-dev.txt).
-PY_RC=0
-"$PYTHON" -m pytest -q --tb=short -p no:cacheprovider -x -n 6 --durations=10 || PY_RC=$?
+    WT="$BASE/map2stl"
+    (
+        cd "$WT"
+        unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+        # Import this checkout's packages, not the editable install in the working folder.
+        PYTHONPATH="$(cygpath -w "$WT");$(cygpath -w "$REPO/../numpy2stl/src")"
+        export PYTHONPATH
 
-wait
+        echo "Running JS tests and eslint in the background..."
+        # eslint also catches JS syntax errors (it replaced tests/js/syntaxCheck.test.js).
+        ( npx vitest run > "$LOG_DIR/vitest.log" 2>&1; echo $? > "$LOG_DIR/vitest.rc" ) &
+        ( npx eslint app/client/static/js > "$LOG_DIR/eslint.log" 2>&1; echo $? > "$LOG_DIR/eslint.rc" ) &
+
+        echo "Running Python test suite..."
+        # -n 6 needs pytest-xdist (requirements-dev.txt).
+        PY_RC=0
+        "$PYTHON" -m pytest -q --tb=short -p no:cacheprovider -x -n 6 --durations=10 || PY_RC=$?
+
+        wait
+        FAILED=0
+        [ "$PY_RC" -eq 0 ] || { echo "pre-push: Python tests failed" >&2; FAILED=1; }
+        for step in vitest eslint; do
+            rc=$(cat "$LOG_DIR/$step.rc" 2>/dev/null || echo 1)
+            if [ "$rc" -ne 0 ]; then
+                echo "----- $step (failed) -----" >&2
+                cat "$LOG_DIR/$step.log" >&2
+                FAILED=1
+            else
+                echo "$step: ok ($(tail -n 3 "$LOG_DIR/$step.log" | grep -m1 -E 'Tests|passed|problems' || echo 'no problems'))"
+            fi
+        done
+        exit $FAILED
+    )
+}
+
 FAILED=0
-[ "$PY_RC" -eq 0 ] || { echo "pre-push: Python tests failed" >&2; FAILED=1; }
-for step in vitest eslint; do
-    rc=$(cat "$LOG_DIR/$step.rc" 2>/dev/null || echo 1)
-    if [ "$rc" -ne 0 ]; then
-        echo "----- $step (failed) -----" >&2
-        cat "$LOG_DIR/$step.log" >&2
-        FAILED=1
-    else
-        echo "$step: ok ($(tail -n 3 "$LOG_DIR/$step.log" | grep -m1 -E 'Tests|passed|problems' || echo 'no problems'))"
-    fi
+for sha in $SHAS; do
+    run_suites "$sha" || FAILED=1
+    cleanup
 done
 exit $FAILED
