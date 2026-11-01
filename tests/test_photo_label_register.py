@@ -335,7 +335,7 @@ def test_candidates_route_uses_auto_pose(srv, monkeypatch):
 
     fake.candidate_poses = candidate_poses
     fake.viewpoints_from_fc = lambda fc: [(37.1801, -3.5901)]      # within SEED_MATCH_M of the candidate
-    monkeypatch.setitem(sys.modules, "auto_pose", fake)
+    monkeypatch.setitem(sys.modules, "city2stl.photo_label.auto_pose", fake)
     r = _post(base, "/api/register/candidates", {"photo": "a.png"})
     assert r["ok"], r
     c = r["candidates"][0]
@@ -347,6 +347,6 @@ def test_candidates_route_uses_auto_pose(srv, monkeypatch):
 
 def test_candidates_route_without_auto_pose_is_a_clean_error(srv, monkeypatch):
     base, _ = srv
-    monkeypatch.setitem(sys.modules, "auto_pose", None)               # makes `import auto_pose` fail
+    monkeypatch.setitem(sys.modules, "city2stl.photo_label.auto_pose", None)  # makes the import fail
     r = _post(base, "/api/register/candidates", {"photo": "a.png"})
     assert r["ok"] is False and "auto_pose" in r["error"]

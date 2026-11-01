@@ -133,6 +133,39 @@ and the registration tools feed building heights into the city model automatical
 
 ## Phase 3: registration family
 
+**Progress (2026-11-01, uncommitted on branch `p3reg`):**
+- Camera solve, done:
+  - `city2stl/skyline/camera_solver.py` now holds `solve_pose` (columns), `solve_terrain`
+    (photo_label's terrain fit, from `terrain_solve.py`) and `solve_pnp` (`register.solve_pose`).
+  - `photo_view.py` holds `cam_from_dict` / `cam_to_dict`, `project_buildings` and `building_height`.
+- Service, done:
+  - The new package `city2stl/photo_label/` (`regions`, `photos`, `solve`, `candidates`,
+    `auto_pose`) holds the logic of `tools/photo_label/server.py`.
+  - `server.py` keeps the HTTP layer, with one-line `api_*` wrappers.
+  - `terrain_solve.py` and `auto_pose.py` in the tool are shims.
+  - `app/server/core/photo_solve.py` imports the package. It still loads the tool server for
+    screening only.
+- Plate registration, done:
+  - An AST comparison of the five align_tool files against `city2stl/registration` and
+    `numpy2stl.registration` found no identical bodies left. The 2026-09-27 promotion had
+    already moved them, and the tool files re-export them.
+  - The one same-maths copy, `eval_registration.invert_affine`, now imports
+    `align_edit.py::invert_affine`.
+  - The near duplicates stay, because their results differ: `locate_buildings.ncc_surface`,
+    `locate.correlate_with`, `refine_guess._warp` / `pearson_at` / `iou_at`, `decompose`.
+- Tests: 9 new `tests/test_registration_*.py` files (210 tests, offline, synthetic).
+- Proofs (all values identical at a relative tolerance of 1e-9; the worst difference was 0.0):
+  - The photo_label solve and project on the 4 labelled Granada photos, plus a synthetic PnP.
+  - `eval_registration` on the 6 ground-truth plates.
+  - Decision: architecture.md, 2026-11-01.
+- Left:
+  - `screen.py` and the screening jobs move into the package once the other session's edits
+    to `server.py` / `screen.py` land. After that, `photo_solve.tool()` can go.
+  - Optional:
+    - Move `eval_registration.truth_in_export_frame` / `corner_error_px` into
+      `city2stl/registration`.
+    - Point the align_tool callers at the package modules instead of the tool re-exports.
+
 - **Camera solve.**
   - One `camera_solver` API, used by the skyline photo path and by photo_label.
   - photo_label's `terrain_solve.solve_pose` / `register.solve_pose` merge into

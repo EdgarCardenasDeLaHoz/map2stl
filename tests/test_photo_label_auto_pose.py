@@ -1,20 +1,14 @@
-"""tools/photo_label/auto_pose.py: skyline from a photo, DEM horizon, start-pose search."""
+"""city2stl/photo_label/auto_pose.py (was tools/photo_label/auto_pose.py): skyline from a photo, DEM horizon, start-pose search."""
 from __future__ import annotations
 
-import importlib.util
 import math
 import types
-from pathlib import Path
 
 import numpy as np
 import pytest
 
+from city2stl.photo_label import auto_pose as ap
 from city2stl.skyline.photo_view import PinholeCamera, dirs_of
-
-MODULE = Path(__file__).resolve().parents[1] / "tools" / "photo_label" / "auto_pose.py"
-spec = importlib.util.spec_from_file_location("photo_label_auto_pose", MODULE)
-ap = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ap)
 
 LAT0, LON0, CELL = 37.0, -3.5, 0.0003
 N = 400

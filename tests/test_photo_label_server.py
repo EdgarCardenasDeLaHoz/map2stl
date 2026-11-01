@@ -226,8 +226,8 @@ def test_project_buildings_hides_occluded_and_clips_near_plane():
 
 def test_roof_height_prior_recovers_camera():
     """Labels clicked on roof tops: terrain-height projection biases the camera, the prior does not."""
+    from city2stl.skyline import camera_solver as cs
     from city2stl.skyline import photo_view as pv
-    ts = _load().ts
     dem = lambda lat, lon: 700.0 + 0.0 * np.asarray(lat, float)  # noqa: E731
     cam = pv.PinholeCamera(LAT0, LON0, 740.0, 10.0, -6.0, 0.0, 450.0, 800, 600)
     spots = [(-300, 1500), (-100, 1400), (250, 1800), (700, 1600), (500, 1500), (-250, 1200),
@@ -242,8 +242,8 @@ def test_roof_height_prior_recovers_camera():
         labels.append({"label": f"P{i + 1}", "x": float(x), "y": float(y), "lat": lat, "lon": lon})
     fc = {"type": "FeatureCollection", "features": feats}
     seed = {"lat": LAT0, "lon": LON0, "heading_deg": 10.0, "f_px": 450.0}
-    ground = ts.solve_terrain(dem, labels, 800, 600, seed, footprints=fc, label_height="ground")
-    prior = ts.solve_terrain(dem, labels, 800, 600, seed, footprints=fc)
+    ground = cs.solve_terrain(dem, labels, 800, 600, seed, footprints=fc, label_height="ground")
+    prior = cs.solve_terrain(dem, labels, 800, 600, seed, footprints=fc)
     assert all(h is None for h in ground["heights_m"])
     assert all(prior["in_footprint"]) and prior["h0_m"] == [20.0] * len(labels)
     assert prior["heights_m"] == pytest.approx([20.0] * len(labels), abs=2.5)
@@ -255,10 +255,10 @@ def test_roof_height_prior_recovers_camera():
 
 
 def test_building_height_tags():
-    ts = _load().ts
-    assert ts.building_height({"height": "12 m"}) == 12.0
-    assert ts.building_height({"levels": "4"}) == 12.0
-    assert ts.building_height({}) == 9.0
+    from city2stl.skyline import photo_view as pv
+    assert pv.building_height({"height": "12 m"}) == 12.0
+    assert pv.building_height({"levels": "4"}) == 12.0
+    assert pv.building_height({}) == 9.0
 
 
 

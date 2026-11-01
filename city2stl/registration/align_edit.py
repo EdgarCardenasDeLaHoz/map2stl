@@ -184,8 +184,13 @@ _MIN_IOU_GAIN_ABS = 0.002
 _MIN_IOU_GAIN_REL = 0.02
 
 
-def _invert2x3(M) -> np.ndarray:
+def invert_affine(M) -> np.ndarray:
+    """Inverse of a 2x3 affine (cv2 convention), as float64. The one copy: the align tool's
+    `eval_registration` imports it (its own `invert_affine` was the same vstack/inv/top-2x3)."""
     return np.linalg.inv(np.vstack([np.asarray(M, dtype=np.float64), [0, 0, 1.0]]))[:2, :3]
+
+
+_invert2x3 = invert_affine      # the name the ECC helpers and tests use
 
 
 def _ecc_once(t_img, s_img, seed_fwd, iters: int = 500):
