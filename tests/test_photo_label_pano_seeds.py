@@ -27,7 +27,7 @@ def _seed(tmp_path, pose=None):
     d.mkdir(parents=True)
     for n in ("7_030.png", "7_060.png", "pano.png", "pano_seg.png", "7_030_mask.png", "7_030_seg.png"):
         Image.new("RGB", (64, 54), "gray").save(d / n)
-    (d / "pano.json").write_text("{}")
+    (d / "pano.json").write_text(json.dumps({"f_px": 40.0, "pitch_deg": 2.0, "width": 360, "height": 54, "deg_per_col": 1.0}))
     (d / "views.json").write_text(json.dumps([
         {"file": "7_030.png", "heading_deg": 30.0, "heading_raw_deg": 25.0, "pitch_deg": 5.0, "fov_deg": 90.0, "w": 64, "h": 54},
         {"file": "7_060.png", "heading_deg": 60.0, "heading_raw_deg": 55.0, "pitch_deg": 0.0, "fov_deg": 90.0, "w": 64, "h": 54}]))
@@ -40,7 +40,7 @@ def test_listing_skips_strip_masks_json(mod, tmp_path):
     _seed(tmp_path)
     cfg = SimpleNamespace(photo_roots={"seeds": tmp_path / "03_seeds"})
     names = [p.name for _, _, p in mod._photo_files(cfg)]
-    assert names == ["7_030.png", "7_060.png"]
+    assert names == ["7_030.png", "7_060.png", "pano.png"]      # strip listed; masks / segmentations hidden
 
 
 def test_seed_frame_pose(mod, tmp_path):
@@ -51,6 +51,16 @@ def test_seed_frame_pose(mod, tmp_path):
     assert c["roll"] == pytest.approx(1.5) and c["f"] == pytest.approx(32.0)
     assert c["elev"] == pytest.approx(6.0) and c["source"] == "pano_anchor" and c["elev_fitted"] is False
     assert (c["width"], c["height"]) == (64, 54)
+
+
+def test_seed_strip_pose(mod, tmp_path):
+    d = _seed(tmp_path)
+    cfg = SimpleNamespace(dem=lambda: None)
+    c = mod.pano_seed(d / "pano.png", cfg)
+    assert c["projection"] == "pano_cylindrical" and c["col0_heading_deg"] == 180.0
+    assert c["heading"] == pytest.approx(0.0) and c["pitch"] == pytest.approx(2.0) and c["elev"] == pytest.approx(6.0)
+    assert [f["file"] for f in c["frames"]] == ["7_030.png", "7_060.png"] and c["weak"] is False
+    assert mod._is_seed_strip(d / "pano.png") and not mod._is_seed_strip(d / "7_030.png")
 
 
 def test_seed_elevation_from_dem_and_drone(mod, tmp_path):
@@ -78,15 +88,20 @@ def test_panoview_pose_and_candidates(mod, tmp_path):
     assert mod.pano_seed(img / "2_b.jpg", cfg) is None                          # not in the manifest
 
 
-def test_screen_skips_known_pose(mod, tmp_path, monkeypatch):
+def test_screen_known_pose_is_screened_without_aspect_rule(mod, tmp_path, monkeypatch):
     d = _seed(tmp_path)
     Image.new("RGB", (480, 100), "gray").save(d / "7_090.png")                 # strip-like, but no pose entry
     cfg = SimpleNamespace(region="r", dem=lambda: None, photo_roots={"seeds": tmp_path / "03_seeds"})
     seen = []
-    monkeypatch.setattr(mod.photo_screen, "screen_photo", lambda p, labels=True: seen.append(p.name) or {"reason": "auto: x"})
+    monkeypatch.setattr(mod.photo_screen, "screen_photo",
+                        lambda p, labels=True, **kw: seen.append((p.name, kw["known_pose"])) or {"reason": "auto: x"})
     flagged = []
     monkeypatch.setattr(mod, "_set_flag", lambda cfg, rel, bad, reason="", keep=False: flagged.append(rel))
     monkeypatch.setattr(mod, "load_flags", lambda cfg: {})
     mod._screen_state["r"] = {"state": "running", "done": 0, "total": 0, "flagged": [], "message": ""}
     mod._screen_region(cfg)
-    assert seen == ["7_090.png"] and flagged == ["seeds/seed_7/7_090.png"]
+    names = dict(seen)
+    assert names["7_090.png"] is False                                          # no pose entry: full screening
+    assert names["7_030.png"] is True and names["7_060.png"] is True            # known pose: screened, no aspect rule
+    assert names["pano.png"] is True and "seeds/seed_7/7_090.png" in flagged
+    assert len(flagged) == 4

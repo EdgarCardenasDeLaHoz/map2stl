@@ -102,3 +102,75 @@ def test_state_shape_idle_and_no_gpu_message(mod, tmp_path, monkeypatch):
     assert st["message"] == "no CUDA GPU: 15 photos screened by aspect only"
     assert st["flagged"] == ["pano.png"]
     assert not (cfg.photo_roots[""] / "clean_screen.json").exists()   # left for a later GPU run
+
+
+def test_geometry_rules_and_known_pose_skips_only_aspect(mod):
+    ps = mod.photo_screen
+    assert ps.geometry_reason(None) == ""
+    assert ps.geometry_reason({"cam_height_m": 2.5, "nearest_building_m": 200}).startswith("auto: street level (camera")
+    assert ps.geometry_reason({"cam_height_m": 90.0, "nearest_building_m": 18.4}) == "auto: too close (nearest building 18 m)"
+    assert ps.geometry_reason({"cam_height_m": 90.0, "nearest_building_m": 225.0}) == ""
+    assert ps.geometry_reason({"cam_height_m": None, "nearest_building_m": None}) == ""
+    drone = {"cam_height_m": 90.0, "nearest_building_m": 300.0}
+    street = {"cam_height_m": 2.5, "nearest_building_m": 20.0}
+    f = ps.screen_from_labels
+    assert f(None, 400, 300, drone, True)["reason"] == ""
+    assert f(None, 400, 300, street, True)["reason"].startswith("auto: street level (camera")
+    assert f(None, 480, 100, drone, True)["reason"] == ""                      # known pose: no aspect rule
+    assert f(None, 480, 100, drone, False)["reason"].startswith("auto: stitched panorama")
+    assert f(_labels(0.5), 400, 300, drone, True)["reason"].startswith("auto: street level (ground")
+    assert f(_labels(0.17), 400, 300)["reason"] == "" and f(_labels(0.18), 400, 300)["reason"] != ""
+
+
+def test_measure_pose_counts_visible_and_nearest(mod, monkeypatch):
+    ps = mod.photo_screen
+    big, small = 0.01 * 100 * 100, 1
+    fake = {"buildings": [{"visible_px": big, "edge_m": 80.0}, {"visible_px": big, "edge_m": 30.0},
+                          {"visible_px": small, "edge_m": 5.0}], "ids": np.ones((100, 100), np.uint16)}
+    seen = {}
+
+    def project(dem, fc, cam, **kw):
+        seen.update(kw)
+        return fake
+
+    import terrain_solve
+    monkeypatch.setattr(terrain_solve, "project_buildings", project)
+    cam = type("C", (), {"lat": 1.0, "lon": 2.0, "elev_m": 12.0, "width": 100, "height": 100})()
+    out = ps.measure_pose(lambda la, lo: 10.0, {"features": []}, cam)
+    assert out["cam_height_m"] == pytest.approx(2.0)
+    assert out["proj_buildings"] == 2 and out["nearest_building_m"] == 30.0     # the 1 px sliver is ignored
+    assert seen["min_dist_m"] == 0.0
+
+
+def test_measure_depth_metrics_synthetic(mod):
+    ps = mod.photo_screen
+    h = w = 100
+    lab = np.zeros((h, w), int)
+    lab[:40] = ps.SKY
+    lab[40:70] = 1                                  # building below the sky
+    lab[70:] = 6                                    # road
+    far = np.full((h, w), 0.2, np.float32)          # all far
+    far[70:] = 1.0
+    m = ps.measure(None, lab, far)
+    assert m["ground"] == pytest.approx(0.3) and m["skyline_frac"] == 1.0
+    assert m["seg_buildings"] == 1 and m["near_block_frac"] == 0.0
+    near = np.full((h, w), 1.0, np.float32)         # the building is the nearest thing
+    near[:40] = 0.0
+    m = ps.measure(None, lab, near)
+    assert m["near_block_frac"] == pytest.approx(0.3) and m["skyline_frac"] == 0.0 and m["seg_buildings"] == 0
+    assert ps.measure(None, lab, None)["near_block_frac"] is None
+
+
+def test_job_known_pose_skips_aspect_but_gets_geometry(mod, tmp_path, monkeypatch):
+    cfg = _region(mod, tmp_path)
+    monkeypatch.setattr(mod.photo_screen, "_ensure_label_map", lambda rgb: _labels(0.0))
+    poses = {"pano": (True, {"cam_height_m": 90.0, "nearest_building_m": 400.0}),     # known, fine, wide
+             "street": (True, {"cam_height_m": 2.5, "nearest_building_m": 12.0}),
+             "street2": (True, {"cam_height_m": 90.0, "nearest_building_m": 20.0})}
+    monkeypatch.setattr(mod, "_pose_geometry", lambda p, c: poses.get(p.stem, (False, None)))
+    st = _run(mod, cfg)
+    flags = mod.load_flags(cfg)
+    assert sorted(st["flagged"]) == ["street.png", "street2.png"]
+    assert flags["street.png"]["reason"] == "auto: street level (camera 2 m)"
+    assert flags["street2.png"]["reason"] == "auto: too close (nearest building 20 m)"
+    assert "pano.png" not in flags and "clean.png" not in flags

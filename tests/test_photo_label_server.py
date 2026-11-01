@@ -500,3 +500,104 @@ def test_loopback_v6_only_beside_ipv4_loopback():
         RequestHandlerClass = object
 
     assert mod.loopback_v6(_Srv()) is None
+
+
+def _sq(lon, lat, d=0.0004):
+    return [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]]
+
+
+def _height_fc(tmp_path):
+    """Five footprints beside each other: tagged, levels, two untagged and one empty."""
+    data = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [_sq(-75.560 + 0.001 * i, 10.40)]},
+         "properties": pr} for i, pr in enumerate([
+             {"height_m": 30.0, "height_source": "osm_height", "name": "Tagged"},
+             {"height_m": 12.0, "height_source": "osm_levels"},
+             {"height_m": 9.0, "height_source": "default"},
+             {"height_m": 9.0, "height_source": "default"},
+             {"height_m": 9.0, "height_source": "default"}])]}
+    return _load().geojson_footprints(data)
+
+
+def _entry(i, measured, published, tier="prior", name=None):
+    return {"name": name or f"b{i}", "lat": 10.4002, "lon": -75.560 + 0.001 * i + 0.0002,
+            "measured_m": measured, "published_m": published, "tier": tier}
+
+
+def test_heights_merge_priority_and_withheld(tmp_path):
+    mod = _load()
+    fc = _height_fc(tmp_path)
+    assert [f["properties"]["height_source"] for f in fc["features"]] == \
+        ["osm_tag", "osm_levels", "default", "default", "default"]
+    n = mod.apply_heights(fc, [
+        _entry(0, 20.0, 18.0),                       # OSM tag wins over a published height
+        _entry(1, 40.0, 36.0, "corroborated"),       # published beats OSM levels
+        _entry(2, 50.0, 45.0, "corroborated"),       # published, measured close: no withheld flag
+        _entry(3, 148.0, 31.0),                      # measured tall, published low: withheld
+        {"name": "far", "lat": 10.5, "lon": -75.5, "measured_m": 99.0, "published_m": 99.0}])
+    assert n == 4
+    p = [f["properties"] for f in fc["features"]]
+    assert (p[0]["height"], p[0]["height_source"], p[0]["published_m"], p[0]["measured_m"]) == (30.0, "osm_tag", 18.0, 20.0)
+    assert (p[1]["height"], p[1]["height_source"]) == (36.0, "published")
+    assert (p[2]["height"], p[2]["height_source"], p[2].get("measured_m")) == (45.0, "published", 50.0)
+    assert (p[3]["height"], p[3]["height_source"], p[3]["measured_m"], p[3].get("published_m")) == \
+        (31.0, "measured_withheld", 148.0, None)
+    assert p[3]["tier"] == "prior"
+    assert (p[4]["height"], p[4]["height_source"]) == (None, "default")        # nothing known: filler rule stays
+    # the solve still reads height / levels
+    ts = mod.ts
+    assert ts.building_height(p[3]) == 31.0 and ts.building_height(p[4]) == 9.0
+    assert ts.drawn_height(p[3], measured=True) == 148.0 and ts.drawn_height(p[1], measured=True) == 36.0
+
+
+def test_heights_nearest_footprint_and_seed_median(tmp_path):
+    mod = _load()
+    fc = _height_fc(tmp_path)
+    d = tmp_path / "seeds"
+    for k, (m, pub) in enumerate([(100.0, 20.0), (120.0, 22.0), (140.0, 24.0)]):
+        (d / f"seed_{k}").mkdir(parents=True)
+        # just outside the footprint (about 5 m), still the nearest one
+        row = {"b9": {"height_m": m, "published_m": pub, "tier": "prior", "name": "b9",
+                      "lat": 10.40021, "lon": -75.557 - 0.00004}}
+        (d / f"seed_{k}" / "heights.json").write_text(json.dumps(row), encoding="utf-8")
+    ent = mod.load_heights(d)
+    assert len(ent) == 1 and ent[0]["measured_m"] == 120.0 and ent[0]["published_m"] == 22.0 and ent[0]["n_seeds"] == 3
+    assert mod.apply_heights(fc, ent) == 1
+    assert fc["features"][3]["properties"]["height_source"] == "measured_withheld"
+    assert mod.load_heights(tmp_path / "nothing") == []
+
+
+def test_region_heights_reach_served_footprints(tmp_path):
+    mod = _load()
+    sd = tmp_path / "seeds" / "seed_1"
+    sd.mkdir(parents=True)
+    (sd / "heights.json").write_text(json.dumps({"b1": {"height_m": 150.0, "published_m": 30.0, "tier": "prior",
+                                                        "name": "b1", "lat": 10.4002, "lon": -75.5598}}), encoding="utf-8")
+    osm = tmp_path / "b.geojson"
+    osm.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [_sq(-75.560, 10.40)]},
+         "properties": {"height_m": 9.0, "height_source": "default"}}]}), encoding="utf-8")
+    cfg = mod.Config(tmp_path / "photos", osm, tmp_path / "ann", "r", dem_path=None, heights_path=tmp_path / "seeds")
+    p = cfg.footprints()["features"][0]["properties"]
+    assert (p["height"], p["height_source"], p["measured_m"]) == (30.0, "measured_withheld", 150.0)
+    assert cfg.heights_matched == 1
+    # a region without a heights path serves the filler as before
+    plain = mod.Config(tmp_path / "photos", osm, tmp_path / "ann", "r", dem_path=None)
+    assert plain.footprints()["features"][0]["properties"]["height_source"] == "default"
+
+
+def test_project_buildings_outlines_withheld_at_measured_height():
+    from city2stl.skyline import photo_view as pv
+    _load()
+    import terrain_solve as ts
+    cam = pv.PinholeCamera(LAT0, LON0, 705.0, 0.0, 0.0, 0.0, 600.0, 640, 480)
+    dem = lambda lat, lon: np.full(np.shape(lat), 700.0)  # noqa: E731
+    fc = _prism_fc([(-10, 200, 10, 220, 31.0)])
+    pr = fc["features"][0]["properties"]
+    pr.update(height_source="measured_withheld", measured_m=148.0, published_m=None)
+    b = ts.project_buildings(dem, fc, cam)["buildings"][0]
+    assert b["height_m"] == 31.0 and b["measured_m"] == 148.0 and b["height_source"] == "measured_withheld"
+    top = min(y for ring in b["measured_outline"] for _x, y in ring)
+    assert top < min(y for ring in b["contours"] for _x, y in ring) - 100       # the dashed box rises far above
+    both = ts.project_buildings(dem, fc, cam, measured=True)["buildings"][0]
+    assert both["height_m"] == 148.0 and "measured_outline" not in both

@@ -90,6 +90,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, parse_qsl, unquote, urlencode, urlparse
 
 HERE = Path(__file__).resolve().parent
@@ -226,7 +227,9 @@ class Config:
 
     def __init__(self, photo_dir: Path, osm_path: Path, annotations_dir: Path, region: str = "granada",
                  api_key=_AUTO, dem_path=DEFAULT_DEM, model_dir=MODEL_DIR, photo_roots=None, view=None,
-                 tiles_cache_dir=TILES_CACHE_DIR, landmarks=None, geoid_m=None):
+                 tiles_cache_dir=TILES_CACHE_DIR, landmarks=None, geoid_m=None, heights_path=None):
+        self.heights_path = Path(heights_path) if heights_path else None  # pipeline heights, see load_heights
+        self.heights_matched = 0
         self.tiles_cache_dir = Path(tiles_cache_dir)
         self.photo_dir = Path(photo_dir)
         # key -> folder; an empty key adds no prefix to photo paths (and so to label file names)
@@ -276,8 +279,11 @@ class Config:
         with self._lock:
             if self._fc is None:
                 data = json.loads(self.osm_path.read_text(encoding="utf-8"))
-                self._fc = (geojson_footprints(data) if data.get("type") == "FeatureCollection"
-                            else overpass_to_geojson(data))
+                fc = (geojson_footprints(data) if data.get("type") == "FeatureCollection"
+                      else tag_sources(overpass_to_geojson(data)))
+                if self.heights_path and self.heights_path.exists():
+                    self.heights_matched = apply_heights(fc, load_heights(self.heights_path))
+                self._fc = fc
             return self._fc
 
     def centroids(self) -> list[tuple[float, float, str]]:
@@ -387,15 +393,124 @@ def geojson_footprints(data: dict) -> dict:
         rings = ([g["coordinates"][0]] if g.get("type") == "Polygon" else
                  [p[0] for p in g["coordinates"]] if g.get("type") == "MultiPolygon" else [])
         pr = f.get("properties") or {}
-        h = pr.get("height_m") if pr.get("height_source") not in (None, "default") else None
+        src = pr.get("height_source")
+        h = pr.get("height_m") if src not in (None, "default") else None
+        src = ("osm_levels" if src == "osm_levels" else "osm_tag") if h is not None else "default"
         for ring in rings:
             if len(ring) >= 4:
                 feats.append({"type": "Feature",
                               "properties": {"id": pr.get("id", i), "name": pr.get("name"),
                                              "building": pr.get("building", "yes"), "height": h,
-                                             "levels": pr.get("levels")},
+                                             "levels": pr.get("levels"), "height_source": src},
                               "geometry": {"type": "Polygon", "coordinates": [ring]}})
     return {"type": "FeatureCollection", "features": feats}
+
+
+WITHHELD_RATIO = 1.5    # measured / published at or above this (and WITHHELD_MIN_M more) = withheld
+WITHHELD_MIN_M = 10.0
+
+
+def tag_sources(fc: dict) -> dict:
+    """`height_source` of Overpass footprints in place: osm_tag (a `height` tag), osm_levels, default."""
+    for f in fc["features"]:
+        pr = f["properties"]
+        if "height_source" not in pr:
+            h, lv = ts._num(pr.get("height")), ts._num(pr.get("levels"))
+            pr["height_source"] = "osm_tag" if h and h > 0 else "osm_levels" if lv and lv > 0 else "default"
+    return fc
+
+
+def load_heights(path) -> list[dict]:
+    """The pipeline's per-building heights from `path`: a seed export folder (every
+    `seed_*/heights.json`, `{name: {height_m, published_m, tier, name, lat, lon}}`) or one such
+    file. A building seen by several seeds becomes one entry: the median `measured_m` (the seed's
+    `height_m`) and `published_m`, the best tier. [] when nothing is there."""
+    import statistics
+    p = Path(path)
+    files = [p] if p.is_file() else sorted(p.glob("seed_*/heights.json")) + sorted(p.glob("heights.json"))
+    seen: dict[str, list[dict]] = {}
+    for fp in files:
+        try:
+            d = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for k, v in (d.items() if isinstance(d, dict) else []):
+            if isinstance(v, dict) and v.get("lat") is not None and v.get("lon") is not None:
+                seen.setdefault(str(v.get("name") or k), []).append(v)
+    rank = {"corroborated": 3, "measured": 2, "prior": 0}
+    out = []
+    for name, vs in seen.items():
+        def med(key, vs=vs):
+            xs = [float(v[key]) for v in vs if v.get(key) is not None]
+            return statistics.median(xs) if xs else None
+        out.append({"name": name, "lat": med("lat"), "lon": med("lon"), "measured_m": med("height_m"),
+                    "published_m": med("published_m"),
+                    "tier": max((v.get("tier") for v in vs), key=lambda t: rank.get(t, 1), default=None),
+                    "n_seeds": len(vs)})
+    return out
+
+
+def apply_heights(fc: dict, entries: list[dict]) -> int:
+    """Merge `load_heights` entries onto the footprints in place; returns how many footprints matched.
+
+    An entry belongs to the footprint containing its lat/lon (the seed names, b0564, do not
+    index the pipeline's footprints), else the one whose bounding box is nearest, within 12 m. Each matched footprint gets
+    `height` (drawn: OSM tag, then published, then levels; a footprint with none keeps no height and
+    `terrain_solve.building_height` falls back to 9 m), `height_source` (osm_tag / osm_levels /
+    published / measured_withheld / default), `tier`, and `measured_m` / `published_m` when they
+    differ from the drawn height. measured_withheld: the measured height is at least WITHHELD_RATIO x
+    the published one and WITHHELD_MIN_M above it, i.e. the pipeline kept a tall building low."""
+    feats = fc["features"]
+    grid: dict[tuple[int, int], list[int]] = {}
+    boxes = []
+    for i, f in enumerate(feats):
+        ring = f["geometry"]["coordinates"][0]
+        xs, ys = [q[0] for q in ring], [q[1] for q in ring]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+        for gx in range(math.floor(min(xs) * 1000), math.floor(max(xs) * 1000) + 1):
+            for gy in range(math.floor(min(ys) * 1000), math.floor(max(ys) * 1000) + 1):
+                grid.setdefault((gx, gy), []).append(i)
+    hit_by: dict[int, list[dict]] = {}
+    for e in entries:
+        lat, lon = e["lat"], e["lon"]
+        cx, cy = math.floor(lon * 1000), math.floor(lat * 1000)
+        hit = next((i for i in grid.get((cx, cy), [])
+                    if boxes[i][0] <= lon <= boxes[i][2] and boxes[i][1] <= lat <= boxes[i][3]
+                    and _inside(lon, lat, feats[i]["geometry"]["coordinates"][0])), None)
+        if hit is None:                                         # nearest bounding box within 12 m
+            kx, best = 111_320.0 * math.cos(math.radians(lat)), 12.0
+            for gx in (-1, 0, 1):
+                for gy in (-1, 0, 1):
+                    for i in grid.get((cx + gx, cy + gy), []):
+                        x0, y0, x1, y1 = boxes[i]               # distance to the footprint's bounding box
+                        d = math.hypot((max(x0 - lon, 0.0, lon - x1)) * kx, (max(y0 - lat, 0.0, lat - y1)) * 111_320.0)
+                        if d < best:
+                            best, hit = d, i
+        if hit is not None:
+            hit_by.setdefault(hit, []).append(e)
+    n = 0
+    for i, es in hit_by.items():
+        pr = feats[i]["properties"]
+        pub = [e["published_m"] for e in es if e.get("published_m")]
+        mea = [e["measured_m"] for e in es if e.get("measured_m")]
+        published = max(pub) if pub else (max(mea) if mea else None)
+        measured = max(mea) if mea else published
+        src = pr.get("height_source") or "default"
+        drawn = ts._num(pr.get("height")) if src in ("osm_tag", "osm_levels") else None
+        if src != "osm_tag" and published:
+            drawn, src = published, "published"
+        if drawn is None:
+            continue
+        if src == "published" and measured and measured >= WITHHELD_RATIO * published \
+                and measured - published >= WITHHELD_MIN_M:
+            src = "measured_withheld"
+        pr["height"], pr["height_source"], pr["tier"] = round(drawn, 1), src, es[0].get("tier")
+        if measured and abs(measured - drawn) > 0.5:
+            pr["measured_m"] = round(measured, 1)
+        if published and abs(published - drawn) > 0.5:
+            pr["published_m"] = round(published, 1)
+        n += 1
+    return n
 
 
 def _centroid(ring) -> tuple[float, float]:
@@ -437,12 +552,18 @@ def image_size(path: Path) -> tuple[int, int]:
 
 _EXT_RANK = {".png": 0, ".jpg": 1, ".jpeg": 1, ".webp": 2}
 _DERIVED = re.compile(r"^(overlay|landmarks_)|_depth|_labels|_baseline", re.I)
-_SEED_NONFRAME = re.compile(r"^pano(_|$)|_(mask|seg)$", re.I)   # strip / masks beside the frames of a seed folder
+_SEED_NONFRAME = re.compile(r"^pano_|_(mask|seg)$", re.I)   # masks / segmentations beside the frames (pano.png is the strip photo)
 
 
 def _is_seed_nonframe(p: Path) -> bool:
-    """True for the stitched strip, masks and segmentations inside `03_seeds/seed_*/` (not photos)."""
+    """True for masks and segmentations (`pano_seg`, `*_mask`, `*_seg`) inside `03_seeds/seed_*/`; the stitched
+    strip `pano.png` is a photo (cylindrical pose, see `pano_seed`)."""
     return p.parent.parent.name == "03_seeds" and bool(_SEED_NONFRAME.search(p.stem))
+
+
+def _is_seed_strip(p: Path) -> bool:
+    """True for `03_seeds/seed_*/pano.png`, the stitched 360 deg strip (listed with a cylindrical pose)."""
+    return p.name.lower() == "pano.png" and p.parent.parent.name == "03_seeds"
 
 
 def _photo_files(cfg: Config) -> list[tuple[str, Path, Path]]:
@@ -485,7 +606,8 @@ def load_flags(cfg: Config) -> dict[str, dict]:
 def list_photos(cfg: Config, include_bad: bool = False) -> list[dict]:
     """One entry per folder+stem (png, else jpg, else webp); derived outputs are hidden.
     Photos flagged bad (api_photo_flag) are left out unless `include_bad`, which lists them
-    with `bad: true` (unflagged entries keep the {path, w, h} shape)."""
+    with `bad: true` (unflagged entries keep the {path, w, h} shape). A seed strip adds
+    `projection: "pano_cylindrical"`."""
     flags = load_flags(cfg)
     out = []
     for key, root, p in _photo_files(cfg):
@@ -497,7 +619,8 @@ def list_photos(cfg: Config, include_bad: bool = False) -> list[dict]:
             w, h = image_size(p)
         except Exception:  # noqa: BLE001 - an unreadable image is just not listed
             continue
-        out.append({"path": rel, "w": w, "h": h, **({"bad": True} if bad else {})})
+        out.append({"path": rel, "w": w, "h": h, **({"bad": True} if bad else {}),
+                    **({"projection": "pano_cylindrical"} if _is_seed_strip(p) else {})})
     return out
 
 
@@ -542,7 +665,8 @@ def _screen_region(cfg: Config) -> None:
     gpu = False
     try:
         rels = {p: photo_rel(k, r, p) for k, r, p in _photo_files(cfg)}
-        todo = [p for p in rels if not photo_screen.screen_path(p).is_file() and not _has_known_pose(p, cfg)]
+        todo = [p for p in rels if not photo_screen.screen_path(p).is_file()]
+        poses = {p: _pose_geometry(p, cfg) for p in todo}     # path -> (known pose, measure_pose output)
         with _screen_lock:
             st["total"] = len(todo)
         try:
@@ -554,7 +678,7 @@ def _screen_region(cfg: Config) -> None:
         pending = []
         for p in todo:
             try:
-                res = photo_screen.screen_photo(p, labels=False)
+                res = photo_screen.screen_photo(p, labels=False, geometry=poses[p][1], known_pose=poses[p][0])
             except Exception:  # noqa: BLE001 - an unreadable photo is skipped
                 res = None
             if res is None:
@@ -572,7 +696,7 @@ def _screen_region(cfg: Config) -> None:
                 wait_for_gpu(2)
             for p in pending:
                 try:
-                    res = photo_screen.screen_photo(p)
+                    res = photo_screen.screen_photo(p, geometry=poses[p][1], known_pose=poses[p][0])
                 except Exception:  # noqa: BLE001
                     traceback.print_exc()
                     res = None
@@ -593,12 +717,28 @@ def _screen_region(cfg: Config) -> None:
                 pass
 
 
-def _has_known_pose(p: Path, cfg: Config) -> bool:
-    """A photo whose camera the panorama pipeline knows (pano_seed) is never auto-flagged."""
+def _pose_geometry(p: Path, cfg: Config) -> tuple[bool, dict | None]:
+    """(known pose?, `photo_screen.measure_pose` of it). A known pose exempts the photo only from the
+    aspect rule; its camera height and nearest visible footprint feed the geometry rules. The geometry is
+    None for a cylindrical strip, without a DEM, or when projecting fails."""
     try:
-        return pano_seed(p, cfg) is not None
+        c = pano_seed(p, cfg)
     except Exception:  # noqa: BLE001 - unknown pose: screen it like any photo
-        return False
+        return False, None
+    if c is None:
+        return False, None
+    dem = cfg.dem()
+    if c.get("projection") == "pano_cylindrical" or dem is None:
+        return True, None
+    try:
+        k = min(1.0, 640 / max(c["width"], c["height"]))      # project at screening size
+        cam = _camera({"lat": c["lat"], "lon": c["lon"], "elev_m": c["elev"], "heading_deg": c["heading"],
+                       "pitch_deg": c["pitch"], "roll_deg": c.get("roll") or 0.0, "f_px": c["f"] * k},
+                      round(c["width"] * k), round(c["height"] * k))
+        return True, photo_screen.measure_pose(dem, cfg.footprints(), cam)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        return True, None
 
 
 def _screen_flag(cfg: Config, st: dict, rel: str, res: dict) -> None:
@@ -880,6 +1020,36 @@ def _seed_frame_pose(photo: Path, cfg) -> dict | None:
                         roll=float(pose.get("horizon_tilt_deg") or 0.0), elev=elev, fitted=fitted)
 
 
+def _seed_strip_pose(photo: Path, cfg) -> dict | None:
+    """The cylindrical camera of `03_seeds/seed_<id>/pano.png` (`pano_camera.load_seed_camera`: pano.json +
+    pose.json, column 0 at 180 deg) as a candidate dict: the usual keys (`heading` is the centre column)
+    plus `projection` "pano_cylindrical", `deg_per_col`, `col0_heading_deg`, `weak` (pose branch
+    `overhead`). Elevation as for frames: `cam_elev_m`, else ground + camera height, else DEM + PANO_CAM_HEIGHT_M."""
+    import pano_camera
+    d = photo.parent
+    pose = _read_json(d / "pose.json")
+    fitted = pose.get("cam_elev_m") is not None
+    elev = None
+    if not fitted and not (pose.get("ground_m") is not None and pose.get("cam_height_m") is not None):
+        dem = cfg.dem()
+        if dem is None:
+            raise ValueError("no DEM")
+        import auto_pose
+        import numpy as np
+        ground = float(auto_pose._dem_sampler(dem)(np.array([float(pose["lat"])]), np.array([float(pose["lon"])]))[0])
+        if not math.isfinite(ground):
+            raise ValueError("no DEM ground")
+        elev = ground + PANO_CAM_HEIGHT_M
+    cam = pano_camera.load_seed_camera(d, elev_m=elev)
+    try:
+        frames = pano_camera.seed_frame_cameras(d, cam)
+    except (OSError, ValueError, KeyError, TypeError):
+        frames = []
+    return {**cam.to_dict(), "frames": frames, "elev": cam.elev_m, "heading": cam.heading_deg, "pitch": cam.pitch_deg,
+            "roll": 0.0, "f": cam.f_px, "source": "pano_anchor", "elev_fitted": fitted,
+            "label": f"Pano seed {pose.get('seed', '')} strip (known pose" + (", weak" if cam.weak else "") + ")"}
+
+
 def _panoview_pose(photo: Path, cfg) -> dict | None:
     """Frame listed in a `manifest.json` in its folder or the one above (per view lat, lon, heading, pitch, fov)."""
     for d in (photo.parent, photo.parent.parent):
@@ -898,6 +1068,7 @@ def pano_seed(photo_path, cfg) -> dict | None:
     * `<run>/03_seeds/seed_<id>/<id>_<HHH>.png` (views.json + pose.json beside it): heading, pitch and
       fov from views.json, roll from pose `horizon_tilt_deg`, elevation `cam_elev_m` (fitted, flagged
       `elev_fitted`), else `ground_m + cam_height_m`, else DEM + PANO_CAM_HEIGHT_M; source `pano_anchor`.
+    * `<run>/03_seeds/seed_<id>/pano.png`, the 360 deg strip: a `pano_cylindrical` camera (`_seed_strip_pose`).
     * a frame named in a `manifest.json` beside it or one folder up (panoview): same, from the manifest.
     * `<run>/02_streetview/<view>/<view>_<HHH>.png`, below.
 
@@ -909,6 +1080,8 @@ def pano_seed(photo_path, cfg) -> dict | None:
     photo = Path(photo_path)
     try:
         if (photo.parent / "views.json").is_file() and photo.parent.parent.name == "03_seeds":
+            if _is_seed_strip(photo):
+                return _seed_strip_pose(photo, cfg)
             return _seed_frame_pose(photo, cfg)
         if (photo.parent / "manifest.json").is_file() or (photo.parent.parent / "manifest.json").is_file():
             return _panoview_pose(photo, cfg)
@@ -997,9 +1170,14 @@ def api_register_candidates(cfg: Config, body: dict) -> dict:
     if photo is not None and not body.get("refresh") and not body.get("viewpoints"):
         ps = pano_seed(photo, cfg)           # known pose: no skyline search needed
         if ps is not None:
-            cam = reg.cam_from_dict(ps)
+            if ps.get("projection"):                      # a strip: its own camera dict, not a pinhole
+                cdict = {k: ps[k] for k in ("lat", "lon", "elev_m", "heading_deg", "pitch_deg", "roll_deg", "f_px",
+                                            "hfov_deg", "width", "height", "projection", "deg_per_col",
+                                            "col0_heading_deg", "weak", "frames")}
+            else:
+                cdict = reg.cam_to_dict(reg.cam_from_dict(ps))
             extra = {k: ps[k] for k in ("elev_fitted",) if k in ps}
-            return {"ok": True, "candidates": [{**reg.cam_to_dict(cam), "score": 0.0, **extra,
+            return {"ok": True, "candidates": [{**cdict, "score": 0.0, **extra,
                                                 "source": ps.get("source", "pano"),
                                                 "label": ps.get("label", "Street View pano (known pose)")}],
                     "geoid_m": _start_geoid(cfg), "cached": False,
@@ -1087,13 +1265,28 @@ def _start_geoid(cfg: Config) -> float:
 
 
 def api_register_step(cfg: Config, body: dict) -> dict:
-    """One render -> new camera. The render and depth live in memory only; nothing is stored."""
+    """One render -> new camera. The render and depth live in memory only; nothing is stored.
+
+    On a seed strip (`body["strip"]` = the strip's `pano_cylindrical` camera dict, `body["camera"]` the
+    pinhole camera of one frame) the strip is resampled to that frame's view (`pano_camera.strip_to_pinhole`),
+    `register.register_step` runs unchanged on it, and the returned `pairs` x, y are mapped back onto strip
+    pixels (`pano_camera.pinhole_to_strip`); the returned `camera` is the refined frame camera."""
     import register as reg
     try:
         rgb = _photo_rgb(cfg, body["photo"])
     except (ValueError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
     h, w = rgb.shape[:2]
+    pano = None
+    if body.get("strip"):
+        try:
+            import pano_camera
+            pano = pano_camera.PanoCamera.from_dict(body["strip"], w, h)
+            fc = body["camera"]
+            w, h = int(fc["width"]), int(fc["height"])
+            rgb = pano_camera.strip_to_pinhole(rgb, pano, reg.cam_from_dict(fc, w, h))
+        except Exception as exc:  # noqa: BLE001 - bad request, reported to the page
+            return {"ok": False, "error": f"bad strip or frame camera: {type(exc).__name__}: {exc}"}
     try:
         cam = reg.cam_from_dict(body["camera"], w, h)
         render = reg.decode_image(body["render"])
@@ -1105,9 +1298,16 @@ def api_register_step(cfg: Config, body: dict) -> dict:
         return {"ok": False, "error": f"bad depth grid: {type(exc).__name__}: {exc}"}
     user = [(float(u["x"]), float(u["y"]), float(u["lat"]), float(u["lon"]), float(u["h_orth"]))
             for u in body.get("user") or [] if u.get("h_orth") is not None]
-    return reg.register_step(rgb, render, depth, cam, dem=cfg.dem(),
-                             geoid_m=float(body.get("geoid_m") or _start_geoid(cfg)),
-                             fit_geoid=cfg.geoid_m is None, user=user)
+    out = reg.register_step(rgb, render, depth, cam, dem=cfg.dem(),
+                            geoid_m=float(body.get("geoid_m") or _start_geoid(cfg)),
+                            fit_geoid=cfg.geoid_m is None, user=user)
+    if pano is not None and out.get("pairs"):
+        import numpy as np
+        px = np.array([[p["x"], p["y"]] for p in out["pairs"]])
+        sx, sy = pano_camera.pinhole_to_strip(pano, cam, px[:, 0], px[:, 1])   # frame px -> strip px
+        out["pairs"] = [{**p, "x": float(a), "y": float(b), "frame_x": p["x"], "frame_y": p["y"]}
+                        for p, a, b in zip(out["pairs"], sx, sy, strict=True) if a == a and b == b]
+    return out
 
 
 def api_solve(cfg: Config, body: dict) -> dict:
@@ -1115,6 +1315,8 @@ def api_solve(cfg: Config, body: dict) -> dict:
     if len(labels) < 4:
         return {"ok": False, "error": f"need at least 4 pairs, got {len(labels)}"}
     w, h = body["image_px"]
+    if (body.get("camera") or {}).get("projection") == "pano_cylindrical":
+        return _solve_pano(cfg, labels, body["camera"], int(w), int(h))
     obs = [Obs(float(lb["x"]), float(lb["lat"]), float(lb["lon"]), str(lb.get("label") or f"P{i + 1}"),
                up_px=h / 2 - float(lb["y"])) for i, lb in enumerate(labels)]
     try:
@@ -1156,6 +1358,27 @@ def api_solve(cfg: Config, body: dict) -> dict:
             "terrain": None}
 
 
+def _solve_pano(cfg: Config, labels: list[dict], c: dict, w: int, h: int) -> dict:
+    """`api_solve` for a cylindrical strip: the terrain fit with the cylindrical camera, started from the
+    strip's known pose `c` (no column solve: a strip is not a pinhole). Heading offset, pitch, height
+    (and position / f) are fitted; the reply is `_solve_reply`'s."""
+    dem = cfg.dem()
+    if dem is None:
+        return {"ok": False, "error": "no DEM loaded; cannot fit a strip"}
+    fc = cfg.footprints()
+    rows = []
+    for lb in labels:
+        nm = name_at(fc, float(lb["lat"]), float(lb["lon"]))
+        rows.append({**lb, "osm_names": [nm] if nm else []})
+    seed = {"lat": float(c["lat"]), "lon": float(c["lon"]), "heading_deg": float(c["heading_deg"]),
+            "f_px": float(c["f_px"]), "pitch_deg": float(c.get("pitch_deg") or 0.0)}
+    t = ts.solve_terrain(dem, rows, w, h, seed, footprints=fc, pano=True)
+    if t is None:
+        return {"ok": False, "error": "no label lies on the DEM"}
+    stand_in = SimpleNamespace(lat=seed["lat"], lon=seed["lon"], heading_deg=seed["heading_deg"], sigma_m=None)
+    return _solve_reply(cfg, labels, stand_in, t)
+
+
 def _terrain(cfg: Config, labels: list[dict], w: int, h: int, pose) -> dict | None:
     """Terrain fit seeded from the column pose; None when no DEM covers the labels."""
     dem = cfg.dem()
@@ -1171,6 +1394,10 @@ def _terrain(cfg: Config, labels: list[dict], w: int, h: int, pose) -> dict | No
 
 
 def _camera(c: dict, w: int, h: int):
+    """A PinholeCamera from a camera dict, or a `pano_camera.PanoCamera` when `projection` is "pano_cylindrical"."""
+    if c.get("projection") == "pano_cylindrical":
+        import pano_camera
+        return pano_camera.PanoCamera.from_dict(c, w, h)
     from city2stl.skyline import photo_view
     return photo_view.PinholeCamera(float(c["lat"]), float(c["lon"]), float(c["elev_m"]),
                                     float(c["heading_deg"]), float(c["pitch_deg"]),
@@ -1196,12 +1423,14 @@ def _solve_reply(cfg: Config, labels, pose, t: dict) -> dict:
             ticks.append((d, {"x": float(x), "name": name}))
     ticks.sort(key=lambda k: k[0])
     rms = math.sqrt(sum(v * v for v in t["residuals_px"]) / len(labels))
+    strip = ({k: c[k] for k in ("projection", "width", "height", "deg_per_col", "col0_heading_deg")}
+             if getattr(cam, "cylindrical", False) else {})
     return {"ok": True,
             "pose": {"lat": cam.lat, "lon": cam.lon, "elev_m": cam.elev_m, "ground_m": c["ground_m"],
                      "heading_deg": cam.heading_deg, "pitch_deg": cam.pitch_deg, "f_px": cam.f_px,
                      "hfov_deg": c["hfov_deg"], "rms_px": rms,
                      "median_px": t["median_px"], "median_m": t["median_m"],
-                     "sigma_m": pose.sigma_m, "roll_deg": cam.roll_deg, "rejected": [],
+                     "sigma_m": pose.sigma_m, "roll_deg": cam.roll_deg, "rejected": [], **strip,
                      "column_pose": {"lat": pose.lat, "lon": pose.lon, "heading_deg": pose.heading_deg}},
             "residuals_px": t["residuals_px"], "residuals_m": t["residuals_m"],
             "heights_m": t["heights_m"], "h0_m": t["h0_m"], "in_footprint": t["in_footprint"],
@@ -1222,7 +1451,7 @@ def api_project(cfg: Config, body: dict) -> dict:
 
     import cv2
     import numpy as np
-    r = ts.project_buildings(dem, cfg.footprints(), cam)
+    r = ts.project_buildings(dem, cfg.footprints(), cam, measured=body.get("heights") == "measured")
     ids = r["ids"].astype(np.int32)
     bgr = np.dstack([np.zeros_like(ids), ids >> 8, ids & 255]).astype(np.uint8)
     ok, png = cv2.imencode(".png", bgr)
@@ -1700,7 +1929,8 @@ class Regions:
             else:
                 warn(f"photo folder {key!r} missing ({folder}), left out")
         return {"label": spec.get("label") or rid, "osm": osm, "dem": dem, "photos": roots, "view": spec.get("view"),
-                "landmarks": spec.get("landmarks") or [], "geoid_m": spec.get("geoid_m")}
+                "landmarks": spec.get("landmarks") or [], "geoid_m": spec.get("geoid_m"),
+                "heights": _abs(spec["heights"]) if spec.get("heights") else None}
 
     def ids(self) -> list[str]:
         return list(self._specs)
@@ -1718,7 +1948,8 @@ class Regions:
                 cfg = Config(next(iter(roots.values()), DEFAULT_PHOTOS), spec["osm"], self._annotations, rid,
                              api_key=self._key, dem_path=spec["dem"], model_dir=self._model_dir,
                              photo_roots=roots, view=spec["view"], landmarks=spec.get("landmarks"),
-                             geoid_m=spec.get("geoid_m"), tiles_cache_dir=self.tiles_cache_dir)
+                             geoid_m=spec.get("geoid_m"), tiles_cache_dir=self.tiles_cache_dir,
+                             heights_path=spec.get("heights"))
                 self._cfgs[rid] = cfg
             return cfg
 

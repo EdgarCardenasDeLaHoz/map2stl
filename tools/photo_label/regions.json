@@ -39,6 +39,7 @@
     "geoid_m": -6.2,
     "osm": "runs/cartagena/01_osm/buildings.geojson",
     "dem": "cache/opentopo/efc0c25e213e077907a31505162ff69f.tif",
+    "heights": "runs/cartagena/03_seeds",
     "photos": {
       "seeds": "runs/cartagena/03_seeds",
       "commons": "runs/cartagena/photos"

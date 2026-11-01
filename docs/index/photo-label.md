@@ -22,12 +22,30 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   to match the photo): `index.html::drawMapLines`, `fpBase`, checkbox `rayChk`.
 - **Buildings projected onto the photo:** `terrain_solve.py::project_buildings` (`MAX_VISIBLE`
   nearest in view, `MIN_DIST_M`, `MIN_VISIBLE_PX`).
+- **Mask heights (auto-correct loop, plan F):** `tools/photo_label/mask_heights.py` - per frame `analyse_frame` (`pose_gate` bad_pose check, `column_top` mask top edge, `classify` ok / too_short / too_tall, `unmatched_blobs`, `column_height` elevation angle x `ray_ring_dist`); across frames `aggregate` / `agree_group` (2+ views within ln 1.25), `find_reassignments`; output `to_readings` (method `photo_mask`), `merge_production` (backup + merge), `score`, `google3d_yardstick` (TODO). Runner `claude/scripts/run_mask_heights.py`; tests `tests/test_photo_label_mask_heights.py`.
 - **Server, routes, config:** `tools/photo_label/server.py` — `Config` (paths, cached DEM and
   footprints, model build state), `LabelHandler.do_GET` / `do_POST` (route table), `make_server`,
   `main`; labels `api_get_labels`, `api_save_labels`, `label_path`; photos `list_photos`,
   `safe_photo`; footprints `overpass_to_geojson` (building ways plus building multipolygon relations, outer
-  rings stitched by `_stitch_rings`, ids `r<relation>`), `geojson_footprints`; start of the 3D view
+  rings stitched by `_stitch_rings`, ids `r<relation>`), `geojson_footprints`, `tag_sources`; start of the 3D view
   outside Granada `start_view` (the region's `view`, else the DEM centre).
+- **Per-building heights (plan F-PHOTOPANO step 6):** a region's `heights` key in `regions.json`
+  (Cartagena: `runs/cartagena/03_seeds`) -> `server.py::Config.heights_path`; `load_heights` reads every
+  `seed_*/heights.json` (`height_m` = measured, `published_m`, `tier`, `name`, `lat`, `lon`; one entry per
+  building, medians over seeds), `apply_heights` merges them onto the footprints by point-in-polygon
+  (seed names `b0564` do not index the pipeline footprints; else nearest bounding box within 12 m) in
+  `Config.footprints`. Footprint props: `height` (drawn: OSM tag, then published, then OSM levels, else none
+  -> `terrain_solve.building_height` 9 m), `height_source` (`osm_tag` / `osm_levels` / `published` /
+  `measured_withheld` / `default`), `tier`, `measured_m` / `published_m` when they differ from the drawn
+  height. `measured_withheld`: measured >= `WITHHELD_RATIO` (1.5) x published and `WITHHELD_MIN_M` (10 m)
+  above it. `terrain_solve.py::project_buildings` returns the source and figures per building, a dashed
+  `measured_outline` for withheld ones, and with `measured=True` (`/api/project` `heights: "measured"`,
+  `drawn_height`) draws them at the measured height. Page: `index.html::heightText`, `fpTip`,
+  `drawMeasuredOutlines`, the `#hModeSel` Heights select. Satellite readings
+  (`runs/satellite/<region>/readings.json`) are not read yet (no file exists). Tests:
+  `tests/test_photo_label_server.py::test_heights_merge_priority_and_withheld`,
+  `test_heights_nearest_footprint_and_seed_median`, `test_region_heights_reach_served_footprints`,
+  `test_project_buildings_outlines_withheld_at_measured_height`.
 - **Camera solve from pairs:** `server.py::api_solve` (terrain fit seeded by
   `city2stl/skyline/camera_solver.py::solve_pose`), `server.py::api_project`;
   `tools/photo_label/terrain_solve.py` — `solve_terrain`, `project_buildings`, `label_priors`,
@@ -57,16 +75,30 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   pose.json; Granada `panoview` frames via `manifest.json`; roots `seeds` / `panoview` in `regions.json`)
   take `pano_seed`'s other branches (`_seed_frame_pose`, `_panoview_pose`): source `pano_anchor`, `elev_fitted`
   when pose.json has `cam_elev_m` (drone); the page treats it like `pano` (`index.html::isPanoStart`: no heading
-  sweep, mesh-ground height unless `elev_fitted`); `_photo_files` hides strip/mask/seg files (`_is_seed_nonframe`),
+  sweep, mesh-ground height unless `elev_fitted`); `_photo_files` hides mask/seg files (`_is_seed_nonframe`) but lists the strip `pano.png`,
   `fillPhotoSel` groups seed frames in an optgroup per folder. Page: `index.html::loadGuesses`, `applyGuess`, `drawGuesses`, `searchHere`
   (drag), `clearGuesses`, checkbox `guessChk`.
 - **Flag a bad photo:** `POST /api/photo/flag` (`<annotations>/<region>_photo_flags.json`), hidden by
   `list_photos` (`?all=1` lists them with `bad`), `server.py::api_photo_flag`, `_set_flag`, `flags_path`; page `index.html::flagPhoto`, button `flagBtn` with Undo; checkbox `flagChk` "Show flagged" lists them marked ⚑
   (`loadPhotoList` with `?all=1`, `fillPhotoSel`, `photoOpt`, `syncFlagBtn`: the button becomes Unflag).
+- **Pano strip as a photo (`03_seeds/seed_N/pano.png`, 2688x540):** `tools/photo_label/pano_camera.py::PanoCamera`
+  (cylindrical camera, same `project_ll` / `project_dirs` / `backproject` as `PinholeCamera`, `cylindrical = True`;
+  heading = col0 + col*deg_per_col, col0 180 so north is mid-strip; row = horizon_row - f tan(elev)),
+  `load_seed_camera` (pano.json + pose.json; `weak` for pose_branch `overhead`, seed 6),
+  `fit_col0_heading` (re-fits col0 from the 12 frames by template match; Cartagena seeds 1/4/5/6 give 179.87 /
+  179.78 / 180.15 / 180.07), `seed_frame_cameras` (views.json -> pinhole dicts), `strip_to_pinhole` /
+  `pinhole_to_strip` / `pinhole_dirs`. Server: `server.py::_is_seed_strip`, `_seed_strip_pose` (via `pano_seed`;
+  listing adds `projection: "pano_cylindrical"`), `_camera`, `_solve_pano` (`api_solve` with
+  `camera.projection`), strip branch of `api_register_step` (`body["strip"]`: resample strip to the frame, run
+  `register.register_step`, map pairs back to strip px). `terrain_solve.py::project_buildings` / `_cyl_polys` /
+  `_solve(pano=True)` accept either camera. Page: `index.html::layoutWide` (body.widePhoto), `autoRegisterStrip`.
 - **Auto screening (street-level frames, stitched panoramas):** `tools/photo_label/screen.py` —
-  `screen_from_labels` (rules: ground share >= `GROUND_MAX`, aspect >= `PANORAMA_ASPECT`), `screen_photo`
-  (cache `<stem>_screen.json`, SegFormer only when the aspect rule did not fire; photos with a `pano_seed`
-  pose are skipped by `server.py::_has_known_pose`, never auto-flagged); job
+  `screen_from_labels` (rules: ground share >= `GROUND_MAX`, aspect >= `PANORAMA_ASPECT`),
+  `geometry_reason` (known pose: camera under 5 m above ground, nearest building under 50 m;
+  `measure_pose` via `terrain_solve.py::project_buildings(min_dist_m=)`), `screen_photo`
+  (cache `<stem>_screen.json`, SegFormer only when no earlier rule fired; a known pose
+  (`server.py::_pose_geometry`) skips only the aspect rule); calibration
+  `claude/scripts/screen_metrics.py` -> `runs/screen_metrics.json`; job
   `server.py::api_photos_screen` / `_screen_region` / `_screen_flag` (GET state `api_photos_screen_state`,
   flags through `_set_flag`; no CUDA and > `SCREEN_CPU_MAX` photos = aspect only); page `index.html::screenPhotos`
   (polls from `switchRegion`, Undo unflags).

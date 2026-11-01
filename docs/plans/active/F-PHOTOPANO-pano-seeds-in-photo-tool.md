@@ -62,6 +62,64 @@ Status: approved 2026-10-26, steps 1–2 first (import and list), then 3–6. Ol
 6. **Per-building heights.** The pipeline's measured heights per footprint, read from its stage
    cache or report, are shown in the building list and on the map next to the model height.
 
+## Extension 2026-10-31: pano camera, depth, missing heights, pano vs frames
+
+Status: approved 2026-10-31 (A+B first, then D, then C+E after the Commons run; seed 6 included, flagged as a weak pose). The seed export landed 2026-10-27 (seeds 1, 4, 5
+and 6, 12 frames each, `pano.png` / `pano_seg.png` / `pano.json` / `heights.json` per seed).
+User choices (2026-10-31 form):
+- **Missing height:** a footprint visible from the seed with no entry in its `heights.json`.
+- **Yardsticks:** Google 3D mesh top at the same pose, `published_m`, and cross-seed agreement.
+- **Depth:** after the 57-photo Commons auto-register run finishes (GPU contention).
+- **Pano:** a full panorama camera; register and label on the strip (this replaces the
+  read-only strip of step 3).
+
+Approach:
+- **A. Cylindrical camera** `tools/photo_label/pano_camera.py`: column to heading
+  (`deg_per_col`, a column-0 heading), row to elevation angle (`f_px`, pitch), with
+  `project` / `backproject` matching `PinholeCamera`'s interface. `pano.json` notes the PNG is
+  rolled (north mid-strip) and that `col0_heading_deg` refers to the un-rolled strip, so the
+  column-0 heading is fitted from the 12 frames (each frame lands on known columns) and
+  checked before anything relies on it.
+- **B. Strip in the tool:** each `pano.png` is listed as a photo with a `pano_cylindrical`
+  pose. `terrain_solve.py::project_buildings` and `_solve` take either camera. Pairs on the
+  strip solve heading offset, pitch and height. Auto register renders Google 3D at the 12 frame
+  poses (pinhole, as now) and maps the matches onto strip columns, so `register.py` is reused
+  unchanged.
+- **C. Depth** for the 48 frames and the 4 strips (`_compute_depth`, GPU queue), run after the
+  Commons batch.
+- **D. Missing heights:** `project_buildings` over 360° from each seed, minus that seed's
+  `heights.json`, listed per seed and drawn on the map.
+- **E. Per-building heights, both ways:** the building top row (from the sky/building mask, with
+  depth giving distance) is converted to a height. This is done (1) per frame, with the frame
+  camera, and (2) on the strip, with the cylindrical camera. Each is scored against the three
+  yardsticks. Output: `runs/cartagena/03_seeds/compare.json` and a table in the tool, then a
+  decision entry stating whether strip, frames or neither is better.
+
+- **F. Auto-correct loop** (added 2026-10-31, user: start now, apply automatically when 2+
+  views agree; ask the panoramic session to relax withholding only after scoring). Per frame,
+  with the frame's pinhole camera: project every footprint, read the sky/building mask's top
+  edge over its columns, and classify it `ok` / `too_short` / `too_tall` / `unmatched_building`
+  (mask building with no footprint). Turn each mask top into a height (elevation angle x
+  distance from the pose). Keep a height only where 2+ frames or seeds agree (log ratio within
+  ln 1.25); when an outline rises into sky but a neighbouring footprint lines up with the mask,
+  move the reading there. Agreed readings are written automatically as method `photo_mask` to
+  the region's satellite readings file (they cannot publish over `city2stl/skyline` rules), and
+  scored against the 7 published Bocagrande towers and the Google 3D mesh. New module
+  `tools/photo_label/mask_heights.py`; tool wiring waits for A+B.
+
+Target files: `tools/photo_label/pano_camera.py` (new), `terrain_solve.py`, `server.py`
+(`pano_seed`, listing, a `/api/seeds/compare` route), `index.html` (strip canvas, wide-photo
+layout), `register.py` callers only, tests `tests/test_photo_label_pano_camera.py`. No edits to
+`city2stl/skyline/`.
+
+Success: a strip opens in the tool with buildings projected on it lining up within ~1° of
+the frames; both height sets exist for every seed building; the comparison table states the
+error against each yardstick and which method wins.
+
+Risks: the strip column-0 heading is unknown until fitted. Seed 6's pose is the weak
+`overhead` branch. Google 3D has building-top bias where tiles are coarse. Depth Anything
+is relative and needs per-photo fitting against the Google render (`api_depth_fit`).
+
 ## Target files
 
 `tools/photo_label/pano_import.py` (new), `tools/photo_label/regions.json`,

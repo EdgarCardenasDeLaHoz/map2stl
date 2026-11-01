@@ -38,6 +38,11 @@
   #oLeg .ring b { position:absolute; font-weight:600; }
   #dCompute { position:absolute; left:50%; top:55%; transform:translateX(-50%); display:none; font:inherit; padding:4px 14px; }
   #photo { width:100%; height:100%; display:block; cursor:crosshair; }
+  /* a wide photo (a 2688x540 pano strip): the photo takes the full width in a band, the map sits below it */
+  body.widePhoto #main { flex-direction:column; }
+  body.widePhoto #photoCol { flex:none; }
+  body.widePhoto #photoWrap { flex:none; height:var(--wideH, 200px); }
+  body.widePhoto #mapWrap { flex:1; min-height:160px; }
   #mapWrap { flex:45; min-width:0; position:relative; }
   #map, #cesium { position:absolute; inset:0; }
   #cesium { background:#000; }
@@ -69,6 +74,7 @@
     <button id="baseBtn">Map: satellite</button>
     <button id="fitBtn">Fit photo</button>
     <label title="Outline the OSM buildings in view, projected with the solved camera"><input id="bldChk" type="checkbox" checked> Buildings</label>
+    <label title="Height of the outlined buildings: the pipeline's published height, or the measured one where the published height was withheld (those show a dashed outline at the measured height)">Heights <select id="hModeSel"><option value="published">published</option><option value="measured">measured</option></select></label>
     <label title="On the map: camera field of view, a sight ray to each pair (cyan for auto pairs) and the buildings outlined on the photo"><input id="rayChk" type="checkbox" checked> Map lines</label>
     <label title="On the map: our best guesses of where the photo was taken and what it looks at (numbered, with the view as a wedge). Click one to use it; drag the large one to search from a new spot"><input id="guessChk" type="checkbox" checked> Guesses</label>
     <label title="List flagged photos too (marked ⚑); Flag bad becomes Unflag for them"><input id="flagChk" type="checkbox"> Show flagged</label>
@@ -188,6 +194,21 @@ function mapHighlight(id) {
   if (l) { l.setStyle({ color: "#ff453a", weight: 3, fillOpacity: .35 }); l.bringToFront(); }
 }
 
+// Where a footprint's drawn height comes from, in words: "31 m published (measured 148 m, withheld)".
+const SRC_WORDS = { osm_tag: "OSM height tag", osm_levels: "OSM levels x 3 m", published: "published",
+                    measured_withheld: "published", default: "default" };
+function heightText(p) {                // p: footprint properties or a projected building
+  const h = p.height_m != null ? p.height_m : p.height, src = p.height_source;
+  if (h == null || !src) return h == null ? "" : `${Number(h).toFixed(0)} m`;
+  let t = `${Number(h).toFixed(0)} m ${SRC_WORDS[src] || src}`;
+  if (p.measured_m != null) t += src === "measured_withheld" ? `, measured ${p.measured_m.toFixed(0)} m (withheld)` : `, measured ${p.measured_m.toFixed(0)} m`;
+  if (p.published_m != null && src !== "published" && src !== "measured_withheld") t += `, published ${p.published_m.toFixed(0)} m`;
+  return t;
+}
+function fpTip(p) {                     // map tooltip: the name and, when the pipeline knew it, the height source
+  const known = p.height_source && p.height_source !== "default";
+  return p.name || known ? [p.name, known ? heightText(p) : null].filter(Boolean).join(" - ") : null;
+}
 let fpGroup = null;                     // the footprints near the view, on the map
 let fpAll = [];                         // every footprint layer, with its bounds: [layer, bounds]
 // One canvas for every footprint: as SVG each of a region's 40k buildings is a DOM node.
@@ -200,7 +221,8 @@ async function loadFootprints(seq) {
     style: fpStyle,
     onEachFeature: (f, layer) => {
       fpLayers.set(f.properties.id, layer);
-      if (f.properties.name) layer.bindTooltip(f.properties.name, { sticky: true });
+      const tip = fpTip(f.properties);
+      if (tip) layer.bindTooltip(tip, { sticky: true });
       layer.on("click", () => { if (st.bld.length) { st.hiId = f.properties.id; draw(); } });
     },
     interactive: true,
@@ -616,6 +638,16 @@ new ResizeObserver(([e]) => {
   const was = map.getSize().x; map.invalidateSize();
   if (was < 50 && e.contentRect.width >= 50 && curRegion) homeMap();
 }).observe($("map"));
+// A wide photo (aspect > WIDE_ASPECT, e.g. a 2688x540 pano strip) gets the full width and a band as tall as its
+// width-fitted height (at least 140 px, at most 45% of the window); the map moves below it.
+const WIDE_ASPECT = 2.5;
+function layoutWide() {
+  const ph = st.photo, wide = !!ph && ph.w / ph.h > WIDE_ASPECT;
+  document.body.classList.toggle("widePhoto", wide);
+  if (wide) document.body.style.setProperty("--wideH", Math.round(Math.min(innerHeight * 0.45, Math.max(140, innerWidth * ph.h / ph.w + 8))) + "px");
+  else document.body.style.removeProperty("--wideH");
+}
+window.addEventListener("resize", () => { if (st.photo && document.body.classList.contains("widePhoto")) layoutWide(); });
 function fit() {
   if (!st.img) return;
   const s = Math.min(cv.width / st.img.width, cv.height / st.img.height);
@@ -687,6 +719,16 @@ function drawBuildings() {
     ctx.globalAlpha = 1; ctx.lineWidth = hi ? 3 : 1; ctx.strokeStyle = hi ? "#ff453a" : c; ctx.stroke();
     if (b.roof.length && !hi) { trace(b.roof); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke(); }
   }
+  drawMeasuredOutlines(order);
+  ctx.restore();
+}
+// A building the pipeline measured tall but published low: a dashed outline at the measured height.
+function drawMeasuredOutlines(list) {
+  ctx.save(); ctx.setLineDash([7, 4]); ctx.lineWidth = 2; ctx.strokeStyle = "#ffd60a";
+  for (const b of list) {
+    if (!b.measured_outline || !b.measured_outline.length) continue;
+    ctx.beginPath(); for (const r of b.measured_outline) scrPath(r, true); ctx.stroke();
+  }
   ctx.restore();
 }
 function bldAt(x, y) {                            // visible building under an image point (id buffer)
@@ -701,7 +743,7 @@ async function loadBuildings() {
   const q = st.solve && st.solve.pose;
   if (!q || q.elev_m == null) return;
   const ph = st.photo;
-  const r = await postJson("/api/project", { camera: q, image_px: [ph.w, ph.h] });
+  const r = await postJson("/api/project", { camera: q, image_px: [ph.w, ph.h], heights: $("hModeSel").value });
   if (st.solve && st.photo === ph && r.ok) {
     st.idMap = await new Promise(res => {
       if (!r.ids_png) return res(null);
@@ -713,6 +755,7 @@ async function loadBuildings() {
     st.bld = r.buildings; draw(); if (dv.tab === "or") dvOrient(); drawMapLines(); status(`${r.buildings.length} buildings in view.`); }
 }
 $("bldChk").onchange = draw;
+$("hModeSel").onchange = loadBuildings;
 $("rayChk").onchange = drawMapLines;
 cv.addEventListener("mousemove", e => {
   if (drag || !st.bld.length || !$("bldChk").checked) return;
@@ -720,7 +763,7 @@ cv.addEventListener("mousemove", e => {
   const b = bldAt(x, y), id = b ? b.id : null;
   if (id === st.hoverId) return;
   st.hoverId = id; mapHighlight(id); draw();
-  status(b ? `${b.name || "building"} (id ${b.id}), assumed height ${b.height_m.toFixed(0)} m, ${b.dist_m.toFixed(0)} m away` : "");
+  status(b ? `${b.name || "building"} (id ${b.id}), height ${heightText(b)}, ${b.dist_m.toFixed(0)} m away` : "");
 });
 cv.addEventListener("mouseleave", () => { if (st.hoverId != null) { st.hoverId = null; mapHighlight(null); draw(); } });
 
@@ -826,7 +869,7 @@ $("solveBtn").onclick = async () => {
   st.solve = { ...r, source: "solve" }; const q = r.pose; camPose = q; $("camViewBtn").disabled = false;
   showCam(q);
   $("result").textContent = `heading ${q.heading_deg.toFixed(1)} deg, hfov ${q.hfov_deg.toFixed(1)} deg, rms ${q.rms_px.toFixed(1)} px, ` +
-    `sigma ${q.sigma_m.toFixed(0)} m, roll ${q.roll_deg.toFixed(1)} deg, f ${q.f_px.toFixed(0)} px` +
+    `sigma ${q.sigma_m == null ? "n/a" : q.sigma_m.toFixed(0) + " m"}, roll ${q.roll_deg.toFixed(1)} deg, f ${q.f_px.toFixed(0)} px` +
     (q.elev_m == null ? " (column solve, no terrain)" :
       `, pitch ${q.pitch_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m (+${(q.elev_m - q.ground_m).toFixed(0)} above ground), ` +
       `median ${q.median_px.toFixed(1)} px = ${q.median_m.toFixed(1)} m`) +
@@ -1040,12 +1083,56 @@ async function meshGround(lat, lon) {
   } catch (_) { return null; } finally { done = true; }
 }
 const isPanoStart = c => c.source === "pano" || c.source === "pano_anchor";   // known pose: no heading sweep
+// Auto register on a pano strip (st.photo.projection "pano_cylindrical"): the server lists the seed's 12 frame
+// cameras with the strip's pose (/api/register/candidates). Each frame pose is rendered from Google 3D (pinhole, as
+// for any photo) and matched against the strip resampled to that frame (/api/register/step with `strip`), which
+// returns inlier pairs in strip pixels. The pairs of all frames then go to the cylindrical solve (/api/solve).
+const STRIP_PAIRS_PER_FRAME = 6;
+async function autoRegisterStrip() {
+  const r0 = await postJson("/api/register/candidates", { photo: st.photo.path, top_k: 1 });
+  const strip = r0.ok && r0.candidates[0];
+  if (!strip || !strip.frames || !strip.frames.length) { status("No frame cameras for this strip: " + (r0.error || r0.reason || "missing views.json") + "."); return; }
+  let geoid = st.geoid ?? r0.geoid_m ?? 50, elev = strip.elev_m;
+  if (!strip.elev_fitted) {
+    const g = await meshGround(strip.lat, strip.lon);
+    if (g != null) elev = g - geoid + PANO_CAM_HEIGHT_M;
+  }
+  const stripCam = { ...strip, elev_m: elev }, pairs = [], user = st.pairs.filter(p => p.h != null);
+  let n = 0;
+  for (const f of strip.frames) {
+    n++;
+    const cam = { ...f, elev_m: elev };
+    status(`Auto register strip: rendering frame ${n}/${strip.frames.length} (heading ${f.heading_deg.toFixed(0)})...`);
+    const rd = await renderAt(cam, geoid);
+    const r = await postJson("/api/register/step", { photo: st.photo.path, camera: cam, strip: stripCam, geoid_m: geoid,
+      user: [], render: rd.image, depth: rd.depth, depth_w: rd.depth_w, depth_h: rd.depth_h });
+    if (!r.ok) { status(`Auto register strip: frame ${n}: ${r.reason || r.error}`); continue; }
+    geoid = r.geoid_m;
+    const ps = r.pairs, take = Math.min(STRIP_PAIRS_PER_FRAME, ps.length);
+    for (let i = 0; i < take; i++) pairs.push(ps[Math.floor(i * ps.length / take)]);
+  }
+  if (pairs.length + user.length < 4) { status(`Auto register strip: only ${pairs.length} matches over the frames; solve with clicked pairs instead.`); return; }
+  st.geoid = geoid;
+  st.auto = pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h }));
+  st.solve = { pose: stripCam, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "guess" };
+  status("Auto register strip: fitting the strip camera...");
+  const r = await postJson("/api/solve", payload(true));
+  if (!r.ok) { status("Auto register strip: solve failed: " + r.error); return; }
+  const q = r.pose;
+  st.solve = { ...r, source: "auto" }; camPose = q; $("camViewBtn").disabled = false; showCam(q);
+  $("result").textContent = `auto register (strip, ${pairs.length} pairs from ${strip.frames.length} frames): heading ${q.heading_deg.toFixed(1)}, ` +
+    `pitch ${q.pitch_deg.toFixed(1)}, elev ${q.elev_m.toFixed(0)} m, median ${q.median_px.toFixed(1)} px = ${q.median_m.toFixed(1)} m` + (strip.weak ? " (weak seed pose: overhead)" : "");
+  renderRows(); draw(); dvRefresh(); await loadBuildings();
+  await saveLabels(true);
+  status(`Auto register strip done: ${st.auto.length} auto pairs (cyan), camera set and saved.`);
+}
 async function autoRegister() {
   if (autoBusy || !st.photo) return;
   if (tiles3d === false) { status("Auto register needs the Google 3D tiles (no API key on the server)."); return; }
   autoBusy = true; $("autoBtn").disabled = true;
   const base = { width: st.photo.w, height: st.photo.h };
   try {
+    if (st.photo.projection === "pano_cylindrical") { await autoRegisterStrip(); return; }
     let starts;
     if (camPose && camPose.elev_m != null) starts = [{ cam: { ...camPose, ...base }, geoid: st.geoid ?? 50,
       tag: st.solve && st.solve.source === "guess" && st.guesses ? `guess #${st.guesses.pick + 1}` : "current camera" }];
@@ -1429,7 +1516,7 @@ function orHover(e) {
 
 async function loadPhoto(path) {
   st.photo = st.photos.find(p => p.path === path);
-  syncFlagBtn();
+  syncFlagBtn(); layoutWide();
   for (const n of [...st.mapMarkers.keys(), ...ces.markers.keys()]) dropMarker(n);
   st.pairs = []; st.auto = []; st.pending = null; st.sel = null; st.nextN = 1; st.geoid = null; invalidate(); dvReset(); clearGuesses();
   const seq = regionSeq, ph = st.photo;
