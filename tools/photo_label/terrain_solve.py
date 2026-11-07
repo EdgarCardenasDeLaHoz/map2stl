@@ -214,6 +214,7 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
                    + (zg + hs - cam.elev_m) ** 2)
     res_m = px * dist / cam.f_px
     ground = float(dem(cam.lat, cam.lon))
+    ground = ground if math.isfinite(ground) else None  # DEM miss under the camera
     camd = {"lat": cam.lat, "lon": cam.lon, "elev_m": cam.elev_m,
             "ground_m": ground, "heading_deg": cam.heading_deg % 360,
             "pitch_deg": cam.pitch_deg, "roll_deg": cam.roll_deg, "f_px": cam.f_px,

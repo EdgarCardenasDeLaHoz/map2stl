@@ -20,7 +20,7 @@ export async function solveNow() {
   setResult(`heading ${q.heading_deg.toFixed(1)} deg, hfov ${q.hfov_deg.toFixed(1)} deg, rms ${q.rms_px.toFixed(1)} px, ` +
     `sigma ${q.sigma_m == null ? "n/a" : q.sigma_m.toFixed(0) + " m"}, roll ${q.roll_deg.toFixed(1)} deg, f ${q.f_px.toFixed(0)} px` +
     (q.elev_m == null ? " (column solve, no terrain)" :
-      `, pitch ${q.pitch_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m (+${(q.elev_m - q.ground_m).toFixed(0)} above ground), ` +
+      `, pitch ${q.pitch_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m${q.ground_m == null ? "" : ` (+${(q.elev_m - q.ground_m).toFixed(0)} above ground)`}, ` +
       `median ${q.median_px.toFixed(1)} px = ${q.median_m.toFixed(1)} m`) +
     (q.rejected.length ? `, rejected: ${q.rejected.join(", ")}` : ""));
   status("Solved."); renderRows(); draw(); dvRefresh(); await loadBuildings();

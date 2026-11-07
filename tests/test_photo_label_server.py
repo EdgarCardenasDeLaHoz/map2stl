@@ -637,3 +637,12 @@ def test_static_serves_only_js_and_css(srv):
     d = Path(SERVER).parent / "static"
     if (d / "main.js").exists():
         assert _raw(base, "/static/main.js.map")[0] == 404
+
+
+def test_json_safe_turns_nan_and_inf_into_null():
+    spec = importlib.util.spec_from_file_location("photo_label_server_nan", SERVER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out = mod.json_safe({"ground_m": float("nan"), "a": [1.5, float("inf"), (float("-inf"),)], "s": "x"})
+    assert out == {"ground_m": None, "a": [1.5, None, [None]], "s": "x"}
+    json.dumps(out, allow_nan=False)

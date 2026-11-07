@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import socket
 import sys
 import threading
@@ -237,6 +238,18 @@ from tiles import (  # noqa: E402,F401
 MAX_BODY = 32 * 1024 * 1024   # /api/register/step carries a render and a depth grid (base64)
 
 
+def json_safe(obj):
+    """``obj`` with NaN and infinities replaced by None: ``json.dumps`` writes them as bare
+    ``NaN``, which the browser's JSON parser rejects (a DEM miss under the camera did this)."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    return obj
+
+
 class LabelHandler(BaseHTTPRequestHandler):
     # Keep-alive: a page of 3D tiles is ~1,000 requests, and each new connection to localhost cost
     # ~300 ms (six at a time), so HTTP/1.0 left tiles queued for a second each. Every response
@@ -274,7 +287,7 @@ class LabelHandler(BaseHTTPRequestHandler):
         self._send(200, path.read_bytes(), ctype, {"Cache-Control": "no-cache"})
 
     def _json(self, code: int, obj) -> None:
-        self._send(code, json.dumps(obj).encode("utf-8"), "application/json")
+        self._send(code, json.dumps(json_safe(obj), allow_nan=False).encode("utf-8"), "application/json")
 
     def _proxy_tiles(self, u) -> None:
         """Forward /tiles3d/<path> to Google with the key added; stream the body back."""
