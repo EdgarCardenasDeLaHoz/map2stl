@@ -24,7 +24,8 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   nearest in view, `MIN_DIST_M`, `MIN_VISIBLE_PX`).
 - **Mask heights (auto-correct loop, plan F):** `tools/photo_label/mask_heights.py` - per frame `analyse_frame` (`pose_gate` bad_pose check, `column_top` mask top edge, `classify` ok / too_short / too_tall, `unmatched_blobs`, `column_height` elevation angle x `ray_ring_dist`); across frames `aggregate` / `agree_group` (2+ views within ln 1.25), `find_reassignments`; output `to_readings` (method `photo_mask`), `merge_production` (backup + merge), `score`, `google3d_yardstick` (TODO). Runner `claude/scripts/run_mask_heights.py`; tests `tests/test_photo_label_mask_heights.py`.
 - **Server, routes, config:** `tools/photo_label/server.py` — `LabelHandler.do_GET` / `do_POST`
-  (route table), `make_server`, `main`, and re-exports of the names `app/server/core/photo_solve.py`
+  (route table), `make_server`, `main`, `json_safe` (every JSON reply: NaN and infinity become
+  `null`, because the browser's JSON parser rejects bare `NaN`), and re-exports of the names `app/server/core/photo_solve.py`
   and `claude/scripts` import. The work lives in sibling modules (split 2026-11-01):
   `paths.py` (photo and side-file paths: `photo_rel`, `safe_photo`, `label_path`, `depth_path`, `flags_path`),
   `footprints.py` (`overpass_to_geojson` with building multipolygon relations stitched by `_stitch_rings`,
