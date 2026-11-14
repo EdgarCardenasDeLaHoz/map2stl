@@ -106,6 +106,12 @@ class CityRequest(BoundingBox):
         default="auto",
         description="'auto' classifies untagged roofs on read (city_data.with_roof_shapes); "
                     "'off' (or false) keeps OSM roof:shape only.")
+    panorama_heights: str | bool | list[str] = Field(
+        default="auto",
+        description="Street View heights (city_data.with_panorama_heights): 'auto' applies the "
+                    "newest skyline report of each region covering the bbox plus the photo-solve "
+                    "readings; 'off' (or false) none; a report name or list uses those. The "
+                    "payload's 'panorama_heights' block counts buildings and lists the reports.")
 
 
 class EnhanceHeightsRequest(BoundingBox):
@@ -169,6 +175,11 @@ class CityRasterRequest(BaseModel):
         description="Keep input grid shape after projection (legacy/opt-in). "
                     "Default False: output reflects the projection's true aspect ratio.",
     )
+    panorama_heights: str | bool | list[str] = Field(
+        default="auto",
+        description="Street View heights for buildings read from the OSM cache (when the "
+                    "body has none): as CityRequest.panorama_heights. Part of the raster cache "
+                    "key when a report or photo reading covers the bbox.")
 
 
 # ---------------------------------------------------------------------------

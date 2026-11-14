@@ -47,11 +47,14 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     reference raster (city2stl.landmarks.reference_landmarks; no effect
                     outside its bbox; a landmark_overrides entry on the same id wins).
                     report.json "landmarks_reference" holds the stats
-    panorama_heights  a skyline region report ("Cartagena_v19_extras", a report folder or a
-                    heights.json path): its corroborated + single buildings replace the
+    panorama_heights  Street View heights: "auto" (default; the newest skyline report of
+                    each region covering the bbox, plus the photo-solve readings), "off",
+                    or a report name / list ("Cartagena_v19_extras", a folder or a
+                    heights.json path). Corroborated + single (+ photo) rows replace the
                     default / raster heights of the footprints they overlap (never a tag,
-                    landmark or survey height; city2stl.panorama_heights). report.json
-                    "panorama_heights" counts rows, applied and skipped
+                    landmark, survey or user height; city_data.with_panorama_heights, the
+                    preview's own call). A named report that does not exist fails the task.
+                    report.json "panorama_heights" counts reports, rows, applied, skipped
     puzzle          {piece_mm | cols+rows | col_edges_mm+row_edges_mm, knob_width_mm,
                      knob_depth_mm, knob_shape, clearance_mm, method, engrave,
                      layout, bed_mm}   (app/server/core/puzzle.py)
@@ -82,6 +85,7 @@ from app.server.core.city_data import (
     check_city_area,
     get_city_layers,
     merge_layer_data,
+    with_panorama_heights,
 )
 from app.server.core.export import mesh_terrain_stage
 from app.server.core.export_params import ExportContext
@@ -92,8 +96,7 @@ from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.canopy import canopy_layer
 from city2stl.city_model import build_on_terrain, is_downhill_piste, resolve_layers
 from city2stl.landmarks import LandmarkError, reference_landmarks
-from city2stl.panorama_heights import apply_panorama_heights
-from city2stl.panorama_heights import load_rows as load_panorama_rows
+from city2stl.panorama_heights import heights_mode as panorama_mode
 
 logger = logging.getLogger(__name__)
 
@@ -241,22 +244,28 @@ def run_city_model(data: dict, task: ExportTask) -> None:
                           names, tol, min_area, allow_large=allow_large,
                           roof_shapes=data.get("roof_shapes"),
                           roof_progress=lambda d, t: task.update(
-                              5, f"Classifying roofs {d:,} of {t:,}..."))
+                              5, f"Classifying roofs {d:,} of {t:,}..."),
+                          panorama_heights="off")   # applied below, after the client's edits
     layers = {n: osm[n] for n in enabled if isinstance(osm.get(n), dict)}
     # Layers the caller edited locally (e.g. SDK roof classification, height overrides)
     # replace the cached OSM copy, which has no record of those edits; the survey
     # heights the server filled are merged back in (city_data.merge_layer_data).
     layers = merge_layer_data(layers, data.get("layer_data"), enabled)
+    # Street View / photo heights: the same call the preview's read makes
+    # (city_data.with_panorama_heights), after the client's edits so a user height wins
+    # and a stale client copy of them is stripped and reapplied.
     panorama_report = None
-    if data.get("panorama_heights") and isinstance(layers.get("buildings"), dict):
-        task.update(18, "Applying panorama heights...")
-        try:
-            rows = load_panorama_rows(data["panorama_heights"])
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            task.fail(f"Panorama heights: {exc}")
+    if isinstance(layers.get("buildings"), dict):
+        mode = panorama_mode(data.get("panorama_heights"))
+        if mode != "off":
+            task.update(18, "Applying Street View heights...")
+        applied = with_panorama_heights(layers, bbox["north"], bbox["south"], bbox["east"],
+                                        bbox["west"], mode)
+        panorama_report = applied.pop("panorama_heights", None)
+        layers = applied
+        if isinstance(mode, list) and panorama_report and panorama_report.get("error"):
+            task.fail(f"Panorama heights: {panorama_report['error']}")
             return
-        layers["buildings"], panorama_report = apply_panorama_heights(layers["buildings"], rows)
-        logger.info("Panorama heights applied: %s", panorama_report)
     trail_context = None
     if "trails" in enabled:   # optional layer: fetched only when the request enables it
         task.update(20, "Loading trails...")

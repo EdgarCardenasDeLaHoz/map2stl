@@ -1,9 +1,11 @@
 """city2stl.panorama_heights: panorama rows replace default / raster heights, nothing measured."""
 
 import json
+import os
 
 import pytest
 
+from city2stl import panorama_heights as ph
 from city2stl.panorama_heights import apply_panorama_heights, load_rows, resolve_report
 
 
@@ -124,3 +126,223 @@ def test_precedence_through_the_export_merge_order():
     assert got == [(21.0, "survey"), (40.0, "panorama_corroborated"), (33.0, "user_override"),
                    (14.0, "osm_tag")]
     assert summary["skipped"] == {"kept_measured": 3} and summary["applied"] == {"corroborated": 1}
+
+
+# ---------------------------------------------------------------- Phase 5: discovery + read path
+
+BOX = (0.01, -0.01, 0.01, -0.01)            # north, south, east, west around (0, 0)
+
+
+def _report(root, name, rows, *, region="Demo", bbox=BOX, sidecar=None, mtime=None,
+            head=True):
+    """A report folder ``<root>/<name>_skyline_report`` whose heights.json carries region,
+    bbox_nsew and tier_counts before buildings, as the writer does."""
+    d = root / f"{name}_skyline_report"
+    d.mkdir()
+    counts = {}
+    for r in rows:
+        counts[r["tier"]] = counts.get(r["tier"], 0) + 1
+    doc = {"region": region, "bbox_nsew": list(bbox), "tier_counts": counts} if head else {}
+    doc["buildings"] = rows
+    (d / "heights.json").write_text(json.dumps(doc), "utf-8")
+    if mtime is not None:
+        os.utime(d / "heights.json", (mtime, mtime))
+    if sidecar is not None:
+        (d / "report_summary.json").write_text(json.dumps({"schema": 1, **sidecar}), "utf-8")
+    return d
+
+
+def _roots():
+    return ph.reports_root(), ph.photo_root()   # the per-test folders of conftest
+
+
+def test_find_reports_by_bbox_head_and_sidecar():
+    root, _ = _roots()
+    _report(root, "Here_v1", [_row(0, 0, "single")], region="Here")
+    _report(root, "Far_v1", [_row(50, 50, "single")], region="Far", bbox=(51, 49, 51, 49))
+    _report(root, "Prior_v1", [_row(0, 0, "tag_prior")], region="Prior")
+    # The sidecar's box wins over heights.json's (and says it is far away): skipped unparsed.
+    _report(root, "Side_v1", [_row(0, 0, "single")], region="Side",
+            sidecar={"bbox_nsew": [51, 49, 51, 49], "tier_counts": {"single": 1}})
+    _report(root, "Side_v2", [_row(0, 0, "corroborated")], region="Side2",
+            sidecar={"bbox_nsew": list(BOX), "region": "Side two", "generated_at": "2026-11-01",
+                     "tier_counts": {"corroborated": 1}})
+    found = {r["name"]: r for r in ph.find_reports(BOX)}
+    assert set(found) == {"Here_v1", "Side_v2"}
+    assert found["Here_v1"]["rows"] == {"single": 1} and found["Here_v1"]["rows_in_bbox"] == 1
+    assert found["Here_v1"]["sidecar"] is False
+    assert found["Side_v2"]["sidecar"] is True and found["Side_v2"]["region"] == "Side two"
+    assert found["Side_v2"]["generated_at"] == "2026-11-01"
+    assert {r["name"] for r in ph.find_reports(None)} == {"Here_v1", "Far_v1", "Side_v1",
+                                                         "Side_v2"}
+
+
+def test_find_reports_without_a_head_parses_the_file():
+    root, _ = _roots()
+    _report(root, "Old_v1", [_row(0, 0, "single")], head=False)
+    _report(root, "OldFar_v1", [_row(50, 50, "single")], head=False, region="x")
+    assert [r["name"] for r in ph.find_reports(BOX)] == ["Old_v1"]
+
+
+def test_newest_run_of_a_region_supersedes_older_ones():
+    root, _ = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "single", 20.0)], mtime=1_000_000)
+    _report(root, "Demo_v2", [_row(0, 0, "single", 25.0)], region="demo", mtime=2_000_000)
+    _report(root, "Other_v1", [_row(0, 0, "single", 30.0)], region="Other", mtime=1_500_000)
+    assert [r["name"] for r in ph.find_reports(BOX)] == ["Demo_v2", "Other_v1"]
+    every = ph.find_reports(BOX, include_superseded=True)
+    assert [(r["name"], r["superseded_by"]) for r in every] == [
+        ("Demo_v2", None), ("Other_v1", None), ("Demo_v1", "Demo_v2")]
+    # The newest report wins a building two regions' reports cover.
+    out, summary = ph.apply_heights(_fc(_feature(0, 0)), BOX)
+    p = out["features"][0]["properties"]
+    assert (p["height_m"], p["height_source"], p["height_report"]) == (
+        25.0, "panorama_single", "Demo_v2")
+    assert summary["buildings"] == 1 and summary["skipped"] == {"lost_to_newer_report": 1}
+    assert [(r["name"], r["applied"]) for r in summary["reports"]] == [
+        ("Demo_v2", 1), ("Other_v1", 0)]
+
+
+def _photo_store(root, region, readings):
+    doc = {"source": "photo", "photos": {"a.jpg": {"saved": "2026-11-01", "heights": [
+        {"building": f"b{i}", "lat": lat, "lon": lon, "height_m": m, "osm_height_m": 10.0}
+        for i, (lon, lat, m) in enumerate(readings)]}}}
+    (root / f"{region}_photo_heights.json").write_text(json.dumps(doc), "utf-8")
+
+
+def test_photo_readings_win_and_take_the_median_per_footprint():
+    root, photos = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "corroborated", 40.0), _row(1, 1, "single", 22.0)],
+            bbox=(2, -1, 2, -1))
+    _photo_store(photos, "Demo", [(0.0002, 0.0002, 30.0), (0.0001, 0.0003, 34.0),
+                                  (0.0003, 0.0001, 50.0), (9.0, 9.0, 99.0)])
+    assert len(ph.photo_rows(BOX)) == 3
+    fc = _fc(_feature(0, 0), _feature(1, 1), _feature(0.002, 0.002, 9.0, "osm_tag"))
+    out, summary = ph.apply_heights(fc, (2, -1, 2, -1))
+    props = [f["properties"] for f in out["features"]]
+    assert (props[0]["height_m"], props[0]["height_source"], props[0]["height_tier"]) == (
+        34.0, "photo_solve", "photo")
+    assert (props[1]["height_m"], props[1]["height_source"]) == (22.0, "panorama_single")
+    assert props[2]["height_m"] == 9.0
+    assert summary["photo"] == {"readings": 3, "applied": 1} and summary["buildings"] == 2
+
+
+def test_apply_is_idempotent_off_undoes_and_named_reports():
+    root, _ = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "single", 20.0)], mtime=1_000_000)
+    _report(root, "Demo_v2", [_row(0, 0, "single", 25.0)], mtime=2_000_000)
+    fc = _fc(_feature(0, 0, 10.0, "default"))
+    once, _ = ph.apply_heights(fc, BOX)
+    twice, summary = ph.apply_heights(once, BOX)
+    assert twice == once and summary["buildings"] == 1
+    off, summary = ph.apply_heights(once, BOX, "off")
+    assert off["features"][0]["properties"] == fc["features"][0]["properties"]
+    assert summary == {"mode": "off", "buildings": 0, "reports": [],
+                       "photo": {"readings": 0, "applied": 0}}
+    named, summary = ph.apply_heights(once, BOX, "Demo_v1")
+    assert named["features"][0]["properties"]["height_m"] == 20.0 and summary["mode"] == "named"
+    _, summary = ph.apply_heights(fc, BOX, ["Nope"])
+    assert "Nope" in summary["error"] and summary["buildings"] == 0
+
+
+@pytest.mark.parametrize("value,expect", [
+    (None, "auto"), (True, "auto"), ("auto", "auto"), ("on", "auto"), (False, "off"),
+    ("off", "off"), ([], "off"), ("Demo_v1", ["Demo_v1"]), (["A", "B"], ["A", "B"])])
+def test_heights_mode(value, expect):
+    assert ph.heights_mode(value) == expect
+
+
+def test_signature_is_empty_without_sources_and_changes_with_a_new_run():
+    root, _ = _roots()
+    assert ph.signature(BOX) == "" and ph.signature(BOX, "off") == ""
+    _report(root, "Demo_v1", [_row(0, 0, "single")], mtime=1_000_000)
+    sig = ph.signature(BOX)
+    assert sig.startswith("_ph") and ph.signature(BOX) == sig
+    _report(root, "Demo_v2", [_row(0, 0, "single")], mtime=2_000_000)
+    assert ph.signature(BOX) not in ("", sig)
+    assert ph.signature((51, 49, 51, 49)) == ""
+
+
+def test_city_data_applies_heights_on_read(tmp_data_dir):
+    """get_city_layers (preview, overlay and export all read through it) applies the reports."""
+    from unittest.mock import patch
+
+    from app.server.core import city_data
+    from app.server.core.cache import osm_cache_key, write_osm_cache
+    from city2stl.cache_policy import CITY_PIPELINE_VERSION
+
+    root, _ = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "corroborated", 41.0)])
+    bbox = dict(north=BOX[0], south=BOX[1], east=BOX[2], west=BOX[3])
+    payload = {"buildings": _fc(_feature(0, 0), _feature(0.003, 0.003)), "roads": _fc(),
+               "city_pipeline_version": CITY_PIPELINE_VERSION}
+    write_osm_cache(osm_cache_key(*BOX, 0.5, 5.0), payload, {**bbox, "tol": 0.5, "min_area": 5.0})
+
+    def get(mode):
+        with patch("app.server.core.city_data.fetch_osm_data", return_value={}):
+            return city_data.get_city_layers(*BOX, ["buildings", "roads"], 0.5, 5.0,
+                                             roof_shapes="off", panorama_heights=mode)
+
+    out = get("auto")
+    props = [f["properties"] for f in out["buildings"]["features"]]
+    assert (props[0]["height_m"], props[0]["height_source"]) == (41.0, "panorama_corroborated")
+    assert props[1]["height_source"] == "default"
+    stats = out["panorama_heights"]
+    assert stats["buildings"] == 1 and [r["name"] for r in stats["reports"]] == ["Demo_v1"]
+    off = get("off")
+    assert off["buildings"]["features"][0]["properties"]["height_source"] == "default"
+    assert off["panorama_heights"]["mode"] == "off"
+    any_tol, _ = city_data.read_city_layers_any_tolerance(*BOX)
+    assert any_tol["buildings"]["features"][0]["properties"]["height_m"] == 41.0
+
+
+def test_city_model_task_uses_the_same_function(client, monkeypatch):
+    """The export applies heights after merging the client copy, through
+    with_panorama_heights, and the report records it."""
+    import app.server.core.city_model_task as task_mod
+    from app.server.core.export_tasks import ExportTask
+
+    root, _ = _roots()
+    bbox = dict(north=37.19, south=37.172, east=-3.578, west=-3.605)
+    x, y = -3.59, 37.18
+    _report(root, "Granada_v1", [_row(x, y, "single", 27.0)], region="Granada",
+            bbox=(bbox["north"], bbox["south"], bbox["east"], bbox["west"]))
+    asked, seen = [], []
+    monkeypatch.setattr(task_mod, "get_city_layers",
+                        lambda *a, **k: asked.append(k.get("panorama_heights"))
+                        or {"buildings": _fc(_feature(x, y))})
+    real = task_mod.with_panorama_heights
+
+    def spy(payload, *a):
+        out = real(payload, *a)
+        seen.append((a[-1], out["buildings"]["features"][0]["properties"],
+                     out["panorama_heights"]))
+        return out
+
+    monkeypatch.setattr(task_mod, "with_panorama_heights", spy)
+    r = client.get("/api/terrain/dem", params={**bbox, "dim": 60, "projection": "none"})
+    body = {"format": "city", "dem_id": r.json()["dem_id"], "name": "t"}
+    task_mod.run_city_model(dict(body), ExportTask("p1"))
+    assert asked == ["off"]
+    mode, props, stats = seen[-1]
+    assert mode == "auto"
+    assert (props["height_m"], props["height_source"]) == (27.0, "panorama_single")
+    assert stats["buildings"] == 1
+    task_mod.run_city_model({**body, "panorama_heights": "off"}, ExportTask("p2"))
+    assert seen[-1][1]["height_source"] == "default"
+
+
+def test_height_reports_endpoint(client):
+    root, photos = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "single")], mtime=1_000_000)
+    _report(root, "Demo_v2", [_row(0, 0, "single"), _row(0.002, 0.002, "corroborated")],
+            mtime=2_000_000)
+    _photo_store(photos, "Demo", [(0.0002, 0.0002, 30.0)])
+    q = dict(north=BOX[0], south=BOX[1], east=BOX[2], west=BOX[3])
+    body = client.get("/api/cities/height-reports", params=q).json()
+    assert [r["name"] for r in body["reports"]] == ["Demo_v2"]
+    assert body["reports"][0]["rows"] == {"single": 1, "corroborated": 1}
+    assert body["photo_readings"] == 1 and body["rows"] == 3
+    every = client.get("/api/cities/height-reports", params={**q, "all": True}).json()
+    assert [r["superseded_by"] for r in every["reports"]] == [None, "Demo_v2"]
+    assert every["rows"] == 3
