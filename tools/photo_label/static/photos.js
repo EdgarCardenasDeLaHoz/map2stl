@@ -32,6 +32,14 @@ export async function openPhoto(path) {
     const p = { n: st.nextN++, label: l.label, x: l.x, y: l.y, lat: l.lat, lon: l.lon, h: l.h_ellipsoid_m ?? null };
     st.pairs.push(p); setMapMarker(p);
   }
+  if (ph.projection === "pano_cylindrical") {                // a seed strip: read-only skyline reference points (cyan, never saved)
+    try {
+      const sk = await getJson(api("/api/skyline?photo=" + encodeURIComponent(path)));
+      if (seq !== app.regionSeq || st.photo !== ph) return;
+      for (const l of sk.skyline || []) st.auto.push({ n: "sky" + (st.auto.length + 1), label: l.label, x: l.x, y: l.y, lat: l.lat, lon: l.lon, h: l.h_ellipsoid_m ?? null,
+        source: "skyline", confidence: l.confidence, tier: l.tier, feature_id: l.feature_id });
+    } catch (_) { /* no report for this strip: no skyline dots */ }
+  }
   invalidate();
   const q = doc.camera;                    // a saved camera: buildings reappear without solving again
   if (q && q.lat != null) {
@@ -59,8 +67,8 @@ export async function flagPhoto(path, bad) {
 export const showFlagged = () => $("flagChk").checked && toolOn("screen");
 export const photoOpt = p => `<option value="${esc(p.path)}">${p.bad ? "⚑ flagged · " : ""}${esc(p.path)} (${p.w}x${p.h})</option>`;
 export function fillPhotoSel() {
-  // seed frames (seeds/seed_N/...) get one optgroup per seed folder; other photos stay flat
-  const html = [], grp = p => p.path.startsWith("seeds/") ? p.path.slice(0, p.path.lastIndexOf("/")) : "";
+  // photos in a seed folder (<root>/seed_N/...) get one optgroup per folder; other photos stay flat
+  const html = [], grp = p => /\/seed_[^/]+\/[^/]+$/.test(p.path) ? p.path.slice(0, p.path.lastIndexOf("/")) : "";
   let cur = "";
   for (const p of st.photos) {
     const g = grp(p);

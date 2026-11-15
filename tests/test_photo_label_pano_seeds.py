@@ -41,7 +41,7 @@ def test_listing_skips_strip_masks_json(mod, tmp_path):
     _seed(tmp_path)
     cfg = SimpleNamespace(photo_roots={"seeds": tmp_path / "03_seeds"})
     names = [p.name for _, _, p in mod._photo_files(cfg)]
-    assert names == ["7_030.png", "7_060.png", "pano.png"]      # strip listed; masks / segmentations hidden
+    assert names == ["pano.png", "7_030.png", "7_060.png"]      # strip first; masks / segmentations hidden
 
 
 def test_seed_frame_pose(mod, tmp_path):

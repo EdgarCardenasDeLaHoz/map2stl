@@ -12,6 +12,7 @@ Serves the pairing page and a few JSON endpoints:
     GET  /photo/<rel>     one photo's bytes
     GET  /api/footprints  OSM building footprints as GeoJSON (from a cached Overpass JSON)
     GET  /api/labels      saved pairs for ?photo=<rel>
+    GET  /api/skyline     read-only skyline pairs of a seed strip, ?photo=<rel> (never saved)
     POST /api/labels      save pairs to city2stl/skyline/sites/annotations/<region>_<photo>.json
     POST /api/solve       camera fit on the pairs: terrain fit (terrain_solve.solve_terrain, DEM
                           from --dem) seeded by camera_solver.solve_pose, which is the answer
@@ -142,6 +143,7 @@ from paths import (  # noqa: E402,F401
 )
 from photos import (  # noqa: E402,F401
     api_get_labels,
+    api_get_skyline,
     api_photo_flag,
     api_save_labels,
     list_photos,
@@ -355,6 +357,8 @@ class LabelHandler(BaseHTTPRequestHandler):
             elif u.path == "/api/labels":
                 rel = parse_qs(u.query).get("photo", [""])[0]
                 self._json(200, api_get_labels(cfg, rel))
+            elif u.path == "/api/skyline":
+                self._json(200, api_get_skyline(cfg, parse_qs(u.query).get("photo", [""])[0]))
             elif u.path.startswith("/photo/"):
                 p = safe_photo(cfg, unquote(u.path[len("/photo/"):]))
                 if p is None:

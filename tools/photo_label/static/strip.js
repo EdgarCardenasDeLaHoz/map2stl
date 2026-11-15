@@ -46,10 +46,10 @@ export async function autoRegisterStrip() {
   if (pairs.length + user.length < 4) { status(`Auto register strip: only ${pairs.length} matches over the frames; solve with clicked pairs instead.`); return; }
   const prevSolve = st.solve;                       // a failed fit puts this back, so the readout and the map agree
   st.geoid = geoid;
-  st.auto = pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h }));
+  st.auto = st.auto.filter(p => p.source === "skyline").concat(pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h })));
   st.solve = { pose: stripCam, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "guess" };
   status("Auto register strip: fitting the strip camera...");
-  const r = await postJson("/api/solve", payload(true));
+  const r = await postJson("/api/solve", payload(true, true));
   if (stale()) return;
   if (!r.ok) { st.solve = prevSolve; setPose(); draw(); status("Auto register strip: solve failed: " + r.error); return; }
   const q = r.pose;

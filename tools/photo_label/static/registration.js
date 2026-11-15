@@ -14,7 +14,7 @@ import { $, f32b64, status } from "./util.js";
 export async function solveNow() {
   const ph = st.photo, seq = app.regionSeq, stale = () => st.photo !== ph || seq !== app.regionSeq;
   status("Solving...");
-  const r = await postJson("/api/solve", payload(false));
+  const r = await postJson("/api/solve", payload(false, true));
   if (stale()) return;                                // another photo or region opened meanwhile: this answer is not for it
   if (!r.ok) { status("Solve failed: " + r.error); return; }
   st.solve = { ...r, source: "solve" }; const q = r.pose; app.camPose = q; $("camViewBtn").disabled = false;
@@ -212,7 +212,7 @@ export async function autoRegister() {
     if (!best) { if (!/^Auto register: /.test($("status").textContent)) status("Auto register found no usable match."); return; }
     const { r } = best, q = r.camera;
     st.geoid = r.geoid_m;
-    st.auto = r.pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h }));
+    st.auto = st.auto.filter(p => p.source === "skyline").concat(r.pairs.map((p, i) => ({ n: "auto" + (i + 1), label: "auto" + (i + 1), x: p.x, y: p.y, lat: p.lat, lon: p.lon, h: p.h })));
     app.camPose = q; $("camViewBtn").disabled = false;
     st.solve = { pose: q, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "auto" };
     showCam(q);

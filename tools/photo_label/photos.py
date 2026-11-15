@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from footprints import name_at
 from paths import (
     Conflict,
+    _is_seed_frame,
     _is_seed_strip,
     _photo_files,
     flags_path,
@@ -40,10 +41,14 @@ def list_photos(cfg: Config, include_bad: bool = False) -> list[dict]:
     """One entry per folder+stem (png, else jpg, else webp); derived outputs are hidden.
     Photos flagged bad (api_photo_flag) are left out unless `include_bad`, which lists them
     with `bad: true` (unflagged entries keep the {path, w, h} shape). A seed strip adds
-    `projection: "pano_cylindrical"`."""
+    `projection: "pano_cylindrical"`. The list follows `_photo_files` order (seed roots first, strip first
+    in its folder) and leaves out the single frames of a seed folder that has a strip (`_is_seed_frame`):
+    they stay in `_photo_files` and open by path."""
     flags = load_flags(cfg)
     out = []
     for key, root, p in _photo_files(cfg):
+        if _is_seed_frame(p):
+            continue
         rel = photo_rel(key, root, p)
         bad = rel in flags
         if bad and not include_bad:
@@ -101,7 +106,21 @@ def api_get_labels(cfg: Config, rel: str) -> dict:
     p = label_path(cfg, rel)
     if not p.is_file() or _owner_clash(p, rel):
         return {"photo": rel, "labels": []}
-    return json.loads(p.read_text(encoding="utf-8"))
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    if isinstance(doc.get("labels"), list):      # a skyline row never belongs to a label file (see `api_save_labels`)
+        doc["labels"] = [r for r in doc["labels"] if not (isinstance(r, dict) and r.get("source") == "skyline")]
+    return doc
+
+
+def api_get_skyline(cfg: Config, rel: str) -> dict:
+    """Read-only skyline pairs of a seed strip (`seeds.skyline_pairs`), for the page's cyan auto dots. Never
+    saved (`api_save_labels` drops them). Unknown photo: NotFound; a photo with none (or no report): empty."""
+    from seeds import skyline_pairs
+    photo = require_photo(cfg, rel)
+    try:
+        return {"photo": rel, "skyline": skyline_pairs(photo, cfg)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"photo": rel, "skyline": []}
 
 
 def api_save_labels(cfg: Config, body: dict) -> dict:
@@ -111,6 +130,8 @@ def api_save_labels(cfg: Config, body: dict) -> dict:
     fc = cfg.footprints()
     labels = []
     for lab in body.get("labels", []):
+        if lab.get("source") == "skyline":      # read-only reference points: never written to the label file
+            continue
         lat, lon = float(lab["lat"]), float(lab["lon"])
         nm = name_at(fc, lat, lon)
         row = {"label": str(lab.get("label") or nm or "P"), "osm_names": [nm] if nm else [],

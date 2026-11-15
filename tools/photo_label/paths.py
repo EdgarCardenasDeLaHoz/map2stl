@@ -22,6 +22,7 @@ DEFAULT_OSM = REPO_ROOT / "cache" / "5d947d851a9f2b205205e503611a5df310e7e87e.js
 DEFAULT_DEM = REPO_ROOT / "cache" / "opentopo" / "d6eb6dd762c161a4afb3471521b53e14.tif"
 DEFAULT_PHOTOS = REPO_ROOT / "runs" / "photo"
 ANNOTATIONS = REPO_ROOT / "city2stl" / "skyline" / "sites" / "annotations"
+SKYLINE_REPORTS = REPO_ROOT / "city2stl" / "skyline" / "runs" / "region_reports"   # read-only: `seeds.skyline_pairs`
 REGIONS_FILE = HERE / "regions.json"
 MODEL_DIR = REPO_ROOT / "runs" / "photo_label_model"
 TILES_CACHE_DIR = REPO_ROOT / "runs" / "photo_label_tiles"
@@ -61,8 +62,24 @@ def _is_seed_strip(p: Path) -> bool:
     return p.name.lower() == "pano.png" and p.parent.parent.name == "03_seeds"
 
 
+def _is_seed_frame(p: Path) -> bool:
+    """True for a single pinhole frame (`N_HHH.png`) of a seed folder that also holds the stitched strip
+    `pano.png`: the page lists the strip instead (`photos.list_photos`), but `_photo_files`, `pano_seed`
+    and `safe_photo` still know the frame, since registration and screening use it with its known camera."""
+    return (p.parent.parent.name == "03_seeds" and not _is_seed_strip(p)
+            and any((p.parent / f"pano{e}").is_file() for e in (".png", ".jpg", ".jpeg", ".webp")))
+
+
+def _natural(s: str) -> list:
+    """Sort key putting `seed_2` before `seed_10`."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+
 def _photo_files(cfg: Config) -> list[tuple[str, Path, Path]]:
-    """(root key, root folder, file) per folder+stem across the roots (png, else jpg, else webp)."""
+    """(root key, root folder, file) per folder+stem across the roots (png, else jpg, else webp).
+
+    Order: the roots as `regions.json` lists them (`cfg.photo_roots`; Cartagena has `seeds` before `commons`),
+    then folder, then inside a folder the stitched strip (`_is_seed_strip`) first and the rest by name."""
     best: dict[tuple, tuple[str, Path, Path]] = {}
     for key, root in cfg.photo_roots.items():
         if not root.is_dir():
@@ -74,7 +91,9 @@ def _photo_files(cfg: Config) -> list[tuple[str, Path, Path]]:
             k = (key, p.parent, p.stem)
             if k not in best or _EXT_RANK[ext] < _EXT_RANK[best[k][2].suffix.lower()]:
                 best[k] = (key, root, p)
-    return sorted(best.values(), key=lambda t: (t[0], t[2]))
+    order = {k: i for i, k in enumerate(cfg.photo_roots)}
+    return sorted(best.values(), key=lambda t: (order[t[0]], _natural(t[2].parent.relative_to(t[1]).as_posix()),
+                                                not _is_seed_strip(t[2]), _natural(t[2].name)))
 
 
 def photo_rel(key: str, root: Path, p: Path) -> str:

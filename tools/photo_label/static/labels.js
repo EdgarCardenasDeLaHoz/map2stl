@@ -79,10 +79,14 @@ export function onRowsInput(e) {
   const p = st.pairs.find(q => q.n === +e.target.dataset.n); if (p) { p.label = e.target.value; scheduleSave(); }
 }
 
-export const payload = withAuto => ({ photo: st.photo.path, image_px: [st.photo.w, st.photo.h],
+// Skyline pairs (source "skyline", read-only reference points of a seed strip) are in st.auto for drawing only:
+// the saved labels never carry them (autosave never writes them to the annotation file); a solve request
+// (forSolve) adds them as extra labels, so a seed strip solves from the skyline pipeline's matches.
+export const payload = (withAuto, forSolve = false) => ({ photo: st.photo.path, image_px: [st.photo.w, st.photo.h],
   ...(st.solve && st.solve.pose ? { camera: st.solve.pose, camera_source: st.solve.source || "solve" } : {}),
   labels: st.pairs.map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null }))
-    .concat(withAuto ? st.auto.map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null, auto: true })) : []) });
+    .concat(withAuto ? st.auto.filter(p => p.source !== "skyline").map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null, auto: true })) : [])
+    .concat(forSolve ? st.auto.filter(p => p.source === "skyline").map(p => ({ label: p.label, x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_ellipsoid_m: p.h ?? null, source: "skyline" })) : []) });
 // Autosave: every add, move, relabel and delete calls scheduleSave(). It snapshots the labels (and the region) now,
 // so a photo or region switch within the delay cannot send the wrong photo's state, and sends the latest snapshot
 // after 500 ms of quiet. flushSave() sends it at once (photo switch, region switch, page close). Sends are chained

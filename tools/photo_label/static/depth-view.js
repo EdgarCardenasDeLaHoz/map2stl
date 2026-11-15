@@ -54,6 +54,27 @@ export function dvNeedPhoto() {
   if (p.state === "error") return "Photo depth failed: " + (p.error || "unknown error");
   return null;
 }
+// Edge gradient of the photo depth: Sobel 3x3 of depth (metres once fitted, else relative depth), divided by the depth so
+// near and far edges compare; grey ramp normalised by the 98th percentile. Cached on the depth object per fit.
+export function edgeGrad(p, fit) {
+  const f = fit && !fit.fail ? fit : null;
+  if (p.edge && p.edge.fit === f) return p.edge;
+  const { w, h, disp } = p, d = new Float32Array(w * h), grad = new Float32Array(w * h);
+  for (let i = 0; i < d.length; i++) { const q = disp[i]; d[i] = f ? (q > f.b ? f.a / (q - f.b) : NaN) : (Number.isFinite(q) ? q - p.lo + (p.hi - p.lo) * 0.05 : NaN); }
+  const at = (x, y) => d[Math.min(h - 1, Math.max(0, y)) * w + Math.min(w - 1, Math.max(0, x))];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const c = d[y * w + x];
+    if (!(c > 0)) { grad[y * w + x] = NaN; continue; }
+    const gx = at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1),
+          gy = at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1),
+          v = Math.hypot(gx, gy) / 8 / c;
+    grad[y * w + x] = Number.isFinite(v) ? v : NaN;
+  }
+  const s = []; for (let i = 0; i < grad.length; i += 3) if (Number.isFinite(grad[i])) s.push(grad[i]);
+  s.sort((a, b) => a - b);
+  return p.edge = { fit: f, w, h, grad, p98: s[Math.floor(.98 * s.length)] || 1 };
+}
+export const edgeAt = (u, v) => { const p = dv.p; if (!p || p.state !== "ready") return NaN; const g = curG(), e = edgeGrad(p, g && g.fit); return sampleG(e.grad, e.w, e.h, u, v) / e.p98; };
 export const fitLabel = f => `fit n ${f.n}, median error ${((Math.exp(f.err) - 1) * 100).toFixed(0)}%`;
 // Layer for the current tab, cached until a grid, fit, tab or camera changes: { canvas|null, msg, kind: m|rel|diff, corner }
 export function dvLayer() {
@@ -76,6 +97,13 @@ export function dvLayer() {
         L.canvas = gridCanvas(p.w, p.h, i => Number.isFinite(p.disp[i]) ? TURBO[Math.round(255 * Math.min(1, Math.max(0, (p.disp[i] - p.lo) / span)))] : null);
         L.corner = g && g.fit ? "Fit failed: " + g.fit.fail + " (relative depth)" : "Relative depth (bigger = nearer); metres need the Google depth";
       }
+    }
+  } else if (dv.tab === "ed") {
+    L.msg = dvNeedPhoto() || "";
+    if (!L.msg) {
+      const e = edgeGrad(dv.p, g && g.fit); L.kind = "edge";
+      L.corner = "Edges: depth change relative to distance (white = sharp edge)" + (g && g.fit && !g.fit.fail ? "" : "; relative depth until Google depth is fitted");
+      L.canvas = gridCanvas(e.w, e.h, i => { const v = e.grad[i]; if (!Number.isFinite(v)) return null; const q = Math.round(255 * Math.min(1, v / e.p98)); return [q, q, q]; });
     }
   } else if (dv.tab === "or") {
     orFill(L, g, gwait);
@@ -106,7 +134,7 @@ export function drawBase() {        // the photo, or the depth layer over dark g
   if (L.canvas) { ctx.imageSmoothingEnabled = true; ctx.drawImage(L.canvas, v.ox, v.oy, w, h); }
   else if (L.msg) { ctx.fillStyle = "#ddd"; ctx.font = "14px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(L.msg, v.ox + w / 2, v.oy + h / 2); }
 }
-export const LEG = { m: ["30 m", "300 m", "3 km"], rel: ["near", "", "far"], diff: ["-50%", "0", "+50%"], pitch: ["0\u00b0", "30\u00b0", "60\u00b0"] };
+export const LEG = { m: ["30 m", "300 m", "3 km"], rel: ["near", "", "far"], diff: ["-50%", "0", "+50%"], edge: ["flat", "", "sharp"], pitch: ["0\u00b0", "30\u00b0", "60\u00b0"] };
 export function dvChrome(L) {       // legend, corner label and Compute button follow the current layer
   const kind = L && L.kind, corner = L ? L.corner : "", comp = dv.tab !== "photo" && dv.tab !== "gd" && !!dv.p && dv.p.state === "missing",
         gbtn = ["gd", "df", "or"].includes(dv.tab) && !dvNeedCam() && !curG() && !dv.gbusy;
@@ -117,7 +145,7 @@ export function dvChrome(L) {       // legend, corner label and Compute button f
   if (kind) {
     const g = $("dLeg").querySelector("canvas").getContext("2d"), im = g.createImageData(160, 1);
     for (let x = 0; x < 160; x++) {
-      const f = x / 159, q = kind === "diff" ? divRgb((f * 2 - 1) * D_DIFF) : kind === "pitch" ? TURBO[Math.round(f * 255)] : TURBO[Math.round((1 - f) * 255)];
+      const f = x / 159, q = kind === "edge" ? (v => [v, v, v])(Math.round(f * 255)) : kind === "diff" ? divRgb((f * 2 - 1) * D_DIFF) : kind === "pitch" ? TURBO[Math.round(f * 255)] : TURBO[Math.round((1 - f) * 255)];
       im.data.set([q[0], q[1], q[2], 255], 4 * x);
     }
     for (let y = 0; y < 10; y++) g.putImageData(im, 0, y);
@@ -216,5 +244,6 @@ export async function dvFit() {
 export function depthHover(x, y) {
   if (x < 0 || y < 0 || x >= st.img.width || y >= st.img.height) return;
   const u = x / st.img.width, v = y / st.img.height, pm = photoM(u, v), gm = googleM(u, v), f = m => m > 0 ? m.toFixed(0) + " m" : "-";
-  status(`photo ${f(pm)}, Google ${f(gm)}, difference ${pm > 0 && gm > 0 ? ((pm / gm - 1) * 100).toFixed(0) + "%" : "-"}`);
+  const eg = dv.tab === "ed" ? edgeAt(u, v) : NaN;
+  status(`photo ${f(pm)}, Google ${f(gm)}, difference ${pm > 0 && gm > 0 ? ((pm / gm - 1) * 100).toFixed(0) + "%" : "-"}` + (dv.tab === "ed" ? `, edge ${Number.isFinite(eg) ? (eg * 100).toFixed(0) + "% of p98" : "-"}` : ""));;
 }

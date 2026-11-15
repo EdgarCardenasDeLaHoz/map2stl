@@ -1,5 +1,6 @@
-"""Seed cameras for a photo: the text hints in its file name, the saved panorama seed folders (`03_seeds`) and
-the candidate tagging that ranks viewpoints against them."""
+"""Seed cameras for a photo: the text hints in its file name, the saved panorama seed folders (`03_seeds`),
+the candidate tagging that ranks viewpoints against them, and `skyline_pairs`, the read-only photo-to-map
+reference points a seed strip gets from the skyline report that measured its buildings."""
 from __future__ import annotations
 
 import json
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from latlon import bearing_deg, dist_m
 from pano_camera import f_px_of_fov, frame_pose_parts, pose_elevation
-from paths import _is_seed_strip, _read_json, image_size
+from paths import SKYLINE_REPORTS, _is_seed_strip, _read_json, image_size
 
 
 def _norm_text(t: str) -> str:
@@ -263,3 +264,66 @@ def pano_seed(photo_path, cfg) -> dict | None:
     f_px = w / 2 / math.tan(math.radians(fov) / 2)
     return {"lat": lat, "lon": lon, "elev": ground + PANO_CAM_HEIGHT_M, "heading": head % 360.0,
             "pitch": pitch, "roll": 0.0, "f": f_px, "width": w, "height": h}
+
+
+def _skyline_report(seed_dir: Path) -> Path | None:
+    """`heights.json` of the skyline report the seed's `pano.json` names (`report`, else the first folder of its
+    `source`, e.g. `Cartagena_v20_agree/assets/pano`), inside `paths.SKYLINE_REPORTS`; None when absent."""
+    pj = _read_json(seed_dir / "pano.json")
+    name = str(pj.get("report") or str(pj.get("source") or "").replace("\\", "/").split("/")[0])
+    if not name or name in (".", ".."):
+        return None
+    f = (SKYLINE_REPORTS / name / "heights.json").resolve()
+    return f if SKYLINE_REPORTS.resolve() in f.parents and f.is_file() else None
+
+
+def skyline_pairs(photo_path, cfg) -> list[dict]:
+    """Reference pairs for a seed strip (`03_seeds/seed_N/pano.png`) from the skyline report, read-only: one per
+    report view named `seed_N_<bearing>` (`heights.json` schema 3, `buildings[].views[]`). The building top
+    is projected through the strip's own camera (`pano_camera.load_seed_camera`; column 0 = 180 deg, the report
+    strip is rolled so north is mid-strip) at DEM ground at the centroid + the view's `height_m` (orthometric,
+    the convention of `solve`'s terrain fit). Rows have the label-file shape of an auto pair
+    (`label` = feature id, x, y, lat, lon, `h_ellipsoid_m` = top + `cfg.geoid_m` or None, `auto` True) plus
+    `source` "skyline", `confidence`, `tier`, `feature_id`, `height_m`. Views whose top falls off the strip or
+    whose centroid is off the DEM are left out. Never saved: `photos.api_save_labels` drops `source` "skyline".
+    [] for a photo that is not a seed strip, has no report, or no DEM."""
+    import auto_pose
+    import numpy as np
+    import pano_camera
+    photo = Path(photo_path)
+    if not _is_seed_strip(photo):
+        return []
+    d = photo.parent
+    try:
+        report = _skyline_report(d)
+        dem = cfg.dem()
+        if report is None or dem is None:
+            return []
+        pose = _read_json(d / "pose.json")
+        known, _ = pose_elevation(pose)
+        elev = None if known is not None else _dem_ground(cfg, float(pose["lat"]), float(pose["lon"])) + PANO_CAM_HEIGHT_M
+        cam = pano_camera.load_seed_camera(d, elev_m=elev)
+        rows = _read_json(report).get("buildings") or []
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+    prefix = f"{d.name}_"
+    picked = [(b, v) for b in rows for v in b.get("views") or []
+              if str(v.get("view_name", "")).startswith(prefix) and v.get("height_m") is not None
+              and b.get("centroid_lat") is not None]
+    if not picked:
+        return []
+    lat = np.array([float(b["centroid_lat"]) for b, _ in picked])
+    lon = np.array([float(b["centroid_lon"]) for b, _ in picked])
+    ground = np.asarray(auto_pose._dem_sampler(dem)(lat, lon), float)
+    top = ground + np.array([float(v["height_m"]) for _, v in picked])
+    xs, ys = cam.project_ll(lat, lon, top)
+    out = []
+    for (b, v), la, lo, t, x, y in zip(picked, lat, lon, top, xs, ys, strict=True):
+        if not (np.isfinite(t) and np.isfinite(x) and np.isfinite(y)) or not (0 <= x < cam.width and 0 <= y < cam.height):
+            continue
+        out.append({"label": str(b.get("feature_id") or b.get("name") or "sky"), "osm_names": [],
+                    "x": float(x), "y": float(y), "lat": float(la), "lon": float(lo),
+                    "h_ellipsoid_m": None if cfg.geoid_m is None else float(t) + cfg.geoid_m, "auto": True,
+                    "source": "skyline", "confidence": v.get("confidence"), "tier": b.get("tier"),
+                    "feature_id": b.get("feature_id"), "height_m": float(v["height_m"])})
+    return out

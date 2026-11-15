@@ -99,6 +99,24 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `camera.projection`), strip branch of `api_register_step` (`body["strip"]`: resample strip to the frame, run
   `register.register_step`, map pairs back to strip px). `terrain_solve.py::project_buildings` / `_cyl_polys` /
   `_solve(pano=True)` accept either camera. Page: `tools/photo_label/static/draw.js::layoutWide` (body.widePhoto), `autoRegisterStrip`.
+- **Photo order, hidden seed frames (2026-11-15):** `paths.py::_photo_files` sorts by the order of
+  `cfg.photo_roots` (`regions.json`: Cartagena lists `seeds` before `commons`), then folder (natural order,
+  `_natural`), then the strip (`_is_seed_strip`) first in its folder. `photos.py::list_photos` leaves out the
+  single frames of a seed folder that has a `pano.png` (`paths.py::_is_seed_frame`); `_photo_files`,
+  `seeds.py::pano_seed`, `screening.py` and `register_model.py` still use them, and `safe_photo` opens them by
+  path. Page: `static/photos.js::fillPhotoSel` (optgroup per `seed_N` folder), `switchRegion` / `onFlagChk` open
+  list[0] = the first strip. Tests: `tests/test_photo_label_skyline.py::test_order_follows_roots_and_strip_first`,
+  `test_frames_hidden_from_list_only`.
+- **Skyline pairs on a seed strip (read-only, never saved):** `seeds.py::skyline_pairs` reads the report named by
+  the seed's `pano.json` (`report`, else first folder of `source`; `seeds.py::_skyline_report`, under
+  `paths.py::SKYLINE_REPORTS`), takes views `seed_N_<bearing>` of `heights.json` schema 3, and projects DEM ground
+  at the centroid + the view's `height_m` through `pano_camera.load_seed_camera` (col0 180: report strips are
+  rolled so north is mid-strip; verified, see test and `fit_col0_heading` 180.0 on seeds 1/4/5/6). Row = auto-pair
+  label row + `source: "skyline"`, `confidence`, `tier`, `feature_id`. Route `GET /api/skyline?photo=`
+  (`photos.py::api_get_skyline`); page `static/photos.js::openPhoto` puts them in `st.auto` (cyan). Never saved:
+  `static/labels.js::payload` filters `source "skyline"`, `photos.py::api_save_labels` drops them and
+  `api_get_labels` hides any in an old file. Solve does use them: `registration.js::solveNow` and the strip
+  solve send `payload(withAuto, true)` (forSolve), which appends the skyline rows to the solve request only. Tests: `test_skyline_pairs_project_the_top`, `test_save_drops_skyline_rows`.
 - **Auto screening (street-level frames, stitched panoramas):** `tools/photo_label/screen.py` —
   `screen_from_labels` (rules: ground share >= `GROUND_MAX`, aspect >= `PANORAMA_ASPECT`),
   `geometry_reason` (known pose: camera under 5 m above ground, nearest building under 50 m;
@@ -152,8 +170,8 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `camera_axes`, `backproject`, `normals`, `classify`, `building_summary`, `rasterize`; route
   `depth.py::api_depth_orient` (`_orient_source`, `_orient_ground`, side file `<stem>_orient.json`).
   Page tab `or`: `tools/photo_label/static/orient.js::dvOrient`, `orDecode`, `orRgb`, `orSet`, `orMarks`, `orHover`.
-- **Depth view (photo / photo depth / Google depth / difference tabs):** page only, `tools/photo_label/static/depth-view.js::dvLayer`, `drawBase`, `dvChrome`,
-  `setTab`, `dvRefresh`, `dvLoadDepth`, `dvGoogle` (via `renderAt(cam, geoid, gridW)`), `dvFit`, `photoM`, `googleM`, `turbo`, `divRgb`;
+- **Depth view (photo / photo depth / Google depth / difference / edges tabs):** page only, `tools/photo_label/static/depth-view.js::dvLayer`, `drawBase`, `dvChrome`,
+  `setTab`, `dvRefresh`, `dvLoadDepth`, `dvGoogle` (via `renderAt(cam, geoid, gridW)`), `dvFit`, `photoM`, `googleM`, `edgeGrad` (Sobel of depth / depth, p98 grey ramp, cached per fit on `dv.p.edge`; the "ed" tab), `edgeAt`, `turbo`, `divRgb`;
   server calls `/api/depth`, `/api/depth/compute`, `/api/depth/fit`.
 - **Register a photo against our own model (edges, no textures):** `tools/photo_label/register_model.py` -- `refine`, `ModelScene`, `model_wireframe`, `render_depth`, `visible_samples`, `photo_features`, `evaluate`; CLI `--region R --eval-panos|--eval-labels`, overlays in `runs/photo_label_model_register/`.
 - **Tests:** `tests/test_photo_label_server.py`, `tests/test_photo_label_regions.py`, `tests/test_photo_label_register.py`,

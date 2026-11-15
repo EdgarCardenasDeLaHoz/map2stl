@@ -5,7 +5,7 @@ import { prefGet } from "./util.js";
 export const st = { auto: [], photos: [], photo: null, img: null, pairs: [], pending: null, sel: null, nextN: 1,
              solve: null, bld: [], hoverId: null, hiId: null, view: { s: 1, ox: 0, oy: 0 }, mapMarkers: new Map(), footprints: null };
 // Depth-view tab state (tabs: photo | pd photo depth | gd Google depth | df difference | or orientation).
-export const DV_TABS = ["photo", "pd", "gd", "df", "or"];
+export const DV_TABS = ["photo", "pd", "gd", "df", "ed", "or"];
 export const dv = { tab: "photo", seq: 0, ver: 0, p: null, gc: new Map(), loading: false, gbusy: false, gerr: null, timer: 0, layer: null, chrome: "", src: "photo", view: "surf" };
 {
   const t = prefGet("photoLabelTab"); if (DV_TABS.includes(t)) dv.tab = t;
