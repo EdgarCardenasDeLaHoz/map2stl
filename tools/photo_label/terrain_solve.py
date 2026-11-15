@@ -137,7 +137,9 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
            pano: bool = False) -> dict | None:
     """One fit (see `solve_terrain`). `labels`: dicts with x, y, lat, lon, label[, osm_names]. `seed`: optional
     {lat, lon, heading_deg, f_px[, pitch_deg]} from the column solve (`pano`: the strip's centre heading). Returns None when a label is off the
-    DEM (`solve_terrain` drops those first), else {camera, residuals, named_heights, median_px, max_px, ...}."""
+    DEM (`solve_terrain` drops those first), else {camera, residuals, named_heights, median_px, max_px, ...}.
+    A label with a numeric `height_m` (a seed strip's skyline pair: the skyline report's building top) keeps that
+    height above the DEM: it is not a free parameter, so those pairs pin the pose instead of being fitted away."""
     from scipy.optimize import least_squares
 
     lat = np.array([float(lb["lat"]) for lb in labels])
@@ -148,7 +150,9 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
         return None
     named = np.array([is_named(lb) for lb in labels])
     h0, inside = priors if priors is not None else (np.zeros(len(labels)), np.zeros(len(labels), bool))
-    free = np.ones(len(labels), bool) if priors is not None else named
+    fixed = np.array([lb.get("height_m") is not None for lb in labels])
+    hfix = np.array([float(lb["height_m"]) if f else 0.0 for lb, f in zip(labels, fixed, strict=True)])
+    free = (np.ones(len(labels), bool) if priors is not None else named) & ~fixed
     ni = np.where(free)[0]
     pri_w = np.where(~named[ni], PRIOR_WEIGHT / PRIOR_SIGMA_M, 0.0) if priors is not None else None
     nbase = 7 if roll else 6
@@ -156,7 +160,7 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
     kx0 = M_PER_DEG_LAT * math.cos(math.radians(lat.mean()))
 
     def split(p):
-        hs = np.zeros(len(labels))
+        hs = hfix.copy()
         hs[ni] = p[nbase:]
         return hs
 
@@ -195,7 +199,7 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
                 for pt in pitches:
                     for f in fs:
                         p = [la, lo, el, hd, pt, f] + ([0.0] if roll else [])
-                        hs = np.zeros(len(labels))
+                        hs = hfix.copy()
                         hs[ni] = np.where(named[ni], 20.0, h0[ni])
                         cam = _cam(p, roll, w, h, pano)
                         cand.append((float(np.median(np.abs(resid_cam(cam, hs)))), p))
@@ -250,7 +254,7 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
         "camera": camd,
         "residuals_px": [float(v) for v in px],
         "residuals_m": [float(v) for v in res_m],
-        "heights_m": [float(hs[i]) if free[i] else None for i in range(len(labels))],
+        "heights_m": [float(hs[i]) if free[i] or fixed[i] else None for i in range(len(labels))],
         "h0_m": [float(h0[i]) for i in range(len(labels))] if priors is not None else None,
         "in_footprint": [bool(v) for v in inside] if priors is not None else None,
         "median_px": float(np.median(px)), "max_px": float(px.max()),

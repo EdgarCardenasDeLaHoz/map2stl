@@ -254,6 +254,30 @@ def test_roof_height_prior_recovers_camera():
     assert pe < 0.5 * ge
 
 
+def test_fixed_label_heights_pin_the_camera():
+    """Skyline pairs carry `height_m` (the report's building top): the fit holds it instead of fitting it,
+    so pairs projected from a known pose cannot be explained away by free heights while the pose drifts."""
+    from city2stl.skyline import photo_view as pv
+    ts = _load().ts
+    dem = lambda lat, lon: 700.0 + 0.0 * np.asarray(lat, float)  # noqa: E731
+    cam = pv.PinholeCamera(LAT0, LON0, 740.0, 10.0, -6.0, 0.0, 450.0, 800, 600)
+    spots = [(-300, 1500), (-100, 1400), (250, 1800), (700, 1600), (500, 1500), (-250, 1200), (60, 2000), (-450, 1700)]
+    labels = []
+    for i, (e, n) in enumerate(spots):
+        lat, lon = _ll(e, n)
+        hm = 12.0 + 4.0 * i                                # tops at different heights
+        x, y = cam.project_ll(lat, lon, 700.0 + hm)
+        labels.append({"label": f"sky{i}", "x": float(x), "y": float(y), "lat": lat, "lon": lon,
+                       "height_m": hm, "source": "skyline"})
+    seed = {"lat": LAT0, "lon": LON0, "heading_deg": 14.0, "f_px": 470.0}
+    t = ts.solve_terrain(dem, labels, 800, 600, seed)
+    assert t["heights_m"] == pytest.approx([12.0 + 4.0 * i for i in range(len(spots))])
+    assert t["camera"]["elev_m"] == pytest.approx(740.0, abs=2.0)
+    assert t["camera"]["pitch_deg"] == pytest.approx(-6.0, abs=0.3)
+    assert t["camera"]["heading_deg"] == pytest.approx(10.0, abs=0.3)
+    assert t["median_px"] < 1.0
+
+
 def test_building_height_tags():
     ts = _load().ts
     assert ts.building_height({"height": "12 m"}) == 12.0

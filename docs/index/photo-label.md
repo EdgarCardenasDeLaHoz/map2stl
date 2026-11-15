@@ -116,7 +116,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   (`photos.py::api_get_skyline`); page `static/photos.js::openPhoto` puts them in `st.auto` (cyan). Never saved:
   `static/labels.js::payload` filters `source "skyline"`, `photos.py::api_save_labels` drops them and
   `api_get_labels` hides any in an old file. Solve does use them: `registration.js::solveNow` and the strip
-  solve send `payload(withAuto, true)` (forSolve), which appends the skyline rows to the solve request only. Tests: `test_skyline_pairs_project_the_top`, `test_save_drops_skyline_rows`.
+  solve send `payload(withAuto, true)` (forSolve), which appends the skyline rows to the solve request only, each with the report's `height_m`. `terrain_solve.py::_solve` holds a label's `height_m` fixed instead of fitting it (free heights let the projected pairs fit at 0 px while the pose drifted). Tests: `test_skyline_pairs_project_the_top`, `test_save_drops_skyline_rows`, `tests/test_photo_label_server.py::test_fixed_label_heights_pin_the_camera`.
 - **Auto screening (street-level frames, stitched panoramas):** `tools/photo_label/screen.py` —
   `screen_from_labels` (rules: ground share >= `GROUND_MAX`, aspect >= `PANORAMA_ASPECT`),
   `geometry_reason` (known pose: camera under 5 m above ground, nearest building under 50 m;

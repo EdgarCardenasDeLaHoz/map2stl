@@ -37,7 +37,7 @@ export async function openPhoto(path) {
       const sk = await getJson(api("/api/skyline?photo=" + encodeURIComponent(path)));
       if (seq !== app.regionSeq || st.photo !== ph) return;
       for (const l of sk.skyline || []) st.auto.push({ n: "sky" + (st.auto.length + 1), label: l.label, x: l.x, y: l.y, lat: l.lat, lon: l.lon, h: l.h_ellipsoid_m ?? null,
-        source: "skyline", confidence: l.confidence, tier: l.tier, feature_id: l.feature_id });
+        source: "skyline", confidence: l.confidence, tier: l.tier, feature_id: l.feature_id, hm: l.height_m ?? null });
     } catch (_) { /* no report for this strip: no skyline dots */ }
   }
   invalidate();
