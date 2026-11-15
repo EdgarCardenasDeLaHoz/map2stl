@@ -188,7 +188,7 @@ export async function dvGoogle() {
   status("Google depth: rendering at the solved camera (waiting for tiles)...");
   let ok = false;
   try {
-    const rd = await renderAt({ ...camPose, width: ph.w, height: ph.h }, geoidFor(), GD_GRID_W);
+    const rd = await renderAt({ ...app.camPose, width: ph.w, height: ph.h }, geoidFor(), GD_GRID_W);
     if (seq === dv.seq) {
       dv.gc.set(key, { depth: unb64f32(rd.depth), b64: rd.depth, w: rd.depth_w, h: rd.depth_h, fit: null });
       if (dv.gc.size > 4) dv.gc.delete(dv.gc.keys().next().value);

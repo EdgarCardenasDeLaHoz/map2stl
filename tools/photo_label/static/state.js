@@ -15,10 +15,10 @@ export const dv = { tab: "photo", seq: 0, ver: 0, p: null, gc: new Map(), loadin
 // Loose page-wide state. curRegion: the region every fetch carries; regionSeq: lets a slow response from a
 // region left behind be ignored; camPose: the solved or restored camera of the open photo; tiles3d: null =
 // unknown, then true/false from /api/config; startView: {lat, lon, ground_m} of the region; satOn: satellite or
-// OSM base map; autoBusy / guessSeq / guessBusy: Auto register and start-guess progress; renderLock: serialises
+// OSM base map; autoBusy / solveBusy / guessSeq / guessBusy: Auto register and start-guess progress; renderLock: serialises
 // renders on the offscreen Cesium viewer; drag: the canvas mouse drag in progress.
 export const app = { curRegion: "", regionSeq: 0, camPose: null, tiles3d: null, startView: null, satOn: true,
-              autoBusy: false, guessSeq: 0, guessBusy: false, renderLock: Promise.resolve(), drag: null };
+              autoBusy: false, solveBusy: false, guessSeq: 0, guessBusy: false, renderLock: Promise.resolve(), drag: null };
 // Footprints on the 2D map. layers: id -> Leaflet layer; hi: highlighted id; inView: ids recoloured to match the
 // photo's outlines; group: the layers near the view; all: [layer, bounds] of every footprint; bounds: their extent.
 export const fp = { layers: new Map(), hi: null, inView: new Set(), group: null, all: [], bounds: null };

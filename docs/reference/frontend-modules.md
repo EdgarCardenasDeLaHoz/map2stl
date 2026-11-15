@@ -490,7 +490,9 @@ One IIFE on `window.reportsPage`.
 
 ### Photo-label tool page (`tools/photo_label/index.html` + `static/*.js`)
 
-Plain ES modules, no build step: `index.html` is the markup, `static/main.js` boots it. Paths:
+Plain ES modules, no build step: `index.html` is the markup, `static/main.js` boots it. This
+section lists only the entry points; the module-by-module map is the "Page" bullet in
+[docs/index/photo-label.md](../index/photo-label.md). Paths:
 `tools/photo_label/static/<module>.js::<function>` — `layoutWide`, `drawMeasuredOutlines`, `loadBuildings` in `draw.js`;
 `autoRegisterStrip` in `strip.js`; `heightText`, `fpTip` in `map2d.js`. Mode, tool switches and the Settings sheet:
 `ui.js::setMode`, `setTool`, `setAutoScreen`, `applyUi`, `openSheet`; header Saved state and context pill: `chrome.js::setSaved`, `syncCtx`.

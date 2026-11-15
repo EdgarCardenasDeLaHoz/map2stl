@@ -15,6 +15,7 @@ import { $, esc, prefSet, status } from "./util.js";
 
 export async function openPhoto(path) {
   flushSave();                                   // a pair edited a moment ago still goes to the photo it belongs to
+  st.img = null; st.pending = null; app.drag = null;   // no image until this photo's own has loaded: clicks and autosave ignore the gap
   st.photo = st.photos.find(p => p.path === path);
   syncFlagBtn(); layoutWide(); syncCtx();
   for (const n of [...st.mapMarkers.keys(), ...ces.markers.keys()]) dropMarker(n);
@@ -113,9 +114,7 @@ export async function onFlagBtn() {
     e.preventDefault();
     if (!(await flagPhoto(item.path, false))) return;
     st.photos.splice(at, 0, item);
-    const o = new Option(`${item.path} (${item.w}x${item.h})`, item.path);
-    const ref = $("photoSel").options[at];
-    (ref ? ref.parentNode : $("photoSel")).insertBefore(o, ref || null);
+    fillPhotoSel();                               // rebuilds the list with its optgroups and labels
     $("photoSel").value = item.path; loadPhoto(item.path);
   };
   $("status").append(undo);

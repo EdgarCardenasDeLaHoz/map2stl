@@ -111,7 +111,7 @@ def _screen_flag(cfg: Config, st: dict, rel: str, res: dict) -> None:
         st["done"] += 1
 
 
-def api_photos_screen(cfg: Config, body: dict) -> dict:
+def api_photos_screen(cfg: Config, _body: dict) -> dict:
     """POST /api/photos/screen: start the region's screening job unless one is running."""
     with cfg.screen_lock:
         if cfg.screen_state.get(cfg.region, {}).get("state") == "running":

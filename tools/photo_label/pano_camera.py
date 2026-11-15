@@ -76,7 +76,7 @@ class PanoCamera:
                    (heading_deg - 0.5 * width * dpc) % 360.0)
 
     def to_dict(self) -> dict:
-        """The camera as the page and `server._camera` pass it around."""
+        """The camera as the page and `solve._camera` pass it around."""
         return {"projection": "pano_cylindrical", "lat": self.lat, "lon": self.lon, "elev_m": self.elev_m,
                 "heading_deg": self.heading_deg, "pitch_deg": self.pitch_deg, "roll_deg": 0.0,
                 "f_px": self.f_px, "width": self.width, "height": self.height,
@@ -243,6 +243,8 @@ def fit_col0_heading(seed_dir, cam: PanoCamera | None = None, half_deg: float = 
 
 def f_px_of_fov(width: float, fov_deg: float) -> float:
     """Pinhole focal length in pixels of a frame ``width`` px wide with horizontal field of view ``fov_deg``."""
+    if not 0.0 < float(fov_deg) < 180.0:
+        raise ValueError(f"field of view must be between 0 and 180 deg, got {fov_deg}")
     return float(width) / 2 / math.tan(math.radians(float(fov_deg)) / 2)
 
 

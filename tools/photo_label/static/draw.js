@@ -5,7 +5,7 @@ import { depthHover, drawBase } from "./depth-view.js";
 import { finish, invalidate, renderRows, scheduleSave, select } from "./labels.js";
 import { drawMapLines, heightText, map, mapHighlight } from "./map2d.js";
 import { dvOrient, orHover } from "./orient.js";
-import { app, dv, st } from "./state.js";
+import { app, dv, st, ui } from "./state.js";
 import { $, colorOf, hue, status } from "./util.js";
 
 export const cv = $("photo"), ctx = cv.getContext("2d");
@@ -84,9 +84,12 @@ export function drawBuildings() {
   const trace = rs => { ctx.beginPath(); for (const r of rs) scrPath(r, true); };
   const order = st.bld.filter(b => b.id !== st.hiId && b.id !== st.hoverId)
     .concat(st.bld.filter(b => b.id === st.hiId || b.id === st.hoverId));
+  // Beginner: thin faint outlines, full style only under the cursor and for buildings a pair sits on
+  const slim = ui.mode === "beginner", matched = new Set(slim ? st.pairs.map(p => bldAt(p.x, p.y)).filter(Boolean).map(b => b.id) : []);
   for (const b of order) {
     const hi = b.id === st.hiId || b.id === st.hoverId, c = `hsl(${hue(b.id)},85%,${hi ? 65 : 55}%)`;
     trace(b.contours);
+    if (slim && !hi && !matched.has(b.id)) { ctx.globalAlpha = 0.35; ctx.lineWidth = 0.75; ctx.strokeStyle = c; ctx.stroke(); ctx.globalAlpha = 1; continue; }
     ctx.globalAlpha = hi ? 0.3 : 0.15; ctx.fillStyle = c; ctx.fill();
     ctx.globalAlpha = 1; ctx.lineWidth = hi ? 3 : 1; ctx.strokeStyle = hi ? "#ff453a" : c; ctx.stroke();
     if (b.roof.length && !hi) { trace(b.roof); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.stroke(); }
@@ -110,13 +113,16 @@ export function bldAt(x, y) {                            // visible building und
   const i = (py * m.w + px) * 4, k = m.data[i] + 256 * m.data[i + 1];
   return k ? st.bld[k - 1] : null;
 }
+let bldSeq = 0;
 export async function fetchBuildings() {
+  bldSeq++;
   st.bld = []; st.idMap = null; st.hoverId = st.hiId = null;
   const q = st.solve && st.solve.pose;
   if (!q || q.elev_m == null) return;
-  const ph = st.photo;
+  const ph = st.photo, mine = bldSeq;            // a reply for an older pose (or a newer request) is dropped
+  const cur = () => mine === bldSeq && st.photo === ph && st.solve && st.solve.pose === q;
   const r = await postJson("/api/project", { camera: q, image_px: [ph.w, ph.h], heights: $("hModeSel").value });
-  if (st.solve && st.photo === ph && r.ok) {
+  if (cur() && r.ok) {
     st.idMap = await new Promise(res => {
       if (!r.ids_png) return res(null);
       const im = new Image();
@@ -124,6 +130,7 @@ export async function fetchBuildings() {
         const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
         res({ w: im.width, h: im.height, data: g.getImageData(0, 0, im.width, im.height).data }); };
       im.onerror = () => res(null); im.src = "data:image/png;base64," + r.ids_png; });
+    if (!cur()) return;
     st.bld = r.buildings; draw(); if (dv.tab === "or") dvOrient(); drawMapLines(); status(`${r.buildings.length} buildings in view.`); }
 }
 export async function loadBuildings() {

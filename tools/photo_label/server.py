@@ -2,9 +2,12 @@
 
 Serves the pairing page and a few JSON endpoints:
 
+    GET  /, /index.html   the pairing page
+    GET  /static/<file>   its .js / .css modules (static/)
     GET  /api/regions     {"default": id, "regions": [{id, label, photos: n}]} from regions.json
     GET  /api/photos      photos of the region (path relative to its photo root, prefixed by the
-                          root's key when it has one; pixel size)
+                          root's key when it has one; pixel size); `?all=1` also lists the photos
+                          flagged bad, with `bad: true`
                           (frames of `03_seeds/seed_*` folders list without the strip / masks / json)
     GET  /photo/<rel>     one photo's bytes
     GET  /api/footprints  OSM building footprints as GeoJSON (from a cached Overpass JSON)
@@ -14,6 +17,13 @@ Serves the pairing page and a few JSON endpoints:
                           from --dem) seeded by camera_solver.solve_pose, which is the answer
                           when no DEM covers the labels; plus predicted columns of named
                           footprints in view (ticks) to check the solution against the photo
+    POST /api/register/candidates {photo, top_k?, viewpoints?, only_viewpoints?, refresh?, ...}: start
+                          poses for a photo with no camera (seeds.pano_seed for a known pose, else
+                          auto_pose skyline vs DEM), cached in `<stem>_guesses.json`
+    POST /api/register/step {photo, camera, render, depth, depth_w, depth_h, ...}: one render ->
+                          refined camera (register.register_step), nothing stored
+    POST /api/photo/flag  {photo, bad?, reason?}: mark / unmark a photo as unusable
+                          (`<region>_photo_flags.json`) -> {ok, bad, count_flagged}
     POST /api/project     {camera, image_px} -> OSM footprints in view as base/top pixel rings
     GET  /api/config      {"tiles3d": bool, "view": {lat, lon, ground_m}|null, "region": id}:
                           whether a Google Maps key is available (never the key), and where the
@@ -64,7 +74,10 @@ One server serves every region of tools/photo_label/regions.json (label, osm, de
 key -> folder). Each region's Config is built on first use; the Google key and tile session are
 shared, and /tiles3d does not depend on the region. Every region-specific GET takes `?region=<id>`
 and every POST a `"region"` in its body; missing means the server default (--region), an unknown id
-is a 400. `--osm/--dem/--photos` override the default region's entry.
+is a 400 (routes that ignore the region, / and /static/ and /api/regions, never reject it).
+A request that names no photo or has a malformed body or field is a 400, an unknown photo a 404,
+a label file that belongs to another photo with the same file name a 409; only a server fault is a 500.
+`--osm/--dem/--photos` override the default region's entry.
 
 A label file keeps the format `photo_localize.solve_from_labels` reads (label, osm_names, x, y)
 and may carry the solved `camera` (+ `camera_source`: "solve"|"auto") from the POST body, which the
@@ -96,70 +109,38 @@ STATIC_TYPES = {".js": "text/javascript; charset=utf-8", ".css": "text/css; char
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-import model_glb  # noqa: E402,F401
-import screen as photo_screen  # noqa: E402,F401
-import terrain_solve as ts  # noqa: E402,F401
+import terrain_solve as ts  # noqa: E402,F401  (tests reach it as server.ts)
 import tiles  # noqa: E402  (the handler calls tiles.urlopen, which tests replace)
-from depth import (  # noqa: E402,F401
-    DEPTH_MAX_W,
-    _block_mean,
-    _compute_depth,
-    _orient_ground,
-    _orient_source,
+from depth import (  # noqa: E402
     api_depth,
     api_depth_compute,
     api_depth_fit,
     api_depth_orient,
 )
 from footprints import (  # noqa: E402,F401
-    WITHHELD_MIN_M,
-    WITHHELD_RATIO,
-    _centroid,
-    _inside,
-    _round_coords,
-    _stitch_rings,
     apply_heights,
     geojson_footprints,
     load_heights,
     name_at,
     overpass_to_geojson,
-    tag_sources,
 )
-from latlon import bearing_deg, dist_m  # noqa: E402,F401
-from modelapi import (  # noqa: E402,F401
-    _build_model,
-    api_model_info,
-)
+from modelapi import api_model_info  # noqa: E402
 from paths import (  # noqa: E402,F401
-    _DERIVED,
-    _EXT_RANK,
-    _SEED_NONFRAME,
     ANNOTATIONS,
-    DEFAULT_DEM,
-    DEFAULT_OSM,
-    DEFAULT_PHOTOS,
-    HERE,
     IMG_EXT,
-    MODEL_DIR,
     REGIONS_FILE,
-    REPO_ROOT,
-    TILES_CACHE_DIR,
-    _abs,
+    BadRequest,
+    Conflict,
+    NotFound,
     _guess_cache_path,
-    _is_seed_nonframe,
     _is_seed_strip,
     _photo_files,
-    _read_json,
     depth_path,
-    flags_path,
-    image_size,
     label_path,
     photo_rel,
     safe_photo,
 )
 from photos import (  # noqa: E402,F401
-    _photo_rgb,
-    _set_flag,
     api_get_labels,
     api_photo_flag,
     api_save_labels,
@@ -167,50 +148,27 @@ from photos import (  # noqa: E402,F401
     load_flags,
 )
 from regions import (  # noqa: E402,F401
-    _AUTO,
     KEY_VAR,
     Config,
     Regions,
     UnknownRegion,
     build_regions,
-    load_api_key,
     load_regions,
 )
 from screening import (  # noqa: E402,F401
-    SCREEN_CPU_MAX,
-    _pose_geometry,
-    _screen_flag,
     _screen_region,
     api_photos_screen,
     api_photos_screen_state,
 )
 from seeds import (  # noqa: E402,F401
-    _FROM,
-    HEADING_AGREE_DEG,
-    HEADING_BONUS,
     PANO_CAM_HEIGHT_M,
-    SEED_MATCH_M,
-    _norm_text,
-    _panoview_pose,
-    _parse_coord,
-    _seed_camera,
-    _seed_frame_pose,
-    _seed_strip_pose,
     _tag_candidates,
     pano_seed,
     photo_focal_35mm,
     photo_hints,
 )
 from solve import (  # noqa: E402,F401
-    MAX_TICKS,
-    TICK_RADIUS_M,
     _camera,
-    _dem_centre,
-    _guess_key,
-    _solve_pano,
-    _solve_reply,
-    _start_geoid,
-    _terrain,
     api_project,
     api_register_candidates,
     api_register_step,
@@ -218,16 +176,7 @@ from solve import (  # noqa: E402,F401
     start_view,
 )
 from tiles import (  # noqa: E402,F401
-    IDLE_PER_HOST,
-    TILES_CACHE_CAP,
-    TILES_CACHE_SWEEP_EVERY,
-    TILES_HOST,
-    TILES_PREFIX,
-    _cache_paths,
     _max_age,
-    _PooledResponse,
-    _rewrite_uri,
-    pooled_urlopen,
     rewrite_tile_uris,
     tile_cache_get,
     tile_cache_put,
@@ -235,6 +184,7 @@ from tiles import (  # noqa: E402,F401
     tiles_upstream_url,
 )
 
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 MAX_BODY = 32 * 1024 * 1024   # /api/register/step carries a render and a depth grid (base64)
 
 
@@ -310,11 +260,23 @@ class LabelHandler(BaseHTTPRequestHandler):
         try:
             resp = tiles.urlopen(urllib.request.Request(url, headers={"User-Agent": "photo-label/1"}), timeout=30)
         except urllib.error.HTTPError as exc:
-            self._send(exc.code, self._scrub(exc.read()), exc.headers.get_content_type() or "text/plain")
+            try:
+                self._send(exc.code, self._scrub(exc.read()), exc.headers.get_content_type() or "text/plain")
+            except _CLIENT_GONE:
+                self.close_connection = True
+            finally:
+                exc.close()
             return
         except Exception as exc:  # noqa: BLE001 - never echo the exception text, it may hold the URL
             self._json(502, {"ok": False, "error": f"tile upstream unreachable ({type(exc).__name__})"})
             return
+        try:
+            self._relay(resp, cfg, cdir, rel, cacheable)
+        except _CLIENT_GONE:        # the browser dropped the connection mid-tile: nothing left to answer
+            self.close_connection = True
+
+    def _relay(self, resp, cfg, cdir, rel: str, cacheable: bool) -> None:
+        """Send the upstream response `resp` to the client (JSON rewritten, bodies streamed and cached)."""
         with resp:
             ctype = resp.headers.get("Content-Type") or "application/octet-stream"
             code = getattr(resp, "status", 200)
@@ -358,15 +320,18 @@ class LabelHandler(BaseHTTPRequestHandler):
             if u.path.startswith("/tiles3d/"):
                 self._proxy_tiles(u)
                 return
+            if u.path == "/api/regions":            # the routes that ignore the region never reject its id
+                self._json(200, self.regions.listing())
+                return
+            if u.path in ("/", "/index.html"):
+                self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+                return
+            if u.path.startswith("/static/"):
+                self._static(u.path[len("/static/"):])
+                return
             cfg = self.regions.get(parse_qs(u.query).get("region", [""])[0])
             if u.path == "/api/config":
                 self._json(200, {"tiles3d": bool(cfg.api_key), "view": start_view(cfg), "region": cfg.region})
-            elif u.path == "/api/regions":
-                self._json(200, self.regions.listing())
-            elif u.path in ("/", "/index.html"):
-                self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
-            elif u.path.startswith("/static/"):
-                self._static(u.path[len("/static/"):])
             elif u.path == "/api/model/info":
                 self._json(200, api_model_info(cfg, parse_qs(u.query).get("rebuild") == ["1"]))
             elif u.path == "/api/model.glb":
@@ -398,8 +363,14 @@ class LabelHandler(BaseHTTPRequestHandler):
                     self._send(200, p.read_bytes(), IMG_EXT[p.suffix.lower()])
             else:
                 self._json(404, {"ok": False, "error": f"no such endpoint: {u.path}"})
-        except UnknownRegion as exc:
+        except _CLIENT_GONE:
+            self.close_connection = True
+        except (UnknownRegion, BadRequest) as exc:
             self._json(400, {"ok": False, "error": str(exc)})
+        except NotFound as exc:
+            self._json(404, {"ok": False, "error": str(exc)})
+        except Conflict as exc:
+            self._json(409, {"ok": False, "error": str(exc)})
         except Exception as exc:
             tile = u.path.startswith("/tiles3d/")  # a tile traceback could carry the keyed URL
             if not tile:
@@ -423,13 +394,34 @@ class LabelHandler(BaseHTTPRequestHandler):
             self._json(404, {"ok": False, "error": f"no such endpoint: {self.path}"})
             return
         try:
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0:
+                self.close_connection = True          # the body, if any, was not read
+                self._json(400, {"ok": False, "error": "bad Content-Length"})
+                return
             if length > MAX_BODY:
-                raise ValueError(f"request body too large ({length} bytes)")
+                self.close_connection = True
+                self._json(413, {"ok": False, "error": f"request body too large ({length} bytes)"})
+                return
             body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise BadRequest("the request body must be a JSON object")
             self._json(200, route(self.regions.get(body.get("region")), body))
-        except UnknownRegion as exc:
+        except _CLIENT_GONE:
+            self.close_connection = True
+        except (UnknownRegion, BadRequest) as exc:
             self._json(400, {"ok": False, "error": str(exc)})
+        except NotFound as exc:
+            self._json(404, {"ok": False, "error": str(exc)})
+        except Conflict as exc:
+            self._json(409, {"ok": False, "error": str(exc)})
+        except KeyError as exc:                      # a handler read a field the body lacks
+            self._json(400, {"ok": False, "error": f"missing field {exc}"})
+        except (TypeError, ValueError) as exc:       # bad JSON, or a field of the wrong type / not a number
+            self._json(400, {"ok": False, "error": f"bad request: {exc}"})
         except Exception as exc:
             traceback.print_exc()
             self._json(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})

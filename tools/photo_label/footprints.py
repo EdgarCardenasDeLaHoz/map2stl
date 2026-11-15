@@ -125,6 +125,14 @@ def tag_sources(fc: dict) -> dict:
     return fc
 
 
+def _finite(v) -> bool:
+    """True for a number (or numeric string) that is not NaN / inf."""
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def load_heights(path) -> list[dict]:
     """The pipeline's per-building heights from `path`: a seed export folder (every
     `seed_*/heights.json`, `{name: {height_m, published_m, tier, name, lat, lon}}`) or one such
@@ -140,7 +148,7 @@ def load_heights(path) -> list[dict]:
         except (OSError, ValueError):
             continue
         for k, v in (d.items() if isinstance(d, dict) else []):
-            if isinstance(v, dict) and v.get("lat") is not None and v.get("lon") is not None:
+            if isinstance(v, dict) and _finite(v.get("lat")) and _finite(v.get("lon")):
                 seen.setdefault(str(v.get("name") or k), []).append(v)
     rank = {"corroborated": 3, "measured": 2, "prior": 0}
     out = []
@@ -170,14 +178,16 @@ def apply_heights(fc: dict, entries: list[dict]) -> int:
     boxes = []
     for i, f in enumerate(feats):
         ring = f["geometry"]["coordinates"][0]
-        xs, ys = [q[0] for q in ring], [q[1] for q in ring]
+        xs, ys = [q[0] for q in ring], [q[1] for q in ring]   # q may be [lon, lat, z]
         boxes.append((min(xs), min(ys), max(xs), max(ys)))
         for gx in range(math.floor(min(xs) * 1000), math.floor(max(xs) * 1000) + 1):
             for gy in range(math.floor(min(ys) * 1000), math.floor(max(ys) * 1000) + 1):
                 grid.setdefault((gx, gy), []).append(i)
     hit_by: dict[int, list[dict]] = {}
     for e in entries:
-        lat, lon = e["lat"], e["lon"]
+        if not (_finite(e.get("lat")) and _finite(e.get("lon"))):   # a hand-written entry may lack them
+            continue
+        lat, lon = float(e["lat"]), float(e["lon"])
         cx, cy = math.floor(lon * 1000), math.floor(lat * 1000)
         hit = next((i for i in grid.get((cx, cy), [])
                     if boxes[i][0] <= lon <= boxes[i][2] and boxes[i][1] <= lat <= boxes[i][3]
@@ -228,8 +238,8 @@ def _inside(lon: float, lat: float, ring) -> bool:
     c = False
     j = len(ring) - 1
     for i in range(len(ring)):
-        xi, yi = ring[i]
-        xj, yj = ring[j]
+        xi, yi = ring[i][:2]    # [lon, lat] or [lon, lat, z]
+        xj, yj = ring[j][:2]
         if (yi > lat) != (yj > lat) and lon < (xj - xi) * (lat - yi) / (yj - yi) + xi:
             c = not c
         j = i

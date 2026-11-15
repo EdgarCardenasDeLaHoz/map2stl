@@ -46,7 +46,7 @@ export function onKeydown(e) {
 // Solve needs four pairs; the button says how many are missing.
 export function syncSolveBtn() {
   const n = st.pairs.length, b = $("solveBtn");
-  b.disabled = n < 4;
+  b.disabled = n < 4 || app.solveBusy;
   b.title = n < 4 ? `Needs 4 pairs · ${n} so far` : "Solve the camera from the clicked pairs";
   $("solveNeed").textContent = n < 4 ? `Needs 4 pairs · ${n} so far` : "";
   $("pairCount").textContent = n < 4 ? `${n} of 4 needed` : `${n} pairs`;
@@ -63,8 +63,8 @@ export function renderRows() {
     <td class="l"><input value="${esc(p.label)}" data-n="${p.n}"></td>
     <td class="pd x">${p.x.toFixed(0)}, ${p.y.toFixed(0)}</td>
     <td class="pd x">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}${p.h == null ? "" : ", " + p.h.toFixed(1) + " m"}</td>
-    <td class="pd x">${hts[i] == null ? "after Solve" : hts[i].toFixed(0) + " m" + (inf[i] ? ` · OSM ${h0s[i].toFixed(0)} m` : "")}</td>
-    <td class="x">${res[i] == null ? "after Solve" : res[i].toFixed(1) + " px"}<span class="pd">${resM[i] == null ? "" : " / " + resM[i].toFixed(1) + " m"}</span></td>
+    <td class="pd x">${hts[i] == null ? "after Solve" : (+hts[i]).toFixed(0) + " m" + (inf[i] && h0s[i] != null ? ` · OSM ${(+h0s[i]).toFixed(0)} m` : "")}</td>
+    <td class="x">${res[i] == null ? "after Solve" : (+res[i]).toFixed(1) + " px"}<span class="pd">${resM[i] == null ? "" : " / " + (+resM[i]).toFixed(1) + " m"}</span></td>
     <td class="x"><button class="del" data-del="${p.n}" title="Delete this pair" aria-label="Delete pair ${p.n}">✕</button></td></tr>`).join("") +
     (st.auto.length ? `<tr><td><span class="dot" style="background:#00e5ff"></span></td><td class="x" colspan="2">${st.auto.length} auto pairs (cyan dots on the photo)</td><td class="pd"></td><td class="pd"></td><td></td><td class="x"><button id="clrAuto" class="del" title="Remove the auto pairs">Clear</button></td></tr>` : "");
   $("pairHint").textContent = `Click a spot on the photo and the same spot on the map to add pair ${st.nextN}.`;

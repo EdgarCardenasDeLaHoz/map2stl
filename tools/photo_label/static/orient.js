@@ -3,7 +3,7 @@
 import { api, postJson } from "./api.js";
 import { TURBO, curG, dvNeedCam, gKey, gridCanvas } from "./depth-view.js";
 import { bldAt, draw } from "./draw.js";
-import { dv, st } from "./state.js";
+import { app, dv, st } from "./state.js";
 import { $, prefSet, status, unb64f32, unb64u8 } from "./util.js";
 
 export const OR_CLS = ["none", "ground", "flat roof", "pitched roof", "wall"];
@@ -48,10 +48,10 @@ export async function dvOrient() {
   const key = orKey(g); if (g.orient && g.orient.key === key) return;
   const o = g.orient = { key, state: "busy" }, seq = dv.seq, ph = st.photo, f = g.fit && !g.fit.fail ? g.fit : null;
   status("Orientation: computing...");
-  const body = { photo: ph.path, camera: { ...camPose, width: ph.w, height: ph.h }, depth: g.b64, depth_w: g.w, depth_h: g.h, grid_w: 320,
-    buildings: st.bld.map(b => ({ id: b.id, rings: b.contours, dist: b.dist_m })) };
-  if (f) { body.a = f.a; body.b = f.b; }
   try {
+    const body = { photo: ph.path, camera: { ...app.camPose, width: ph.w, height: ph.h }, depth: g.b64, depth_w: g.w, depth_h: g.h, grid_w: 320,
+      buildings: st.bld.map(b => ({ id: b.id, rings: b.contours, dist: b.dist_m })) };
+    if (f) { body.a = f.a; body.b = f.b; }
     const r = await postJson("/api/depth/orient", body);
     if (r.ok) { o.state = "ok"; o.r = r; status("Orientation ready."); }
     else { o.state = "err"; o.error = r.reason || r.error || "failed"; status("Orientation failed: " + o.error); }

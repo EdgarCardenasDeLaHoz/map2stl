@@ -11,6 +11,7 @@ export function setSaved(kind, msg) {
   e.title = msg || (kind === "ok" ? "Every change to the pairs is saved automatically" : "");
 }
 const f = (v, u, d = 0) => v == null || Number.isNaN(+v) ? "–" : (+v).toFixed(d) + u;
+export { f as fmt };   // null-safe number text: "–" for null / NaN
 // The camera readout: heading, pitch, elevation and a score, from whatever camera is current.
 export function setPose() {
   const el = $("pose"), s = st.solve, q = s && s.pose;
@@ -18,7 +19,7 @@ export function setPose() {
   let t = `heading ${f(q.heading_deg, "°")}, pitch ${f(q.pitch_deg ?? (s.source === "guess" ? 0 : null), "°")}, elev ${f(q.elev_m, " m")}`;
   if (s.source === "guess") t = `Camera guess${q.label || q.source ? " (" + (q.label || q.source) + ")" : ""}: ${t}, score ${f(q.score, "", 2)}`;
   else if (s.source === "auto") t = `Auto register: ${t}, ${st.auto.length} auto pairs`;
-  else t = `Solved: ${t}${q.rms_px == null ? "" : ", rms " + f(q.rms_px, " px", 1)}`;
+  else t = `${s.residuals_px && s.residuals_px.length ? "Solved" : "Saved camera"}: ${t}${q.rms_px == null ? "" : ", rms " + f(q.rms_px, " px", 1)}`;
   el.textContent = t; el.title = t; el.hidden = false;
 }
 // The long result line (Solve details) plus the short readout.

@@ -875,7 +875,8 @@ def scene_for(cfg) -> ModelScene:
     """The region's cached (or freshly built) model as a `ModelScene`."""
     import model_glb
     meta = model_glb.build_or_load(cfg.dem(), cfg.dem_path, cfg.region, cfg.model_dir,
-                                   footprints=cfg.footprints, osm_path=cfg.osm_path)
+                                   footprints=cfg.footprints, osm_path=cfg.osm_path,
+                                   heights_path=cfg.heights_path)
     return ModelScene.from_glb(meta["glb_path"], meta["origin"]["lon"], meta["origin"]["lat"])
 
 

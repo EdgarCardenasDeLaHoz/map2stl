@@ -27,6 +27,18 @@ MODEL_DIR = REPO_ROOT / "runs" / "photo_label_model"
 TILES_CACHE_DIR = REPO_ROOT / "runs" / "photo_label_tiles"
 
 
+class BadRequest(ValueError):
+    """A request the server cannot act on (missing or malformed field): HTTP 400."""
+
+
+class NotFound(ValueError):
+    """The request names something that does not exist (an unknown photo): HTTP 404."""
+
+
+class Conflict(ValueError):
+    """The request clashes with what is stored (two photos mapping to one label file): HTTP 409."""
+
+
 def image_size(path: Path) -> tuple[int, int]:
     from PIL import Image
     with Image.open(path) as im:
@@ -92,10 +104,39 @@ def safe_photo(cfg: Config, rel: str) -> Path | None:
     return None
 
 
+def require_photo(cfg: Config, rel) -> Path:
+    """The image file `rel` names (see `safe_photo`); BadRequest when `rel` is missing or not a string,
+    NotFound when no such photo exists."""
+    if not isinstance(rel, str) or not rel:
+        raise BadRequest("missing photo")
+    photo = safe_photo(cfg, rel)
+    if photo is None:
+        raise NotFound(f"no such photo: {rel}")
+    return photo
+
+
 def label_path(cfg: Config, rel: str) -> Path:
+    """The label file of photo `rel`, `<region>_<rel without suffix, runs of other characters as _>.json`.
+
+    Different photos can collapse to one name (`a/b.jpg` and `a_b.jpg`); the names are kept as they are
+    so existing files keep their photo, and `photos.py` refuses to read or overwrite a file whose
+    own `file` field names another photo (`label_owner_matches`)."""
+    if not isinstance(rel, str) or not rel:
+        raise BadRequest("missing photo")
     stem = Path(rel).with_suffix("").as_posix()
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "photo"
     return cfg.annotations_dir / f"{cfg.region}_{safe}.json"
+
+
+def mtime_ns(p: Path) -> int:
+    """mtime of a file, or the newest `heights.json` of a seed-export folder; 0 when absent."""
+    files = [*p.glob("seed_*/heights.json"), p / "heights.json"] if p.is_dir() else [p]
+    return max((f.stat().st_mtime_ns for f in files if f.is_file()), default=0)
+
+
+def same_photo(a: str, b: str) -> bool:
+    """Whether two photo paths are one photo: equal up to the extension (png / jpg / webp of a stem are one entry)."""
+    return Path(a).with_suffix("").as_posix() == Path(b).with_suffix("").as_posix()
 
 
 def _read_json(path: Path):

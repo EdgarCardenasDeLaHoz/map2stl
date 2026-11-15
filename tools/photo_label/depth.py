@@ -2,18 +2,17 @@
 `<stem>_depth.npy`, fit metres to it, and classify surface orientation."""
 from __future__ import annotations
 
-import json
 import math
 import threading
 import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from paths import depth_path, safe_photo
+from paths import depth_path, require_photo
 from photos import _photo_rgb
 
 from city2stl.skyline.camera_solver import M_PER_DEG_LAT
-from geo2stl.cache import atomic_write
+from geo2stl.cache import atomic_write, atomic_write_json
 
 if TYPE_CHECKING:
     from regions import Config
@@ -48,9 +47,7 @@ def api_depth(cfg: Config, rel: str) -> dict:
     import base64
 
     import numpy as np
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    photo = require_photo(cfg, rel)
     f = depth_path(photo)
     if f.is_file():
         d = np.load(f).astype(np.float32)
@@ -95,10 +92,8 @@ def _compute_depth(cfg: Config, key: tuple[str, str], photo: Path, rgb) -> None:
 
 
 def api_depth_compute(cfg: Config, body: dict) -> dict:
-    rel = body.get("photo", "")
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    rel = body.get("photo")
+    photo = require_photo(cfg, rel)
     if depth_path(photo).is_file():
         return {"ok": True, "state": "ready"}
     key = (cfg.region, rel)
@@ -122,10 +117,8 @@ def api_depth_fit(cfg: Config, body: dict) -> dict:
     import numpy as np
 
     from city2stl.skyline._pano.roof_fit import fit_inverse_depth
-    rel = body.get("photo", "")
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    rel = body.get("photo")
+    photo = require_photo(cfg, rel)
     f = depth_path(photo)
     if not f.is_file():
         return {"ok": False, "reason": "no depth for this photo yet"}
@@ -197,10 +190,8 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
 
     import numpy as np
     import orient
-    rel = body.get("photo", "")
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    rel = body.get("photo")
+    photo = require_photo(cfg, rel)
     cam = body.get("camera")
     if not isinstance(cam, dict) or not all(k in cam for k in ("lat", "lon", "heading_deg", "pitch_deg",
                                                                   "f_px", "width", "height")):
@@ -245,11 +236,11 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
         if out[k]:
             out[k].pop("_cls")
     try:
-        f.with_name(f.stem.removesuffix("_depth") + "_orient.json").write_text(json.dumps({
+        atomic_write_json(f.with_name(f.stem.removesuffix("_depth") + "_orient.json"), {
             "camera": cam, "a": a, "b": b,
             "photo_buildings": (out["photo"] or {}).get("buildings"),
             "google_buildings": (out["google"] or {}).get("buildings"),
-            "written": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
+            "written": time.strftime("%Y-%m-%dT%H:%M:%S")})
     except OSError:
         pass
     return {"ok": True, **out}

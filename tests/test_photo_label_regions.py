@@ -146,7 +146,7 @@ def test_labels_keep_region_paths(world, mod):
     # Saving a photo of another region's roots fails.
     code, out = _post(base, "/api/labels", {"region": "alpha", "photo": "one/x/b.png", "image_px": [40, 30],
                                             "labels": []})
-    assert code == 500 and "no such photo" in out["error"]
+    assert code == 404 and "no such photo" in out["error"]
 
 
 def test_label_camera_round_trip(world):

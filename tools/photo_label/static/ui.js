@@ -134,7 +134,7 @@ export function initUi() {
   document.addEventListener("click", e => { if (!e.target.closest("#ctx")) ctxOpen(false); });
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
-    if (!$("sheet").hidden) { openSheet(false); e.stopPropagation(); } else if (!$("ctxPop").hidden) ctxOpen(false);
+    if (!$("sheet").hidden) { openSheet(false); e.stopPropagation(); } else if (!$("ctxPop").hidden) { ctxOpen(false); e.stopPropagation(); }
   }, true);
   // a page address can open the sheet or force a mode (used for screenshots); it is not saved
   const h = location.hash;

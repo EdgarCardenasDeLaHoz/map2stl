@@ -17,6 +17,7 @@ export async function screenPhotos(seq) {
       if (++fails >= 5) { status("Auto screening stopped: the server stopped answering (" + (e.message || e) + ")."); return; }
       continue;
     }
+    if (seq !== app.regionSeq) return;
     if (r.state !== "running") break;
   }
   const gone = st.photos.filter(p => r.flagged.includes(p.path) && !p.bad);

@@ -18,7 +18,8 @@ def _build_model(cfg: Config) -> None:
         if dem is None:
             raise ValueError("the model needs a terrain DEM (--dem)")
         meta = model_glb.build_or_load(dem, cfg.dem_path, cfg.region, cfg.model_dir,
-                                       footprints=cfg.footprints, osm_path=cfg.osm_path)
+                                       footprints=cfg.footprints, osm_path=cfg.osm_path,
+                                   heights_path=cfg.heights_path)
         state = {**meta, "status": "ready"}
     except Exception as exc:  # noqa: BLE001 - reported to the page
         traceback.print_exc()

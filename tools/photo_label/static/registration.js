@@ -1,33 +1,43 @@
 // Solve from clicked pairs, and Auto register against renders of the Google 3D mesh (offscreen Cesium viewer).
 import { api, postJson } from "./api.js";
-import { setResult } from "./chrome.js";
+import { fmt, setResult } from "./chrome.js";
 import { loadCesium } from "./cesium3d.js";
 import { dvRefresh } from "./depth-view.js";
 import { draw, loadBuildings } from "./draw.js";
 import { cesiumView, enuOffset, offsetLL, pinholeAxes } from "./geo.js";
-import { payload, renderRows, saveLabels } from "./labels.js";
+import { payload, renderRows, saveLabels, syncSolveBtn } from "./labels.js";
 import { showCam } from "./map2d.js";
 import { app, ces, st } from "./state.js";
 import { autoRegisterStrip } from "./strip.js";
 import { $, f32b64, status } from "./util.js";
 
 export async function solveNow() {
+  const ph = st.photo, seq = app.regionSeq, stale = () => st.photo !== ph || seq !== app.regionSeq;
   status("Solving...");
   const r = await postJson("/api/solve", payload(false));
+  if (stale()) return;                                // another photo or region opened meanwhile: this answer is not for it
   if (!r.ok) { status("Solve failed: " + r.error); return; }
   st.solve = { ...r, source: "solve" }; const q = r.pose; app.camPose = q; $("camViewBtn").disabled = false;
   showCam(q);
-  setResult(`heading ${q.heading_deg.toFixed(1)} deg, hfov ${q.hfov_deg.toFixed(1)} deg, rms ${q.rms_px.toFixed(1)} px, ` +
-    `sigma ${q.sigma_m == null ? "n/a" : q.sigma_m.toFixed(0) + " m"}, roll ${q.roll_deg.toFixed(1)} deg, f ${q.f_px.toFixed(0)} px` +
-    (q.elev_m == null ? " (column solve, no terrain)" :
-      `, pitch ${q.pitch_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m${q.ground_m == null ? "" : ` (+${(q.elev_m - q.ground_m).toFixed(0)} above ground)`}, ` +
-      `median ${q.median_px.toFixed(1)} px = ${q.median_m.toFixed(1)} m`) +
-    (q.rejected.length ? `, rejected: ${q.rejected.join(", ")}` : ""));
+  let text = "Solved.";
+  try {                                               // formatting must never turn a good solve into a failure
+    text = `heading ${fmt(q.heading_deg, "", 1)} deg, hfov ${fmt(q.hfov_deg, "", 1)} deg, rms ${fmt(q.rms_px, "", 1)} px, ` +
+      `sigma ${q.sigma_m == null ? "n/a" : fmt(q.sigma_m, " m")}, roll ${fmt(q.roll_deg, "", 1)} deg, f ${fmt(q.f_px, "")} px` +
+      (q.elev_m == null ? " (column solve, no terrain)" :
+        `, pitch ${fmt(q.pitch_deg, "", 1)} deg, elev ${fmt(q.elev_m, "")} m${q.ground_m == null ? "" : ` (+${fmt(q.elev_m - q.ground_m, "")} above ground)`}, ` +
+        `median ${fmt(q.median_px, "", 1)} px = ${fmt(q.median_m, "", 1)} m`) +
+      (q.rejected && q.rejected.length ? `, rejected: ${q.rejected.join(", ")}` : "");
+  } catch (_) { /* keep the short line */ }
+  setResult(text);
   status("Solved."); renderRows(); draw(); dvRefresh(); await loadBuildings();
+  if (stale()) return;
   saveLabels(true);
 }
 export async function onSolve() {
+  if (app.solveBusy) return;
+  app.solveBusy = true; syncSolveBtn();
   try { await solveNow(); } catch (e) { status("Solve failed: " + (e.message || e)); }
+  finally { app.solveBusy = false; syncSolveBtn(); }
 }
 
 // ---------- automatic registration against the 3D mesh ----------
@@ -113,7 +123,7 @@ export async function renderNow(cam, geoid_m, gridW, { longSide = REG_LONG_SIDE,
   }
   return { image, depth: f32b64(depth), depth_w: dw, depth_h: dh, loaded };
 }
-export const PANO_CAM_HEIGHT_M = 2.5;                 // Street View camera above the road, as server.py
+export const PANO_CAM_HEIGHT_M = 2.5;                 // Street View camera above the road, mirrors seeds.py::PANO_CAM_HEIGHT_M
 // Ellipsoidal ground height of the Google mesh at a point (render viewer's tileset), or null: the
 // lowest of the point and two rings (4 and 8 m) round it, so a tree or awning over the car does not count.
 export async function meshGround(lat, lon) {
@@ -137,19 +147,21 @@ export async function autoRegister() {
   if (app.autoBusy || !st.photo) return;
   if (app.tiles3d === false) { status("Auto register needs the Google 3D tiles (no API key on the server)."); return; }
   app.autoBusy = true; $("autoBtn").disabled = true;
-  const base = { width: st.photo.w, height: st.photo.h };
+  const ph = st.photo, seq = app.regionSeq, base = { width: ph.w, height: ph.h };
+  const stale = () => st.photo !== ph || seq !== app.regionSeq;   // the photo or region changed while a step ran: drop the rest silently
   try {
-    if (st.photo.projection === "pano_cylindrical") { await autoRegisterStrip(); return; }
+    if (ph.projection === "pano_cylindrical") { await autoRegisterStrip(); return; }
     let starts;
-    if (app.camPose && app.camPose.elev_m != null) starts = [{ cam: { ...camPose, ...base }, geoid: st.geoid ?? 50,
+    if (app.camPose && app.camPose.elev_m != null) starts = [{ cam: { ...app.camPose, ...base }, geoid: st.geoid ?? 50,
       tag: st.solve && st.solve.source === "guess" && st.guesses ? `guess #${st.guesses.pick + 1}` : "current camera" }];
     else {
       status("Searching for a start pose from the skyline...");
-      const r = await postJson("/api/register/candidates", { photo: st.photo.path, top_k: 3 });
+      const r = await postJson("/api/register/candidates", { photo: ph.path, top_k: 3 });
+      if (stale()) return;
       if (!r.ok || !r.candidates.length) { status("No start pose: " + (r.error || r.reason || "none found") + ". Solve with clicked pairs instead."); return; }
       starts = r.candidates.slice(0, 3).map((c, i) => ({ cam: { ...c, ...base }, geoid: r.geoid_m, tag: `candidate ${i + 1} (${c.source})` }));
     }
-    const step = async (cam, geoid, rd) => postJson("/api/register/step", { photo: st.photo.path, camera: cam, geoid_m: geoid,
+    const step = async (cam, geoid, rd) => postJson("/api/register/step", { photo: ph.path, camera: cam, geoid_m: geoid,
       user: st.pairs.filter(p => p.h != null).map(p => ({ x: p.x, y: p.y, lat: p.lat, lon: p.lon, h_orth: p.h - geoid })),
       render: rd.image, depth: rd.depth, depth_w: rd.depth_w, depth_h: rd.depth_h });
     let best = null;
@@ -157,17 +169,20 @@ export async function autoRegister() {
       let prev = -1, regeoid = true;
       for (let it = 1; it <= 3; it++) {
         const tag = `${label}, iteration ${it}/3`;
+        if (stale()) return;
         status(`Auto register: rendering ${tag}...`);
         const rd = await renderAt(cam, geoid);
+        if (stale()) return;
         status(`Auto register: matching ${tag}${rd.loaded ? "" : " (tiles still loading)"}...`);
         const r = await step(cam, geoid, rd);
+        if (stale()) return;
         if (!r.ok && regeoid && r.geoid_m != null && Math.abs(r.geoid_m - geoid) > 3) {
           // The start geoid was off (a region far from Granada's 50 m), so the render stood too high or
           // low to match. The server measured it from the render's depth: render again once with it.
           regeoid = false; geoid = r.geoid_m; it--; continue;
         }
         if (!r.ok) { status(`Auto register: ${tag}: ${r.reason || r.error}`); break; }
-        status(`Auto register: ${tag}: ${r.n_inliers} inliers of ${r.n_matches}, median ${r.median_px.toFixed(1)} px, geoid ${r.geoid_m.toFixed(1)} m`);
+        status(`Auto register: ${tag}: ${r.n_inliers} inliers of ${r.n_matches}, median ${fmt(r.median_px, "", 1)} px, geoid ${fmt(r.geoid_m, "", 1)} m`);
         if (!best || r.n_inliers > best.r.n_inliers) best = { r, tag };
         cam = { ...r.camera, ...base }; geoid = r.geoid_m;
         if (r.n_inliers <= prev * 1.05) break;                   // no longer improving
@@ -179,17 +194,21 @@ export async function autoRegister() {
       // (a pose with elev_fitted, e.g. a drone sphere, keeps its elevation)
       if (isPanoStart(s.cam) && !s.cam.elev_fitted) {
         const g = await meshGround(s.cam.lat, s.cam.lon);
+        if (stale()) return;
         if (g != null) s.cam = { ...s.cam, elev_m: g - s.geoid + PANO_CAM_HEIGHT_M };
       }
       await iterate(s.cam, s.geoid, s.tag);
+      if (stale()) return;
     }
     // The guessed heading or FOV can be far off (a skyline search lines a sea horizon up anywhere):
     // look around from the first start's position, then iterate from the direction that matched best.
     const s0 = starts[0];
     if (!isPanoStart(s0.cam) && (!best || best.r.n_inliers < SWEEP_IF_BELOW)) {
-      const sw = await sweepHeadings(s0.cam, s0.geoid, step);
+      const sw = await sweepHeadings(s0.cam, s0.geoid, step, stale);
+      if (stale()) return;
       if (sw) await iterate(sw.cam, sw.geoid, `sweep (heading ${sw.cam.heading_deg.toFixed(0)}, hfov ${sw.hfov})`);
     }
+    if (stale()) return;
     if (!best) { if (!/^Auto register: /.test($("status").textContent)) status("Auto register found no usable match."); return; }
     const { r } = best, q = r.camera;
     st.geoid = r.geoid_m;
@@ -197,10 +216,11 @@ export async function autoRegister() {
     app.camPose = q; $("camViewBtn").disabled = false;
     st.solve = { pose: q, ticks: [], predicted_x: [], residuals_px: [], auto: true, source: "auto" };
     showCam(q);
-    setResult(`auto register (${best.tag}): ${r.n_inliers} inliers of ${r.n_matches} matches, median ${r.median_px.toFixed(1)} px, ` +
-      `geoid ${r.geoid_m.toFixed(1)} m, heading ${q.heading_deg.toFixed(1)}, pitch ${q.pitch_deg.toFixed(1)}, roll ${q.roll_deg.toFixed(1)}, ` +
-      `hfov ${q.hfov_deg.toFixed(1)} deg, elev ${q.elev_m.toFixed(0)} m`);
+    setResult(`auto register (${best.tag}): ${r.n_inliers} inliers of ${r.n_matches} matches, median ${fmt(r.median_px, "", 1)} px, ` +
+      `geoid ${fmt(r.geoid_m, "", 1)} m, heading ${fmt(q.heading_deg, "", 1)}, pitch ${fmt(q.pitch_deg, "", 1)}, roll ${fmt(q.roll_deg, "", 1)}, ` +
+      `hfov ${fmt(q.hfov_deg, "", 1)} deg, elev ${fmt(q.elev_m, "")} m`);
     renderRows(); draw(); dvRefresh(); await loadBuildings();
+    if (stale()) return;
     await saveLabels(true);
     status(`Auto register done: ${st.auto.length} auto pairs (cyan), camera set and saved.`);
   } catch (e) {
@@ -212,23 +232,26 @@ export async function autoRegister() {
 // Renders SWEEP_HEADINGS directions at SWEEP_HFOV from cam0's position, then the best one at each of
 // SWEEP_FOVS. Score: inliers when the step solved, else matches with a depth. Returns the best
 // {cam, geoid, hfov} (the solved camera when that step solved), or null when nothing matched.
-export async function sweepHeadings(cam0, geoid, step) {
+export async function sweepHeadings(cam0, geoid, step, stale = () => false) {
   const withView = (heading, hfov) => ({ ...cam0, heading_deg: ((heading % 360) + 360) % 360, pitch_deg: Math.min(cam0.pitch_deg || 0, 0),
     f_px: cam0.width / 2 / Math.tan(hfov * Math.PI / 360), hfov_deg: hfov });
   const score = r => r.ok ? 1000 + r.n_inliers : (r.n_lifted || 0);
   let top = null;
   const tryCam = async (cam, hfov, what) => {
+    if (stale()) return;
     status(`Auto register: sweep, ${what}...`);
     const rd = await renderAt(cam, geoid, REG_GRID_W, { longSide: SWEEP_LONG_SIDE, waitMs: SWEEP_WAIT_MS });
+    if (stale()) return;
     const r = await step(cam, geoid, rd), sc = score(r);
+    if (stale()) return;
     if (!top || sc > top.sc) top = { sc, hfov, cam: r.ok ? { ...r.camera, width: cam0.width, height: cam0.height } : cam, geoid: r.ok ? r.geoid_m : geoid, swept: cam };
   };
   for (let k = 0; k < SWEEP_HEADINGS; k++) {
     const h = cam0.heading_deg + k * 360 / SWEEP_HEADINGS;
     await tryCam(withView(h, SWEEP_HFOV), SWEEP_HFOV, `heading ${(((h % 360) + 360) % 360).toFixed(0)} (${k + 1}/${SWEEP_HEADINGS})`);
   }
-  if (!top || top.sc < MIN_SWEEP_SCORE) return null;
+  if (stale() || !top || top.sc < MIN_SWEEP_SCORE) return null;
   const h = top.swept.heading_deg;
   for (const f of SWEEP_FOVS) await tryCam(withView(h, f), f, `heading ${h.toFixed(0)}, hfov ${f}`);
-  return top.sc < MIN_SWEEP_SCORE ? null : top;
+  return stale() || top.sc < MIN_SWEEP_SCORE ? null : top;
 }

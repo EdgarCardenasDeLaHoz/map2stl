@@ -24,6 +24,7 @@ from city2stl.skyline import photo_view as pv
 
 M_PER_DEG_LAT = pv.M_PER_DEG_LAT
 ROLL_MIN_LABELS = 8
+MIN_LABELS = 4          # fewest labels on the DEM a fit is attempted with (api_solve asks for the same)
 ROLL_GAIN = 0.8         # free roll must cut the median residual to this fraction to be kept
 MAX_H = 120.0           # upper bound of a named label's height above the terrain, m
 PRIOR_SIGMA_M = 4.0     # roof-height prior: an unnamed label's height ~ footprint height +- this, m
@@ -98,7 +99,31 @@ def solve_terrain(dem, labels: list[dict], w: int, h: int, seed: dict | None = N
     """Fit the camera with roll 0; with 8 or more labels also with roll free, kept only when it
     cuts the median residual clearly (free roll otherwise absorbs label noise: -7 deg on the
     cathedral photo while the median gets worse). With `pano` the photo is a cylindrical strip
-    (`pano_camera.PanoCamera`; labels' x, y are strip pixels, roll is never fitted)."""
+    (`pano_camera.PanoCamera`; labels' x, y are strip pixels, roll is never fitted).
+
+    A label off the DEM (NaN elevation) is left out of the fit instead of sinking it: the lists of
+    the result keep one slot per input label (None for the left-out ones) and `off_dem` holds
+    their indices. None when fewer than `MIN_LABELS` labels lie on the DEM."""
+    if labels:
+        zg = np.asarray(dem(np.array([float(lb["lat"]) for lb in labels]),
+                            np.array([float(lb["lon"]) for lb in labels])), float)
+        on = np.isfinite(zg)
+        if not on.all():
+            if int(on.sum()) < MIN_LABELS:
+                return None
+            keep = [i for i in range(len(labels)) if on[i]]
+            t = solve_terrain(dem, [labels[i] for i in keep], w, h, seed, n_start, footprints,
+                              label_height, pano)
+            if t is None:
+                return None
+            for k in ("residuals_px", "residuals_m", "heights_m", "h0_m", "in_footprint"):
+                if t.get(k) is not None:
+                    full = [None] * len(labels)
+                    for i, v in zip(keep, t[k], strict=True):
+                        full[i] = v
+                    t[k] = full
+            t["off_dem"] = [i for i in range(len(labels)) if not on[i]]
+            return t
     pri = label_priors(labels, footprints) if label_height == "prior" else None
     flat = _solve(dem, labels, w, h, seed, n_start, False, pri, pano)
     if flat is None or pano or len(labels) < ROLL_MIN_LABELS:
@@ -111,8 +136,8 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
            roll: bool, priors: tuple[np.ndarray, np.ndarray] | None = None,
            pano: bool = False) -> dict | None:
     """One fit (see `solve_terrain`). `labels`: dicts with x, y, lat, lon, label[, osm_names]. `seed`: optional
-    {lat, lon, heading_deg, f_px[, pitch_deg]} from the column solve (`pano`: the strip's centre heading). Returns None when no label lies on the
-    DEM, else {camera, residuals, named_heights, median_px, max_px, ...}."""
+    {lat, lon, heading_deg, f_px[, pitch_deg]} from the column solve (`pano`: the strip's centre heading). Returns None when a label is off the
+    DEM (`solve_terrain` drops those first), else {camera, residuals, named_heights, median_px, max_px, ...}."""
     from scipy.optimize import least_squares
 
     lat = np.array([float(lb["lat"]) for lb in labels])
@@ -231,6 +256,7 @@ def _solve(dem, labels: list[dict], w: int, h: int, seed: dict | None, n_start: 
         "median_px": float(np.median(px)), "max_px": float(px.max()),
         "median_m": float(np.median(res_m)),
         "n_starts": len(starts),
+        "off_dem": [],
     }
 
 

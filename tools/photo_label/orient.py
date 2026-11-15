@@ -31,7 +31,8 @@ NONE, GROUND, FLAT, PITCHED, WALL = 0, 1, 2, 3, 4
 
 
 def camera_axes(cam: dict):
-    """(fwd, right, up) unit vectors in ENU, as index.html pinholeAxes."""
+    """(fwd, right, up) unit vectors in ENU: the same axes as static/geo.js::pinholeAxes, which returns them
+    in the order [right, up, fwd]."""
     h, p = math.radians(cam["heading_deg"]), math.radians(cam["pitch_deg"])
     r = math.radians(cam.get("roll_deg") or 0.0)
     fwd = np.array([math.sin(h) * math.cos(p), math.cos(h) * math.cos(p), math.sin(p)])

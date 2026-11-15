@@ -83,12 +83,13 @@ export async function loadModel() {
     mdl.info = info;
     status("Loading our city model...");
     mdl.shader = modelShader();
-    mdl.model = await Cesium.Model.fromGltfAsync({
+    const m = await Cesium.Model.fromGltfAsync({
       url: api("/api/model.glb"), modelMatrix: modelMatrix(), customShader: mdl.shader,
       upAxis: Cesium.Axis.Z, forwardAxis: Cesium.Axis.X,   // vertices are already (E, N, U)
       allowPicking: false, backFaceCulling: false,
     });
-    if (seq !== app.regionSeq) { mdl.model = null; return; }   // the region changed while it loaded
+    if (seq !== app.regionSeq) { try { m.destroy(); } catch (_) { /* gone already */ } return; }   // the region changed while it loaded
+    mdl.model = m;
     ces.viewer.scene.primitives.add(mdl.model);
     for (const id of ["mdlShow", "mdlAlpha", "mdlDz"]) $(id).disabled = false;
     applyModelShow();

@@ -37,7 +37,9 @@ import time
 from pathlib import Path
 
 import numpy as np
+from paths import mtime_ns
 
+from geo2stl.cache import atomic_write, atomic_write_json
 from geo2stl.geo import M_PER_DEG_SPHERE as M_PER_DEG_LAT
 
 MODEL_VERSION = 1
@@ -291,25 +293,28 @@ def ground_samples(dem, bbox: dict, n: int = GROUND_SAMPLES) -> list[list[float]
     return out
 
 
-def cache_key(dem_path, inputs: dict, osm_path=None, grid_px: int = GRID_PX) -> str:
-    """Key of a built model: DEM file and mtime, the chosen inputs, grid size, ``MODEL_VERSION``."""
+def cache_key(dem_path, inputs: dict, osm_path=None, grid_px: int = GRID_PX, heights_path=None) -> str:
+    """Key of a built model: DEM file and mtime, the chosen inputs, grid size, ``MODEL_VERSION``.
+    The footprint source also keys the footprints file and the pipeline `heights_path` (path + mtime),
+    because both change the building heights it draws."""
     parts = [str(MODEL_VERSION), str(grid_px), json.dumps(inputs, sort_keys=True)]
-    for p in (dem_path, osm_path if inputs.get("source") == "footprints" else None):
+    fp = inputs.get("source") == "footprints"
+    for p in (dem_path, osm_path if fp else None, heights_path if fp else None):
         if p:
             p = Path(p)
-            parts += [str(p.resolve()), str(p.stat().st_mtime_ns if p.exists() else 0)]
+            parts += [str(p.resolve()), str(mtime_ns(p))]
     return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 def build_or_load(dem, dem_path, region: str, out_dir: Path, footprints=None, osm_path=None,
-                  log=print, grid_px: int = GRID_PX) -> dict:
+                  log=print, grid_px: int = GRID_PX, heights_path=None) -> dict:
     """Metadata of the region's model (built and written under ``out_dir`` on the first call):
     ``{glb_path, origin: {lon, lat}, bbox, source, payload_key, faces, glb_bytes, build_s,
     ground: [[lon, lat, dem_h], ...]}``.
     ``footprints`` is a callable returning the server's FeatureCollection (fallback source)."""
     fc = footprints() if callable(footprints) else footprints
     inputs = choose_inputs(dem, fc)
-    key = cache_key(dem_path, inputs, osm_path, grid_px)
+    key = cache_key(dem_path, inputs, osm_path, grid_px, heights_path)
     out_dir = Path(out_dir)
     glb, meta_path = out_dir / f"{region}_{key}.glb", out_dir / f"{region}_{key}.json"
     if glb.is_file() and meta_path.is_file():
@@ -331,13 +336,13 @@ def build_or_load(dem, dem_path, region: str, out_dir: Path, footprints=None, os
     lat0 = (bbox["north"] + bbox["south"]) / 2
     raw = model_glb(model, bbox, shape, lon0, lat0)
     out_dir.mkdir(parents=True, exist_ok=True)
-    glb.write_bytes(raw)
+    atomic_write(glb, lambda fh: fh.write(raw))
     meta = {"origin": {"lon": lon0, "lat": lat0}, "bbox": bbox, "source": inputs["source"],
             "payload_key": inputs["payload_key"], "faces": int(len(model.merged.faces)),
             "glb_bytes": len(raw), "build_s": round(time.time() - t0, 1),
             "layers": sorted(k for k, m in (model.parts or {}).items() if m is not None and len(m.faces)),
             "scale": model.scale.describe(), "model_version": MODEL_VERSION,
             "ground": ground_samples(dem, bbox)}
-    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    atomic_write_json(meta_path, meta, indent=2)   # written last: a meta file means the glb is whole
     log(f"model: {meta['faces']} faces, {len(raw) / 1e6:.1f} MB glb in {meta['build_s']} s")
     return {**meta, "glb_path": str(glb)}

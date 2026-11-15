@@ -258,6 +258,8 @@ def pano_seed(photo_path, cfg) -> dict | None:
             w, h = im.size
     except OSError:
         pass
+    if not 0.0 < fov < 180.0:
+        return None
     f_px = w / 2 / math.tan(math.radians(fov) / 2)
     return {"lat": lat, "lon": lon, "elev": ground + PANO_CAM_HEIGHT_M, "heading": head % 360.0,
             "pitch": pitch, "roll": 0.0, "f": f_px, "width": w, "height": h}

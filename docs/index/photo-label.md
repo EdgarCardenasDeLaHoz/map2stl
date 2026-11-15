@@ -24,15 +24,15 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   nearest in view, `MIN_DIST_M`, `MIN_VISIBLE_PX`).
 - **Mask heights (auto-correct loop, plan F):** `tools/photo_label/mask_heights.py` - per frame `analyse_frame` (`pose_gate` bad_pose check, `column_top` mask top edge, `classify` ok / too_short / too_tall, `unmatched_blobs`, `column_height` elevation angle x `ray_ring_dist`); across frames `aggregate` / `agree_group` (2+ views within ln 1.25), `find_reassignments`; output `to_readings` (method `photo_mask`), `merge_production` (backup + merge), `score`, `google3d_yardstick` (TODO). Runner `claude/scripts/run_mask_heights.py`; tests `tests/test_photo_label_mask_heights.py`.
 - **Server, routes, config:** `tools/photo_label/server.py` — `LabelHandler.do_GET` / `do_POST`
-  (route table), `make_server`, `main`, `json_safe` (every JSON reply: NaN and infinity become
-  `null`, because the browser's JSON parser rejects bare `NaN`), and re-exports of the names `app/server/core/photo_solve.py`
+  (route table; errors map `paths.py::BadRequest` / `NotFound` / `Conflict` to 400 / 404 / 409, `require_photo` checks a body's photo), `make_server`, `main`, `json_safe` (every JSON reply: NaN and infinity become
+  `null`, because the browser's JSON parser rejects bare `NaN`), and re-exports of the names `app/server/core/photo_solve.py` (on master)
   and `claude/scripts` import. The work lives in sibling modules (split 2026-11-01):
   `paths.py` (photo and side-file paths: `photo_rel`, `safe_photo`, `label_path`, `depth_path`, `flags_path`),
   `footprints.py` (`overpass_to_geojson` with building multipolygon relations stitched by `_stitch_rings`,
   ids `r<relation>`; `geojson_footprints`, `tag_sources`, `load_heights`, `apply_heights`),
   `regions.py` (`Config`: paths, cached DEM and footprints, model build state, screen and depth job
   state; `Config.glb_path`), `photos.py` (`list_photos`, flags, `api_get_labels`, `api_save_labels`),
-  `seeds.py` (`pano_seed`, `PANO_CAM_HEIGHT_M` — the server's copy is the source; `index.html` mirrors it),
+  `seeds.py` (`pano_seed`, `PANO_CAM_HEIGHT_M` — the server's copy is the source; `static/registration.js` mirrors it),
   `solve.py` (`api_solve`, `api_project`, `api_register_candidates`, `api_register_step`, `start_view`:
   the region's `view`, else the DEM centre), `screening.py`, `depth.py`, `tiles.py` (pooled client, tile
   cache), `modelapi.py` (`api_model_info`), `latlon.py` (`dist_m`, `bearing_deg`, flat-earth).
@@ -75,7 +75,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
 - **Start-pose guesses (preloaded, shown on the map):** `solve.py::api_register_candidates` seeds the
   search with request viewpoints, the title viewpoint, photo GPS (as a viewpoint, never trusted alone)
   and footprint viewpoints; `photo_hints` (credit.json title vs region `landmarks` in `regions.json`,
-  "from/desde X" = viewpoint, other match = subject, `_bearing_deg`), `_tag_candidates` (source/label),
+  "from/desde X" = viewpoint, other match = subject, `latlon.py::bearing_deg`), `_tag_candidates` (source/label),
   heading re-rank toward the subject, the title viewpoint searched alone and pinned first, cache `<stem>_guesses.json`. Street View frames take their known
   pose instead: `pano_seed` (metadata.json, heading from the file name + median `heading_offset_deg`,
   the file's real size). Panorama-pipeline frames (`runs/<region>/03_seeds/seed_<id>/` with views.json +
@@ -111,7 +111,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   (polls from `switchRegion`, Undo unflags).
 - **Footprints speed:** server `Config.footprints_bytes` (serialised once, 6 decimals, gzip); page
   draws on one canvas `fpRenderer` and keeps only those near the view on the map, `fpWindow`
-  (`fpAll`, `FP_MIN_ZOOM`).
+  (`fp.all` in `static/map2d.js`, `FP_MIN_ZOOM`).
 - **Geoid:** a region's measured `geoid_m` in `regions.json` (`Config.geoid_m`, `solve.py::_start_geoid`)
   is used as is (`register_step(fit_geoid=False)`); without one, `register.py::geoid_from_render` (every
   depth cell) and `autoRegister` re-renders once when the measured geoid moves > 3 m.
@@ -129,7 +129,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `_build_model`, `GET /api/model.glb`. Page: `tools/photo_label/static/model.js::loadModel`, `modelMatrix`,
   `modelShader`, `measureGeoid`, `applyModelShow`.
 - **Depth view (server half) and tile cache:** `depth.py::api_depth` (GET, `<stem>_depth.npy`, `_block_mean`),
-  `api_depth_compute` / `_compute_depth` (GPU thread, `_depth_state`), `api_depth_fit` (metres = a / (disp - b));
+  `api_depth_compute` / `_compute_depth` (GPU thread, `Config.depth_state`), `api_depth_fit` (metres = a / (disp - b));
   Google tile disk cache `tile_cache_get`, `tile_cache_put`, `tile_cache_trim`, `_max_age`, `TILES_CACHE_DIR`
   (`runs/photo_label_tiles`, 2 GB cap), used by `LabelHandler._proxy_tiles`. Tests: `tests/test_photo_label_depth.py`.
 - **Page:** `tools/photo_label/index.html` (markup) plus ES modules in `tools/photo_label/static/`, served
@@ -138,6 +138,12 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   3D `cesium3d.js::initCesium`, `setMode3d`, `pick3d`, `groundUnder`, `viewFromCamera`; photo canvas
   `draw.js::draw`, `drawBuildings`; pairs `labels.js::renderRows`, `select`, `removePair`, autosave
   `labels.js::scheduleSave` (500 ms debounce, header state `chrome.js::setSaved`).
+  Smaller helpers: `state.js` `DV_TABS`, `TOOL_KEYS`, `ui`, `toolOn`, `app.solveBusy`; `api.js::getJson`;
+  `chrome.js::fmt` (null-safe number for result lines); `cesium3d.js::lookFrom`, `applyFov`, `syncCesMarkers`;
+  `registration.js::onSolve`, `labels.js::syncSolveBtn`, `ensureRenderViewer`, `disposeRenderViewer`; `labels.js::flushSave`;
+  `photos.js::onFlagChk`, `onFlagBtn`; `depth-view.js::depthHover`, `computeDepth`, `dvReset`; `orient.js::orFill`;
+  `geo.js::pinholeProject`, `cesiumView`, `cesiumBasis`; `strip.js::STRIP_PAIRS_PER_FRAME`.
+  Stale-result guards: async handlers compare `app.regionSeq` and the open photo after every await.
 - **Beginner mode and Settings:** `static/ui.js` — `setMode` (Beginner / Custom / Everything), `setTool`
   (elements marked `data-need="<tool>"`), `setAutoScreen` (region load screens only when on, default on),
   `applyUi`, `openSheet`; persisted with `util.js::prefSet`. Design: `docs/design-guidelines.md`; mockups

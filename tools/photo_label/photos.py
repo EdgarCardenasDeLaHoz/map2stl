@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING
 
 from footprints import name_at
 from paths import (
+    Conflict,
     _is_seed_strip,
     _photo_files,
     flags_path,
     image_size,
     label_path,
     photo_rel,
+    require_photo,
     safe_photo,
+    same_photo,
 )
 
 from geo2stl.cache import atomic_write_json
@@ -22,6 +25,7 @@ if TYPE_CHECKING:
     from regions import Config
 
 _FLAGS_LOCK = threading.Lock()
+_LABELS_LOCK = threading.Lock()
 
 
 def load_flags(cfg: Config) -> dict[str, dict]:
@@ -80,18 +84,29 @@ def api_photo_flag(cfg: Config, body: dict) -> dict:
             "count_flagged": _set_flag(cfg, rel, bad, str(body.get("reason") or ""))}
 
 
+def _owner_clash(p, rel: str) -> bool:
+    """True when the label file `p` exists and its `file` field names a different photo than `rel`
+    (two photos whose paths map to one file name). A file without `file` belongs to whoever asks."""
+    try:
+        owner = json.loads(p.read_text(encoding="utf-8")).get("file")
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(owner, str) and not same_photo(owner, rel)
+
+
 def api_get_labels(cfg: Config, rel: str) -> dict:
+    """Saved pairs of photo `rel` (BadRequest without one); none for a photo that has no file, or whose
+    label file belongs to another photo with the same file name. Unknown photos are not a 404 here:
+    the page asks for labels of whatever it lists, and a stale name simply has none."""
     p = label_path(cfg, rel)
-    if not p.is_file():
+    if not p.is_file() or _owner_clash(p, rel):
         return {"photo": rel, "labels": []}
     return json.loads(p.read_text(encoding="utf-8"))
 
 
 def api_save_labels(cfg: Config, body: dict) -> dict:
-    rel = body["photo"]
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    rel = body.get("photo")
+    photo = require_photo(cfg, rel)
     w, h = body.get("image_px") or image_size(photo)
     fc = cfg.footprints()
     labels = []
@@ -112,16 +127,16 @@ def api_save_labels(cfg: Config, body: dict) -> dict:
         doc["camera"] = cam
         doc["camera_source"] = str(body.get("camera_source") or "solve")
     p = label_path(cfg, rel)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+    with _LABELS_LOCK:
+        if _owner_clash(p, rel):
+            raise Conflict(f"{p.name} already holds the labels of another photo; rename one of the two")
+        atomic_write_json(p, doc, indent=2, ensure_ascii=False)
     return {"ok": True, "saved": str(p), "n": len(labels)}
 
 
 def _photo_rgb(cfg: Config, rel: str):
     import cv2
-    photo = safe_photo(cfg, rel)
-    if photo is None:
-        raise ValueError(f"no such photo: {rel}")
+    photo = require_photo(cfg, rel)
     img = cv2.imread(str(photo), cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError(f"cannot read photo: {rel}")

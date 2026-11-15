@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import terrain_solve as ts
 from footprints import name_at
 from latlon import bearing_deg, dist_m
-from paths import _guess_cache_path, safe_photo
+from paths import _guess_cache_path, mtime_ns, safe_photo
 from photos import _photo_rgb
 from seeds import (
     HEADING_AGREE_DEG,
@@ -23,6 +24,7 @@ from seeds import (
 )
 
 from city2stl.skyline.camera_solver import M_PER_DEG_LAT, Obs, solve_pose
+from geo2stl.cache import atomic_write_json
 
 if TYPE_CHECKING:
     from regions import Config
@@ -52,10 +54,21 @@ def _dem_centre(dem) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
-def _guess_key(rel, body, viewpoints, top_k, landmarks, hints) -> str:
+def _stamp(p) -> list:
+    """[path, mtime_ns] of a file for a cache key; mtime 0 when it is missing or `p` is None."""
+    if not p:
+        return [None, 0]
+    p = Path(p)
+    return [str(p), mtime_ns(p)]
+
+
+def _guess_key(rel, body, viewpoints, top_k, landmarks, hints, files=()) -> str:
+    """Key of a cached candidate search: the request, the hints, and `files` (photo, DEM, footprints:
+    anything whose change must invalidate it) as path + mtime."""
     import hashlib
     blob = json.dumps(["title-pinned", rel, viewpoints, bool(body.get("only_viewpoints")), top_k, landmarks, hints,
-                       body.get("exif"), body.get("radius_m")], sort_keys=True, default=str)
+                       body.get("exif"), body.get("radius_m"), [_stamp(f) for f in files]],
+                      sort_keys=True, default=str)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
@@ -108,7 +121,8 @@ def api_register_candidates(cfg: Config, body: dict) -> dict:
     if exif is None:
         f35 = photo_focal_35mm(photo)        # focal only: a GPS position would restrict the search to it
         exif = {"focal_35mm": f35} if f35 else None
-    key = _guess_key(rel, {**body, "exif": exif}, req_vps, top_k, cfg.landmarks, hints)
+    key = _guess_key(rel, {**body, "exif": exif}, req_vps, top_k, cfg.landmarks, hints,
+                     files=(photo, cfg.dem_path, cfg.osm_path, cfg.heights_path))
     cache = None if only else _guess_cache_path(photo)
     if cache is not None and not body.get("refresh"):
         try:
@@ -169,7 +183,7 @@ def api_register_candidates(cfg: Config, body: dict) -> dict:
             **({} if out else {"reason": "no sky boundary in the photo, or no DEM data at the search area"})}
     if cache is not None and out:
         try:
-            cache.write_text(json.dumps({"key": key, "response": resp}, ensure_ascii=False), encoding="utf-8")
+            atomic_write_json(cache, {"key": key, "response": resp}, ensure_ascii=False)
         except OSError:
             pass
     return resp
@@ -291,7 +305,7 @@ def _solve_pano(cfg: Config, labels: list[dict], c: dict, w: int, h: int) -> dic
             "f_px": float(c["f_px"]), "pitch_deg": float(c.get("pitch_deg") or 0.0)}
     t = ts.solve_terrain(dem, rows, w, h, seed, footprints=fc, pano=True)
     if t is None:
-        return {"ok": False, "error": "no label lies on the DEM"}
+        return {"ok": False, "error": f"fewer than {ts.MIN_LABELS} labels lie on the DEM"}
     stand_in = SimpleNamespace(lat=seed["lat"], lon=seed["lon"], heading_deg=seed["heading_deg"], sigma_m=None)
     return _solve_reply(cfg, labels, stand_in, t)
 
@@ -323,7 +337,7 @@ def _solve_reply(cfg: Config, labels, pose, t: dict) -> dict:
     c = t["camera"]
     cam = _camera(c, c["width"], c["height"])
     dem = cfg.dem()
-    zs = [float(dem(float(lb["lat"]), float(lb["lon"]))) + (hh or 0.0)
+    zs = [float(dem(float(lb["lat"]), float(lb["lon"]))) + (hh or 0.0)  # NaN off the DEM
           for lb, hh in zip(labels, t["heights_m"], strict=True)]
     px, _ = cam.project_ll([float(lb["lat"]) for lb in labels], [float(lb["lon"]) for lb in labels], zs)
     ticks = []
@@ -337,7 +351,9 @@ def _solve_reply(cfg: Config, labels, pose, t: dict) -> dict:
         if x == x and 0 <= x <= cam.width and d <= TICK_RADIUS_M:
             ticks.append((d, {"x": float(x), "name": name}))
     ticks.sort(key=lambda k: k[0])
-    rms = math.sqrt(sum(v * v for v in t["residuals_px"]) / len(labels))
+    used = [v for v in t["residuals_px"] if v is not None]   # labels off the DEM were left out of the fit
+    rms = math.sqrt(sum(v * v for v in used) / len(used))
+    off = [str(labels[i].get("label") or f"P{i + 1}") for i in t.get("off_dem") or []]
     strip = ({k: c[k] for k in ("projection", "width", "height", "deg_per_col", "col0_heading_deg")}
              if getattr(cam, "cylindrical", False) else {})
     return {"ok": True,
@@ -345,10 +361,11 @@ def _solve_reply(cfg: Config, labels, pose, t: dict) -> dict:
                      "heading_deg": cam.heading_deg, "pitch_deg": cam.pitch_deg, "f_px": cam.f_px,
                      "hfov_deg": c["hfov_deg"], "rms_px": rms,
                      "median_px": t["median_px"], "median_m": t["median_m"],
-                     "sigma_m": pose.sigma_m, "roll_deg": cam.roll_deg, "rejected": [], **strip,
+                     "sigma_m": pose.sigma_m, "roll_deg": cam.roll_deg, "rejected": off, **strip,
                      "column_pose": {"lat": pose.lat, "lon": pose.lon, "heading_deg": pose.heading_deg}},
             "residuals_px": t["residuals_px"], "residuals_m": t["residuals_m"],
             "heights_m": t["heights_m"], "h0_m": t["h0_m"], "in_footprint": t["in_footprint"],
+            "off_dem": t.get("off_dem") or [],
             "predicted_x": [None if x != x else float(x) for x in px],
             "ticks": [k for _, k in ticks[:MAX_TICKS]],
             "terrain": {"median_px": t["median_px"], "max_px": t["max_px"], "median_m": t["median_m"]}}
