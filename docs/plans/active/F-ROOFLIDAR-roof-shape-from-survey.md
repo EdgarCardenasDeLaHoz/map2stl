@@ -1,7 +1,7 @@
 # F-ROOFLIDAR — Roof shape from survey lidar
 
 _Approved 2026-10-18 (user: "Lidar roof shape"). Status: planned, not started. Proposal:
-[F-ROOFLIDAR](../../proposals.md)._
+[F-ROOFLIDAR](../../proposals.md). Its REDIAM MDS-MDT provider (step 1) is also used by [F-PHOTOVIEW](F-PHOTOVIEW-elevated-photo-heights.md) Part 2, G5 (per-building TIN)._
 
 ## Goal
 

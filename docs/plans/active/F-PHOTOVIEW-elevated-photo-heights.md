@@ -246,3 +246,90 @@ labels and Depth Anything). The baseline above is kept as `heights_baseline.json
   spans several houses up the slope. The roof fit's defaults stay as they were (drone callers);
   the step ratio 0.95 is also where the measured-footprint count peaks, a choice that uses no
   truth.
+
+## Part 2: per-building geometry to export
+
+_Added 2026-11-15. Scope: turn the three solved Granada photos into per-building height, roof and
+footprint evidence that can reach the city export, with every footprint change reviewed by the
+user. Phases G0-G5._
+
+**Inputs.** The three elevated Granada photos with hand-solved cameras: `granada_albaicin`,
+`granada_albaicin_pano` and `granada_cathedral` (`runs/photo/`). The six panoview street frames
+stay excluded (flagged bad).
+
+**Feasibility.** Height is realistic: tens of buildings changed, not hundreds. Roof is partial.
+Footprint is flag-only. Mesh comes from lidar, not from the photo.
+
+### G0 Reference set
+
+- New `claude/scripts/photo_geometry_ref.py`. Truth sources:
+  - the cached CNIG nDSM (`cache/survey_cnig_mdsn/`);
+  - `runs/benchmark/truth/granada.json`;
+  - OSM roof tags (957 tagged roofs, with `roof:orientation`);
+  - REDIAM 1 m MDS minus MDT, by ranged reads of the regional mosaic (user approved ranged reads
+    2026-11-15; the cache lives outside `city2stl/skyline/`).
+- Hold out survey-filled rows (`--exclude-source survey`), because CNIG also feeds the export.
+
+### G1 Heights
+
+- Run `city2stl/skyline/photo_view.py::measure(depth_break=True)` on all three photos. Confirm the
+  0.95 step setting still peaks the measured count on cathedral and pano (it was checked on photo 1 only).
+- Merge per OSM id with `mask_heights.py::agree_group` (2+ views within ln 1.25). A single-view
+  reading is kept and flagged `single`.
+- Output `runs/photo/granada/geometry.json` (height, sigma, n_views), written by the new
+  `tools/photo_label/building_geometry.py`.
+- Metric: median absolute error <= 3 m on 6-12 m houses against CNIG, per photo and merged.
+  Buildings with no CNIG value are counted separately. Baseline: 3.48 m median on photo 1 (676 buildings).
+
+### G2 Roof
+
+- `tools/photo_label/orient.py::classify` / `building_summary` at the full depth grid (CPU allowed
+  for these few photos, per user).
+- Ridge from a bimodal split of the pitched cells' facings; second cue is Hough tile lines on the
+  roof pixels reprojected to the roof plane.
+- Map to `roof:shape` (flat / gabled / hipped), `roof:orientation`, and `roof:height` =
+  tan(pitch) x half-width, with a standard 30 deg pitch fallback (measured pitch is too noisy: 8-14
+  depth cells per house).
+- Metric: flat-vs-pitched balanced accuracy against 0.783 of `roof_shape_gbm`; ridge within 20 deg
+  of the REDIAM plane fit or the tag.
+- Risk: houses are 10-20 px wide at 300-500 m.
+
+### G3 Footprints
+
+- Per-building +/-3 m shift search matching the projected outline
+  (`terrain_solve.py::project_buildings`) to depth edges and segmentation. Missing buildings come
+  from `mask_heights.py::unmatched_blobs` plus a depth cluster; merges are flagged where one roof
+  plane spans two outlines.
+- Output is proposals only, shown on a new review layer in the photo-label tool. User decision
+  2026-11-15: every footprint fix is reviewed and accepted by the user in the tool, never auto-applied.
+- Metric: flag precision against nDSM building masks.
+
+### G4 Export wiring
+
+- New step `app/server/core/city_data.py::with_photo_geometry` after `with_roof_shapes`. It reads
+  `geometry.json` and sets `height_source` "photo" and `roof_source` "photo".
+- Precedence (user decision 2026-11-15): a photo height overrides the CNIG survey only where 2+
+  photos agree and differ from the survey (e.g. buildings built after the 2008-15 flight);
+  otherwise it fills only where the survey is empty. Always below `user_override` and tags.
+- Accepted footprint fixes travel as an optional `footprint_lonlat` on landmark kind `osm`
+  (`city2stl/landmarks.py::OVERRIDE_KINDS`); missing buildings as reference-style `ref:` entries.
+- `merge_layer_data` must preserve the photo source. Step off = byte-identical export. Bump
+  `CITY_PIPELINE_VERSION` only if cached payloads change.
+- Files: `app/server/core/city_data.py`, `city2stl/landmarks.py`, `city2stl/height/survey_fill.py`, tests.
+- Note: `photo_mask` readings are not in `readings.py::METHODS`, so they never reached the export before.
+
+### G5 Mesh
+
+- Per-building TIN through the existing landmark kind `ndsm` (`ndsm_solid`), using the new REDIAM
+  MDS-MDT provider (step 1 of [F-ROOFLIDAR](F-ROOFLIDAR-roof-shape-from-survey.md)), only for
+  buildings that G1-G3 flag.
+- Full photo-derived meshes are rejected for small houses (out of range); they stay in
+  F-PHOTOCARVE for landmarks only.
+
+### Part 2 decisions (2026-11-15)
+
+- REDIAM ranged reads of the regional mosaic are approved.
+- A photo height overrides the CNIG survey only where 2+ photos agree; otherwise it fills gaps only.
+- Footprint changes are always reviewed and accepted by the user in the tool.
+- Only the three elevated photos are used; the six street frames stay excluded.
+- Photo-derived meshes for houses are rejected: out of range at 300-500 m; lidar supplies the mesh (G5).
