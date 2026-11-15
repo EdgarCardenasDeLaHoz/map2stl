@@ -192,7 +192,7 @@ export async function dvLoadDepth() {
   if (seq !== dv.seq) return;
   dv.loading = false; dv.ver++; draw();
   if (dv.p.state === "running") { status("Photo depth: computing on the server..."); dv.timer = setTimeout(dvLoadDepth, 3000); }
-  else if (dv.p.state === "ready") dvFit();
+  else if (dv.p.state === "ready") { dvFit(); dvOrient(); }   // without Google depth, orientation uses the saved fit
   else dvOrient();            // no photo depth available: orientation can go on with Google alone
 }
 export async function computeDepth() {

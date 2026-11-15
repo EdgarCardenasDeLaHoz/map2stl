@@ -169,7 +169,12 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
 - **Orientation (roof / wall / ground, wall facing, roof pitch, per building):** `tools/photo_label/orient.py` —
   `camera_axes`, `backproject`, `normals`, `classify`, `building_summary`, `rasterize`; route
   `depth.py::api_depth_orient` (`_orient_source`, `_orient_ground`, side file `<stem>_orient.json`).
-  Page tab `or`: `tools/photo_label/static/orient.js::dvOrient`, `orDecode`, `orRgb`, `orSet`, `orMarks`, `orHover`.
+  Photo-depth scale: a/b from the body (Google fit), else the a/b saved in `<stem>_orient.json`, else
+  `depth.py::_fit_from_buildings` (median disparity per projected building against its distance); reply `fit_source`.
+  So the tab works without rendering Google depth. Tests: `tests/test_photo_label_orient.py::test_route_reuses_saved_fit`,
+  `test_route_fits_photo_depth_to_building_distances`.
+  Page tab `or`: `tools/photo_label/static/orient.js::dvOrient`, `orHolder` (result on the Google entry, else on `dv.p`),
+  `orDecode`, `orRgb`, `orSet`, `orMarks`, `orHover`.
 - **Depth view (photo / photo depth / Google depth / difference / edges tabs):** page only, `tools/photo_label/static/depth-view.js::dvLayer`, `drawBase`, `dvChrome`,
   `setTab`, `dvRefresh`, `dvLoadDepth`, `dvGoogle` (via `renderAt(cam, geoid, gridW)`), `dvFit`, `photoM`, `googleM`, `edgeGrad` (Sobel of depth / depth, p98 grey ramp, cached per fit on `dv.p.edge`; the "ed" tab), `edgeAt`, `turbo`, `divRgb`;
   server calls `/api/depth`, `/api/depth/compute`, `/api/depth/fit`.

@@ -2,6 +2,7 @@
 `<stem>_depth.npy`, fit metres to it, and classify surface orientation."""
 from __future__ import annotations
 
+import json
 import math
 import threading
 import traceback
@@ -170,6 +171,30 @@ def _orient_source(orient, z, cam: dict, dem, buildings) -> dict:
             "buildings": summ, "_cls": res["cls"]}
 
 
+def _fit_from_buildings(orient, disp, buildings, cam: dict, gw0: int):
+    """Metric fit of the photo disparity without Google depth: each projected building's median
+    disparity against its distance from the camera (`dist`, metres). None with fewer than 10
+    buildings or no positive slope (see `roof_fit.fit_inverse_depth`)."""
+    import numpy as np
+
+    from city2stl.skyline._pano.roof_fit import fit_inverse_depth
+    ph, pw = disp.shape
+    w = min(gw0, pw)
+    h = max(1, round(ph * w / pw))
+    d = _block_mean(disp, w, h) if (w, h) != (pw, ph) else disp
+    labels, ids = orient.rasterize(buildings, w, h, cam["width"], cam["height"])
+    dist = {str(bd.get("id")): bd.get("dist") for bd in buildings}
+    xs, ys = [], []
+    for k, bid in enumerate(ids):
+        v = d[labels == k]
+        v = v[np.isfinite(v)]
+        m = dist.get(str(bid))
+        if v.size >= 4 and m is not None and m > 0:
+            xs.append(float(np.median(v)))
+            ys.append(float(m))
+    return fit_inverse_depth(np.array(xs), np.array(ys)) if len(xs) >= 10 else None
+
+
 def _orient_ground(P, cam: dict, dem):
     """DEM elevation (gh, gw) under the back-projected points, or None without a DEM."""
     import numpy as np
@@ -184,7 +209,10 @@ def _orient_ground(P, cam: dict, dem):
 
 def api_depth_orient(cfg: Config, body: dict) -> dict:
     """Surface orientation of the photo (from `<stem>_depth.npy` + the a/b fit) and/or of the Google
-    depth grid; see orient.py. Writes `<stem>_orient.json` beside the photo."""
+    depth grid; see orient.py. Without a/b in the body the fit saved in `<stem>_orient.json` is used
+    (`fit_source` "saved"), else one fitted to the buildings' distances (`_fit_from_buildings`,
+    "buildings"), so the photo depth works before Google depth is rendered. Writes
+    `<stem>_orient.json` beside the photo."""
     import base64
     import time
 
@@ -201,10 +229,23 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
     buildings = body.get("buildings") or []
     dem = cfg.dem()
     a, b = body.get("a"), body.get("b")
+    fit_source = "body" if a is not None and b is not None else None   # body | saved | buildings
     gw0 = max(8, min(int(body.get("grid_w") or 320), 2000))
     out = {"photo": None, "google": None, "agree": None}
     pz = gz = None
     f = depth_path(photo)
+    saved = f.with_name(f.stem.removesuffix("_depth") + "_orient.json")
+    if fit_source is None and saved.is_file():
+        try:
+            prev = json.loads(saved.read_text(encoding="utf-8"))
+            if prev.get("a") is not None and prev.get("b") is not None:
+                a, b, fit_source = float(prev["a"]), float(prev["b"]), "saved"
+        except (OSError, ValueError, TypeError):
+            pass
+    if fit_source is None and f.is_file() and buildings:
+        fit = _fit_from_buildings(orient, np.load(f).astype(np.float32), buildings, cam, gw0)
+        if fit is not None:
+            a, b, fit_source = fit.a, fit.b, "buildings"
     if f.is_file() and a is not None and b is not None:
         disp = np.load(f).astype(np.float32)
         ph, pw = disp.shape
@@ -220,7 +261,7 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
         if g.size == gw * gh:
             gz = g.reshape(gh, gw)
     if pz is None and gz is None:
-        return {"ok": False, "reason": "no usable depth: need the photo depth with a, b, or a Google depth grid"}
+        return {"ok": False, "reason": "no depth fit yet: press Render Google depth once to scale the photo depth"}
     if pz is not None:
         out["photo"] = _orient_source(orient, pz, cam, dem, buildings)
     if gz is not None:
@@ -236,11 +277,11 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
         if out[k]:
             out[k].pop("_cls")
     try:
-        atomic_write_json(f.with_name(f.stem.removesuffix("_depth") + "_orient.json"), {
+        atomic_write_json(saved, {
             "camera": cam, "a": a, "b": b,
             "photo_buildings": (out["photo"] or {}).get("buildings"),
             "google_buildings": (out["google"] or {}).get("buildings"),
             "written": time.strftime("%Y-%m-%dT%H:%M:%S")})
     except OSError:
         pass
-    return {"ok": True, **out}
+    return {"ok": True, "fit_source": fit_source, **out}

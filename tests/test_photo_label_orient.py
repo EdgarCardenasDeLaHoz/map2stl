@@ -206,3 +206,34 @@ def test_route_neither_source(env):
     base, _ = env
     r = _post(base, "/api/depth/orient", {"photo": "p.png", "camera": CAM})
     assert r["ok"] is False and r["reason"]
+
+
+def test_route_reuses_saved_fit(env):
+    """Without a/b in the body the photo depth is scaled by the fit an earlier call saved."""
+    base, tmp = env
+    z = _plane_z([0, -1, 0], [0, 40, 0])
+    a, b = 40.0, -1.0
+    disp = (a / np.nan_to_num(z, nan=1e6) + b).astype("<f4")
+    np.save(tmp / "photos" / "p_depth.npy", np.repeat(np.repeat(disp, 10, axis=0), 10, axis=1))
+    first = _post(base, "/api/depth/orient", {"photo": "p.png", "camera": CAM, "a": a, "b": b, "grid_w": GW})
+    assert first["ok"] and first["fit_source"] == "body"
+    again = _post(base, "/api/depth/orient", {"photo": "p.png", "camera": CAM, "grid_w": GW})
+    assert again["ok"] and again["fit_source"] == "saved" and again["photo"]
+
+
+def test_route_fits_photo_depth_to_building_distances(env):
+    """No Google depth and no saved fit: the projected buildings' distances scale the photo depth."""
+    base, tmp = env
+    a, b = 300.0, -0.5
+    dists = [20.0 + 15 * k for k in range(16)]
+    disp = np.zeros((480, 640), "<f4")
+    bld = []
+    for k, d in enumerate(dists):
+        x0, x1 = 40 * k, 40 * k + 40
+        disp[:, x0:x1] = a / d + b
+        bld.append({"id": f"b{k}", "rings": [[[x0 + 2, 10], [x1 - 2, 10], [x1 - 2, 470], [x0 + 2, 470]]], "dist": d})
+    np.save(tmp / "photos" / "p_depth.npy", disp)
+    r = _post(base, "/api/depth/orient", {"photo": "p.png", "camera": CAM, "grid_w": GW, "buildings": bld})
+    assert r["ok"] and r["fit_source"] == "buildings" and r["photo"]
+    side = json.loads((tmp / "photos" / "p_orient.json").read_text())
+    assert abs(side["a"] - a) / a < 0.05 and abs(side["b"] - b) < 0.05

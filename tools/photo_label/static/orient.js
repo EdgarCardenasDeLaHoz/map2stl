@@ -28,35 +28,41 @@ export function orRgb(d, view) {
 }
 export const orReady = g => { const p = dv.p; return !!p && p.state !== "running" && !(p.state === "ready" && !g.fit); };   // fit settled, or no photo depth to wait for
 export const orKey = g => { const f = g.fit && !g.fit.fail ? g.fit : null; return `${gKey()}|${f ? f.a + "," + f.b : "nofit"}|${st.bld.length}`; };
+// Where the orientation result lives: the Google depth entry when one is rendered, else the photo depth
+// (the server then scales it with the fit saved in <stem>_orient.json), else nowhere yet.
+export const orHolder = g => g || (dv.p && dv.p.state === "ready" ? dv.p : null);
 export function orFill(L, g, gwait) {
-  L.msg = dvNeedCam() || (!g ? gwait : "");
-  if (!L.msg && !orReady(g)) L.msg = !dv.p ? "Loading photo depth..." : dv.p.state === "running" ? "Computing photo depth on the server..." : "Fitting photo depth to Google...";
-  if (!L.msg) { const o = g.orient; if (!o || o.state === "busy") L.msg = "Computing orientation..."; else if (o.state === "err") L.msg = "Orientation failed: " + o.error; }
+  const h = orHolder(g);
+  L.msg = dvNeedCam() || (h ? "" : !dv.p || dv.p.state === "running" ? "Loading photo depth..." : gwait);
+  if (!L.msg && g && !orReady(g)) L.msg = !dv.p ? "Loading photo depth..." : dv.p.state === "running" ? "Computing photo depth on the server..." : "Fitting photo depth to Google...";
+  if (!L.msg) { const o = h.orient; if (!o || o.state === "busy") L.msg = "Computing orientation..."; else if (o.state === "err") L.msg = "Orientation failed: " + o.error; }
   if (L.msg) return;
-  const R = g.orient.r, sel = orSource(R);
+  const R = h.orient.r, sel = orSource(R);
   if (!sel) { L.msg = "No orientation result for this photo"; return; }
   const d = orDecode(sel.s);
   L.canvas = gridCanvas(sel.s.w, sel.s.h, orRgb(d, dv.view));
   if (dv.view === "pitch") L.kind = "pitch"; else L.sw = dv.view === "wall" ? OR_SW_WALL : OR_SW_SURF;
   const ag = R.agree != null ? ` · agree ${Math.round(R.agree <= 1 ? R.agree * 100 : R.agree)}%` : "";
   const nm = n => n === "photo" ? "Photo" : "Google";
-  L.corner = (sel.name === dv.src ? nm(sel.name) + " depth" : `${nm(sel.name)} depth (${nm(dv.src)} unavailable)`) + ag;
+  L.corner = (sel.name === dv.src ? nm(sel.name) + " depth" : `${nm(sel.name)} depth (${nm(dv.src)} unavailable)`) + ag
+    + (R.fit_source === "saved" ? " · saved fit" : R.fit_source === "buildings" ? " · scaled by building distances" : "");
 }
 export async function dvOrient() {
   if (dv.tab !== "or" || !st.photo) return;
-  const g = curG(); if (!g || !orReady(g) || dvNeedCam()) return;
-  const key = orKey(g); if (g.orient && g.orient.key === key) return;
-  const o = g.orient = { key, state: "busy" }, seq = dv.seq, ph = st.photo, f = g.fit && !g.fit.fail ? g.fit : null;
+  const g = curG(), h = orHolder(g); if (!h || (g && !orReady(g)) || dvNeedCam()) return;
+  const key = g ? orKey(g) : `photo|${JSON.stringify(app.camPose)}|${st.bld.length}`; if (h.orient && h.orient.key === key) return;
+  const o = h.orient = { key, state: "busy" }, seq = dv.seq, ph = st.photo, f = g && g.fit && !g.fit.fail ? g.fit : null;
   status("Orientation: computing...");
   try {
-    const body = { photo: ph.path, camera: { ...app.camPose, width: ph.w, height: ph.h }, depth: g.b64, depth_w: g.w, depth_h: g.h, grid_w: 320,
+    const body = { photo: ph.path, camera: { ...app.camPose, width: ph.w, height: ph.h }, grid_w: 320,
+      ...(g ? { depth: g.b64, depth_w: g.w, depth_h: g.h } : {}),
       buildings: st.bld.map(b => ({ id: b.id, rings: b.contours, dist: b.dist_m })) };
     if (f) { body.a = f.a; body.b = f.b; }
     const r = await postJson("/api/depth/orient", body);
     if (r.ok) { o.state = "ok"; o.r = r; status("Orientation ready."); }
     else { o.state = "err"; o.error = r.reason || r.error || "failed"; status("Orientation failed: " + o.error); }
   } catch (e) { o.state = "err"; o.error = e.message || String(e); status("Orientation failed: " + o.error); }
-  if (seq !== dv.seq) { if (g.orient === o) delete g.orient; return; }
+  if (seq !== dv.seq) { if (h.orient === o) delete h.orient; return; }
   dv.layer = null; dv.ver++; draw();
 }
 export function orMarks() {
@@ -70,7 +76,7 @@ export function orSet(key, val) {
 }
 export function orHover(x, y) {
   if (x < 0 || y < 0 || x >= st.img.width || y >= st.img.height) return;
-  const g = curG(), o = g && g.orient; if (!o || o.state !== "ok") return;
+  const h = orHolder(curG()), o = h && h.orient; if (!o || o.state !== "ok") return;
   const sel = orSource(o.r); if (!sel) return;
   const s = sel.s, d = orDecode(s), i = Math.min(s.h - 1, Math.floor(y / st.img.height * s.h)) * s.w + Math.min(s.w - 1, Math.floor(x / st.img.width * s.w));
   const c = d.cls[i], pt = d.pitch[i], az = d.az[i];
