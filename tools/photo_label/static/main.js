@@ -66,6 +66,7 @@ document.querySelectorAll("#dTabs button").forEach(b => b.classList.toggle("on",
 $("dCompute").onclick = computeDepth;
 $("gRender").onclick = dvGoogle;
 $("oSrc").onclick = e => { if (e.target.dataset.v) orSet("src", e.target.dataset.v); };
+$("oDetail").onclick = e => { if (e.target.dataset.v) orSet("detail", e.target.dataset.v); };
 $("oView").onclick = e => { if (e.target.dataset.v) orSet("view", e.target.dataset.v); };
 orMarks();
 

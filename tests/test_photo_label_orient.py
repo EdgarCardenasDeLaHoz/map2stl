@@ -237,3 +237,61 @@ def test_route_fits_photo_depth_to_building_distances(env):
     assert r["ok"] and r["fit_source"] == "buildings" and r["photo"]
     side = json.loads((tmp / "photos" / "p_orient.json").read_text())
     assert abs(side["a"] - a) / a < 0.05 and abs(side["b"] - b) < 0.05
+
+
+def test_full_res_refine_masks_sky_and_keeps_planes(tmp_path):
+    """roofwall: wall + pitched roof planes at full res, sky label masked, palette PNG written."""
+    import roofwall
+    gw, gh = 160, 120
+    cam = dict(CAM, width=gw, height=gh, f_px=125.0)
+    d, fwd = _rays(cam, gw, gh)
+    pz = lambda n, p0: _plane_z_cam(n, p0, d, fwd)       # noqa: E731
+    wall = pz([0, -1, 0], [0, 40, 0])
+    s30 = math.radians(30)
+    roof = pz([0, -math.sin(s30), math.cos(s30)], [0, 40, -3])
+    z = np.where(np.arange(gh)[:, None] < gh // 2, wall, roof)
+    lab = np.full((gh, gw), 1, np.int16)
+    lab[:10] = 2                                         # sky rows
+    res = roofwall.classify_full(z, cam, lab, radius=2)
+    c = res["cls"]
+    assert (c[:10] == 0).all()
+    assert (c[20:50, 20:140] == orient.WALL).mean() > 0.9
+    sel = c[75:110, 20:140]
+    assert (sel == orient.PITCHED).mean() > 0.8
+    # PNG + json through the folder entry point
+    with np.errstate(invalid="ignore", divide="ignore"):
+        disp = 1000.0 / z + 0.5
+    np.save(tmp_path / "photo_depth.npy", np.nan_to_num(disp, nan=0.5).astype(np.float32))
+    np.save(tmp_path / "photo_labels.npy", lab)
+    (tmp_path / "photo_orient.json").write_text(json.dumps({"camera": cam, "a": 1000.0, "b": 0.5}))
+    stats = roofwall.write_outputs(tmp_path)
+    im = Image.open(tmp_path / "photo_roofwall.png")
+    assert im.mode == "P" and im.size == (gw, gh)
+    assert im.getpalette()[12:15] == [160, 230, 150]
+    assert stats["pixels"]["wall"] > 0 and (tmp_path / "photo_roofwall.json").is_file()
+
+
+def _plane_z_cam(n, p0, d, fwd):
+    n, p0 = np.asarray(n, float), np.asarray(p0, float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (n @ p0) / (d @ n)
+    return np.where(t > 0, t, np.nan) * (d @ fwd)
+
+
+def test_building_vote_roof_majority_keeps_walls():
+    import roofwall
+    cls = np.full((20, 20), 3, np.uint8)
+    cls[:16, :10] = 2                                    # flat outnumbers pitched roof px in building 0
+    cls[:, 8:10] = 4                                     # wall strip stays per pixel
+    cls[:, 15:] = 2                                      # outside every footprint: untouched
+    bl = np.full((20, 20), -1, np.int32)
+    bl[:, :12] = 0
+    out = roofwall.vote(cls, bl)
+    roof = (out[:, :12] != 4)
+    assert (out[:, :12][roof] == 2).all() and (out[:, 8:10] == 4).all()
+    assert (out[:, 12:15] == 3).all() and (out[:, 15:] == 2).all()
+    small = np.full((20, 20), -1, np.int32)
+    small[:2, :2] = 0                                    # 4 roof px < MIN_ROOF_PX: no vote
+    c2 = np.full((20, 20), 3, np.uint8)
+    c2[0, 0] = 2
+    assert (roofwall.vote(c2, small) == c2).all()

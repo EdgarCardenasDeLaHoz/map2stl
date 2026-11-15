@@ -47,7 +47,7 @@ def image_size(path: Path) -> tuple[int, int]:
 
 
 _EXT_RANK = {".png": 0, ".jpg": 1, ".jpeg": 1, ".webp": 2}
-_DERIVED = re.compile(r"^(overlay|landmarks_)|_depth|_labels|_baseline", re.I)
+_DERIVED = re.compile(r"^(overlay|landmarks_)|_depth|_labels|_baseline|_roofwall", re.I)
 _SEED_NONFRAME = re.compile(r"^pano_|_(mask|seg)$", re.I)   # masks / segmentations beside the frames (pano.png is the strip photo)
 
 
@@ -79,14 +79,16 @@ def _photo_files(cfg: Config) -> list[tuple[str, Path, Path]]:
     """(root key, root folder, file) per folder+stem across the roots (png, else jpg, else webp).
 
     Order: the roots as `regions.json` lists them (`cfg.photo_roots`; Cartagena has `seeds` before `commons`),
-    then folder, then inside a folder the stitched strip (`_is_seed_strip`) first and the rest by name."""
+    then folder, then inside a folder the stitched strip (`_is_seed_strip`) first and the rest by name. A root
+    nested inside another (granada `commons` under `runs/photo`) is listed only under its own key."""
     best: dict[tuple, tuple[str, Path, Path]] = {}
     for key, root in cfg.photo_roots.items():
         if not root.is_dir():
             continue
+        nested = [r for r in cfg.photo_roots.values() if root in r.parents]   # a root inside this one lists its own files
         for p in sorted(root.rglob("*")):
             ext = p.suffix.lower()
-            if ext not in IMG_EXT or _DERIVED.search(p.stem) or _is_seed_nonframe(p):
+            if ext not in IMG_EXT or _DERIVED.search(p.stem) or _is_seed_nonframe(p) or any(r in p.parents for r in nested):
                 continue
             k = (key, p.parent, p.stem)
             if k not in best or _EXT_RANK[ext] < _EXT_RANK[best[k][2].suffix.lower()]:

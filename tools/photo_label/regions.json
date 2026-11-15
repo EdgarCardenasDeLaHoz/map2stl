@@ -6,7 +6,8 @@
     "dem": "cache/opentopo/d6eb6dd762c161a4afb3471521b53e14.tif",
     "photos": {
       "": "runs/photo",
-      "panoview": "runs/panoview/granada/images"
+      "panoview": "runs/panoview/granada/images",
+      "commons": "runs/photo/commons/granada"
     },
     "view": {
       "lat": 37.176,

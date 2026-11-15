@@ -107,3 +107,15 @@ def test_screen_known_pose_is_screened_without_aspect_rule(mod, tmp_path, monkey
     assert names["7_030.png"] is True and names["7_060.png"] is True            # known pose: screened, no aspect rule
     assert names["pano.png"] is True and "seeds/seed_7/7_090.png" in flagged
     assert len(flagged) == 4
+
+
+def test_listing_nested_root_and_roofwall(mod, tmp_path):
+    """A root inside another (granada `commons` under `runs/photo`) lists its files once, under its own
+    key, and the `_roofwall.png` side file is not a photo."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "commons" / "granada").mkdir(parents=True)
+    for p in (tmp_path / "a" / "photo.png", tmp_path / "a" / "photo_roofwall.png", tmp_path / "commons" / "granada" / "0001_x.jpg"):
+        Image.new("RGB", (8, 8), "gray").save(p)
+    cfg = SimpleNamespace(photo_roots={"": tmp_path, "commons": tmp_path / "commons" / "granada"})
+    got = [mod.photo_rel(k, r, p) for k, r, p in mod._photo_files(cfg)]
+    assert got == ["a/photo.png", "commons/0001_x.jpg"]

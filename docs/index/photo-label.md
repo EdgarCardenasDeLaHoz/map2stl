@@ -101,7 +101,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `_solve(pano=True)` accept either camera. Page: `tools/photo_label/static/draw.js::layoutWide` (body.widePhoto), `autoRegisterStrip`.
 - **Photo order, hidden seed frames (2026-11-15):** `paths.py::_photo_files` sorts by the order of
   `cfg.photo_roots` (`regions.json`: Cartagena lists `seeds` before `commons`), then folder (natural order,
-  `_natural`), then the strip (`_is_seed_strip`) first in its folder. `photos.py::list_photos` leaves out the
+  `_natural`), then the strip (`_is_seed_strip`) first in its folder. A root nested inside another (Granada `commons` = `runs/photo/commons/granada`, 369 Commons originals with a `manifest.json` of author / licence, inside the `""` root `runs/photo`) is listed only under its own key, and `_DERIVED` hides `_roofwall` side files (`tests/test_photo_label_pano_seeds.py::test_listing_nested_root_and_roofwall`). `photos.py::list_photos` leaves out the
   single frames of a seed folder that has a `pano.png` (`paths.py::_is_seed_frame`); `_photo_files`,
   `seeds.py::pano_seed`, `screening.py` and `register_model.py` still use them, and `safe_photo` opens them by
   path. Page: `static/photos.js::fillPhotoSel` (optgroup per `seed_N` folder), `switchRegion` / `onFlagChk` open
@@ -174,7 +174,12 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   So the tab works without rendering Google depth. Tests: `tests/test_photo_label_orient.py::test_route_reuses_saved_fit`,
   `test_route_fits_photo_depth_to_building_distances`.
   Page tab `or`: `tools/photo_label/static/orient.js::dvOrient`, `orHolder` (result on the Google entry, else on `dv.p`),
-  `orDecode`, `orRgb`, `orSet`, `orMarks`, `orHover`.
+  `orDecode`, `orRgb`, `orSet`, `orMarks`, `orHover`; "Detail: Grid / Full" (`#oDetail`, `dv.detail`) sends `full: true`.
+  **Full-resolution roof / wall / ground:** `tools/photo_label/roofwall.py` - `roofwall_mask` (reads `<stem>_depth.npy`,
+  `_orient.json`, `_labels.npy`; CLI writes `<stem>_roofwall.png` + `.json`), `classify_full` (wide-stencil `orient.py::normals`
+  `radius`/`step`), `vote` (per-building roof majority), `load_buildings` (region DEM + OSM, read-only), `refine` (SegFormer rules: sky / vegetation / water / vehicles = 0, non-building = ground only,
+  edge gaps filled by same-group vote); route flag `depth.py::api_depth_orient` body `full`. Test:
+  `tests/test_photo_label_orient.py::test_full_res_refine_masks_sky_and_keeps_planes`.
 - **Depth view (photo / photo depth / Google depth / difference / edges tabs):** page only, `tools/photo_label/static/depth-view.js::dvLayer`, `drawBase`, `dvChrome`,
   `setTab`, `dvRefresh`, `dvLoadDepth`, `dvGoogle` (via `renderAt(cam, geoid, gridW)`), `dvFit`, `photoM`, `googleM`, `edgeGrad` (Sobel of depth / depth, p98 grey ramp, cached per fit on `dv.p.edge`; the "ed" tab), `edgeAt`, `turbo`, `divRgb`;
   server calls `/api/depth`, `/api/depth/compute`, `/api/depth/fit`.

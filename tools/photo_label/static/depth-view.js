@@ -124,9 +124,9 @@ export function drawBase() {        // the photo, or the depth layer over dark g
   const v = st.view, w = st.img.width * v.s, h = st.img.height * v.s;
   if (dv.tab === "photo") { dvChrome(null); ctx.drawImage(st.img, v.ox, v.oy, w, h); return; }
   const L = dvLayer(); dvChrome(L);
-  if (dv.tab === "or") {       // orientation: a translucent layer over the photo
-    ctx.drawImage(st.img, v.ox, v.oy, w, h);
-    if (L.canvas) { ctx.save(); ctx.globalAlpha = 0.6; ctx.imageSmoothingEnabled = false; ctx.drawImage(L.canvas, v.ox, v.oy, w, h); ctx.restore(); }
+  if (dv.tab === "or") {       // orientation: a near-opaque layer over a dimmed grey photo, so the classes read clearly
+    ctx.save(); if (L.canvas) ctx.filter = "grayscale(1) brightness(0.45)"; ctx.drawImage(st.img, v.ox, v.oy, w, h); ctx.restore();
+    if (L.canvas) { ctx.save(); ctx.globalAlpha = 0.9; ctx.imageSmoothingEnabled = false; ctx.drawImage(L.canvas, v.ox, v.oy, w, h); ctx.restore(); }
     else if (L.msg) { ctx.save(); ctx.font = "14px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.shadowColor = "#000"; ctx.shadowBlur = 6; ctx.fillStyle = "#fff"; ctx.fillText(L.msg, v.ox + w / 2, v.oy + h / 2); ctx.restore(); }
     return;
   }

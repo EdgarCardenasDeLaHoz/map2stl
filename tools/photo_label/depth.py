@@ -151,15 +151,23 @@ def api_depth_fit(cfg: Config, body: dict) -> dict:
     return {"ok": True, "a": cal.a, "b": cal.b, "n": cal.n, "err_median_log": cal.mad_rel}
 
 
-def _orient_source(orient, z, cam: dict, dem, buildings) -> dict:
+def _orient_source(orient, z, cam: dict, dem, buildings, labels=None) -> dict:
     """Backproject, take normals, classify (ground vs roof from the DEM when there is one) and
-    summarise the buildings of one depth grid ``z`` (gh, gw)."""
+    summarise the buildings of one depth grid ``z`` (gh, gw). With ``labels`` (SegFormer map of the
+    same shape) the full-resolution path of roofwall.py::classify_full is used instead, followed by the
+    per-building roof vote (roofwall.py::vote); the reply's ``buildings`` then carry the voted roof class."""
     import base64
 
     import numpy as np
     gh, gw = z.shape
     P = orient.backproject(z, cam)
-    res = orient.classify(orient.normals(P), P, cam, _orient_ground(P, cam, dem))
+    if labels is not None:
+        import roofwall
+        res = roofwall.classify_full(z, cam, labels, _orient_ground(P, cam, dem))
+        if buildings:
+            res["cls"] = roofwall.vote(res["cls"], orient.rasterize(buildings, gw, gh, cam["width"], cam["height"])[0])
+    else:
+        res = orient.classify(orient.normals(P), P, cam, _orient_ground(P, cam, dem))
     summ = {}
     if buildings:
         labels, ids = orient.rasterize(buildings, gw, gh, cam["width"], cam["height"])
@@ -230,9 +238,10 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
     dem = cfg.dem()
     a, b = body.get("a"), body.get("b")
     fit_source = "body" if a is not None and b is not None else None   # body | saved | buildings
-    gw0 = max(8, min(int(body.get("grid_w") or 320), 2000))
+    full = bool(body.get("full"))      # photo source at its own resolution + SegFormer refinement (roofwall.py)
+    gw0 = 2000 if full else max(8, min(int(body.get("grid_w") or 320), 2000))
     out = {"photo": None, "google": None, "agree": None}
-    pz = gz = None
+    pz = gz = plab = None
     f = depth_path(photo)
     saved = f.with_name(f.stem.removesuffix("_depth") + "_orient.json")
     if fit_source is None and saved.is_file():
@@ -255,6 +264,12 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
         with np.errstate(invalid="ignore", divide="ignore"):
             pz = float(a) / (d - float(b))
         pz[~np.isfinite(pz) | (pz <= 0) | (pz > 5000)] = np.nan
+        lp = f.with_name(f.stem.removesuffix("_depth") + "_labels.npy")
+        if full and lp.is_file():
+            plab = np.load(lp)
+            if plab.shape != pz.shape:
+                plab = plab[np.ix_(np.minimum(np.arange(h) * plab.shape[0] // h, plab.shape[0] - 1),
+                                   np.minimum(np.arange(w) * plab.shape[1] // w, plab.shape[1] - 1))]
     gw, gh = int(body.get("depth_w") or 0), int(body.get("depth_h") or 0)
     if body.get("depth") and gw >= 1 and gh >= 1:
         g = np.frombuffer(base64.b64decode(body["depth"]), dtype="<f4").astype(np.float64)
@@ -263,7 +278,7 @@ def api_depth_orient(cfg: Config, body: dict) -> dict:
     if pz is None and gz is None:
         return {"ok": False, "reason": "no depth fit yet: press Render Google depth once to scale the photo depth"}
     if pz is not None:
-        out["photo"] = _orient_source(orient, pz, cam, dem, buildings)
+        out["photo"] = _orient_source(orient, pz, cam, dem, buildings, plab)
     if gz is not None:
         out["google"] = _orient_source(orient, gz, cam, dem, buildings)
     if out["photo"] and out["google"]:

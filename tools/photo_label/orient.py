@@ -60,31 +60,36 @@ def backproject(z, cam: dict):
     return zz[..., None] * d
 
 
-def _shifts(a, pad_val=np.nan):
-    """The 8 neighbours of every cell of (gh, gw[, c]) ``a`` as a list (padding with NaN)."""
-    pw = [(1, 1), (1, 1)] + [(0, 0)] * (a.ndim - 2)
+def _shifts(a, pad_val=np.nan, r: int = 1):
+    """The neighbours within ``r`` cells (Chebyshev, centre excluded) of every cell of (gh, gw[, c]) ``a``
+    as a list (padding with NaN)."""
+    pw = [(r, r), (r, r)] + [(0, 0)] * (a.ndim - 2)
     p = np.pad(a, pw, constant_values=pad_val)
     gh, gw = a.shape[:2]
-    return [p[1 + di:1 + di + gh, 1 + dj:1 + dj + gw]
-            for di in (-1, 0, 1) for dj in (-1, 0, 1) if (di, dj) != (0, 0)]
+    return [p[r + di:r + di + gh, r + dj:r + dj + gw]
+            for di in range(-r, r + 1) for dj in range(-r, r + 1) if (di, dj) != (0, 0)]
 
 
-def normals(P, max_jump: float = 0.15):
+def normals(P, max_jump: float = 0.15, radius: int = 1, step: int = 1):
     """Unit surface normals (gh, gw, 3) facing the camera; NaN at borders, next to missing cells
     and where the range jumps by more than ``max_jump`` (relative) between neighbours.
 
-    The points are first smoothed by a 3x3 mean over the neighbours within ``max_jump`` of the
-    centre's range, so smoothing never blends across an occlusion edge."""
+    The points are first smoothed by a (2*radius+1)^2 mean over the neighbours within ``max_jump`` of
+    the centre's range, so smoothing never blends across an occlusion edge. The normal is the cross
+    product of central differences taken ``step`` cells either side (border: ``step`` cells stay NaN).
+    The defaults (3x3 mean, 1-cell stencil) suit a coarse grid; per-pixel work on a full photo uses
+    a wider radius and step (see roofwall.py) because depth noise of a cell is large against the
+    1-cell baseline."""
     P = np.asarray(P, dtype=np.float64)
     gh, gw = P.shape[:2]
     out = np.full((gh, gw, 3), np.nan)
-    if gh < 3 or gw < 3:
+    k = max(1, int(step))
+    if gh < 2 * k + 1 or gw < 2 * k + 1:
         return out
     rng = np.linalg.norm(P, axis=2)
     rng[~np.isfinite(P).all(axis=2)] = np.nan
-    S = P.copy()
     acc, cnt = np.where(np.isfinite(P), P, 0.0), np.isfinite(rng).astype(float)
-    for sp, sr in zip(_shifts(P), _shifts(rng)):
+    for sp, sr in zip(_shifts(P, r=radius), _shifts(rng, r=radius)):
         with np.errstate(invalid="ignore"):
             ok = np.isfinite(sr) & np.isfinite(rng) & (np.abs(sr - rng) <= max_jump * np.minimum(sr, rng))
         acc = acc + np.where(ok[..., None], sp, 0.0)
@@ -92,24 +97,24 @@ def normals(P, max_jump: float = 0.15):
     with np.errstate(invalid="ignore", divide="ignore"):
         S = np.where((cnt > 0)[..., None], acc / np.maximum(cnt, 1)[..., None], np.nan)
     S[~np.isfinite(rng)] = np.nan
-    dx = S[1:-1, 2:] - S[1:-1, :-2]
-    dy = S[2:, 1:-1] - S[:-2, 1:-1]
+    dx = S[k:-k, 2 * k:] - S[k:-k, :-2 * k]
+    dy = S[2 * k:, k:-k] - S[:-2 * k, k:-k]
     n = np.cross(dx, dy)
     ln = np.linalg.norm(n, axis=2)
     with np.errstate(invalid="ignore", divide="ignore"):
         n = n / ln[..., None]
     n[ln < 1e-12] = np.nan
     # occlusion edges: any of the 4 neighbours (unsmoothed range) jumps relative to the centre
-    c = rng[1:-1, 1:-1]
+    c = rng[k:-k, k:-k]
     bad = ~np.isfinite(c)
-    for nb in (rng[1:-1, :-2], rng[1:-1, 2:], rng[:-2, 1:-1], rng[2:, 1:-1]):
+    for nb in (rng[k:-k, :-2 * k], rng[k:-k, 2 * k:], rng[:-2 * k, k:-k], rng[2 * k:, k:-k]):
         with np.errstate(invalid="ignore"):
             bad |= ~np.isfinite(nb) | (np.abs(nb - c) > max_jump * np.minimum(nb, c))
     n[bad] = np.nan
-    cen = P[1:-1, 1:-1]
+    cen = P[k:-k, k:-k]
     flip = np.sum(n * -cen, axis=2) < 0
     n = np.where(flip[..., None], -n, n)
-    out[1:-1, 1:-1] = n
+    out[k:-k, k:-k] = n
     return out
 
 

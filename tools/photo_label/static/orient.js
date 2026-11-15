@@ -50,11 +50,11 @@ export function orFill(L, g, gwait) {
 export async function dvOrient() {
   if (dv.tab !== "or" || !st.photo) return;
   const g = curG(), h = orHolder(g); if (!h || (g && !orReady(g)) || dvNeedCam()) return;
-  const key = g ? orKey(g) : `photo|${JSON.stringify(app.camPose)}|${st.bld.length}`; if (h.orient && h.orient.key === key) return;
+  const key = (g ? orKey(g) : `photo|${JSON.stringify(app.camPose)}|${st.bld.length}`) + (dv.detail === "full" ? "|full" : ""); if (h.orient && h.orient.key === key) return;
   const o = h.orient = { key, state: "busy" }, seq = dv.seq, ph = st.photo, f = g && g.fit && !g.fit.fail ? g.fit : null;
   status("Orientation: computing...");
   try {
-    const body = { photo: ph.path, camera: { ...app.camPose, width: ph.w, height: ph.h }, grid_w: 320,
+    const body = { photo: ph.path, camera: { ...app.camPose, width: ph.w, height: ph.h }, grid_w: 320, ...(dv.detail === "full" ? { full: true } : {}),
       ...(g ? { depth: g.b64, depth_w: g.w, depth_h: g.h } : {}),
       buildings: st.bld.map(b => ({ id: b.id, rings: b.contours, dist: b.dist_m })) };
     if (f) { body.a = f.a; body.b = f.b; }
@@ -67,11 +67,12 @@ export async function dvOrient() {
 }
 export function orMarks() {
   document.querySelectorAll("#oSrc button").forEach(b => b.classList.toggle("on", b.dataset.v === dv.src));
+  document.querySelectorAll("#oDetail button").forEach(b => b.classList.toggle("on", b.dataset.v === (dv.detail || "grid")));
   document.querySelectorAll("#oView button").forEach(b => b.classList.toggle("on", b.dataset.v === dv.view));
 }
 export function orSet(key, val) {
   dv[key] = val; dv.layer = null; dv.chrome = "";
-  prefSet(key === "src" ? "photoLabelOrSrc" : "photoLabelOrView", val);
+  prefSet(key === "src" ? "photoLabelOrSrc" : key === "detail" ? "photoLabelOrDetail" : "photoLabelOrView", val);
   orMarks(); draw();
 }
 export function orHover(x, y) {

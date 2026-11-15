@@ -6,10 +6,11 @@ export const st = { auto: [], photos: [], photo: null, img: null, pairs: [], pen
              solve: null, bld: [], hoverId: null, hiId: null, view: { s: 1, ox: 0, oy: 0 }, mapMarkers: new Map(), footprints: null };
 // Depth-view tab state (tabs: photo | pd photo depth | gd Google depth | df difference | or orientation).
 export const DV_TABS = ["photo", "pd", "gd", "df", "ed", "or"];
-export const dv = { tab: "photo", seq: 0, ver: 0, p: null, gc: new Map(), loading: false, gbusy: false, gerr: null, timer: 0, layer: null, chrome: "", src: "photo", view: "surf" };
+export const dv = { tab: "photo", seq: 0, ver: 0, p: null, gc: new Map(), loading: false, gbusy: false, gerr: null, timer: 0, layer: null, chrome: "", src: "photo", view: "surf", detail: "grid" };
 {
   const t = prefGet("photoLabelTab"); if (DV_TABS.includes(t)) dv.tab = t;
   const s = prefGet("photoLabelOrSrc"); if (s === "photo" || s === "google") dv.src = s;
+  const dt = prefGet("photoLabelOrDetail"); if (dt === "grid" || dt === "full") dv.detail = dt;
   const v = prefGet("photoLabelOrView"); if (["surf", "wall", "pitch"].includes(v)) dv.view = v;
 }
 // Loose page-wide state. curRegion: the region every fetch carries; regionSeq: lets a slow response from a
