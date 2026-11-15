@@ -584,6 +584,14 @@ class TestPrintability:
         assert top - m.merged.vertices[:, 2].min() < 300 * m.scale.z_mm_per_m
         assert m.parts["towers"].extents[2] <= 8 * width + 1.0
 
+    def test_landmark_heights_are_not_clamped(self):
+        """A height set by a landmark override is kept: the slenderness cap skips it."""
+        tower = {"geometry": _square(-3.59, 37.18, d=0.00002),
+                 "properties": {"height_m": 300, "height_source": "landmark"}}
+        m = build_city_model(_hill(), BBOX, {"towers": _fc(tower)})
+        assert m.report["layers"]["towers"]["clamped"] == 0
+        assert m.parts["towers"].extents[2] > 0.9 * 300 * m.scale.z_mm_per_m
+
     def test_pitched_roof_on_concave_footprint_is_kept(self):
         ell = {"type": "Polygon", "coordinates": [[[-3.590, 37.180], [-3.589, 37.180], [-3.589, 37.1804],
                                                    [-3.5894, 37.1804], [-3.5894, 37.181],

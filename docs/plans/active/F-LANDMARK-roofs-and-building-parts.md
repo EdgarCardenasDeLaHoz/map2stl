@@ -95,6 +95,36 @@ Survey: this session's read-only audit (roofs, parts, sources) — findings belo
    (`ModelScorePanel.vue`). Tracking roof error on the landmark set waits on §1–§3 and on a
    ≤ 1 m reference (lidar nDSM or surveyed pack such as Old San Juan).
 
+## §7 — Per-part tag patches (`"parts"` override kind), Granada Cathedral first
+
+Planned 2026-11-15 (user picked "Cathedral route 1": override the OSM part heights and stacking
+before trying photo rays). Why: the cathedral's 41 OSM parts carry no `min_height`, so every part
+starts at the ground and the tower and spire print as solid columns; roofs fall back to
+0.3 x height (`city2stl/city_model.py::_roof`). The `"height"` override
+(`city2stl/landmarks.py::scale_heights`) multiplies every member by one factor, so it cannot add
+the missing bases. No open mesh of the cathedral exists (search 2026-11-15), so the source is
+published dimensions plus the CNIG nDSM.
+
+- **New override kind `"parts"`** in `city2stl/landmarks.py`: `{"kind": "parts", "source": ...,
+  "parts": {"way/<id>": {"height_m": .., "min_height": .., "roof:shape": .., "roof:height": ..}}}`,
+  keyed by the outline's osm_id. `LandmarkPlan.take` merges each patch into the matching member's
+  props (members only; ids not found are reported as missing). Registered in `OVERRIDE_KINDS`,
+  `resolve_overrides`, `coerce_overrides` and `app/server/core/landmarks.py::validate_spec`.
+- **Implemented 2026-11-15:** `landmarks.py::validate_parts`, `apply_parts_patch`, `load_parts_files`, `parts_file_overrides`. A patched `min_height` is read by `city_model.build_layer` through `heights.min_height_from_tags` (props key `min_height`, parsed with `parse_length_m`); the slenderness cap applies to height minus base, so a spire lifted onto a tower is judged by its own extent. Parts whose height came from a landmark override skip the cap altogether (`city_model.py::_slender_cap`), because the first Granada build cut 18 of 42 patched parts short. `data/landmarks/granada_cathedral_parts.json` was written 2026-11-15: 41 parts plus the tower.
+- **Version-controlled patch** `data/landmarks/granada_cathedral_parts.json`, loaded beside the
+  region's stored overrides (the way `reference_landmarks` reads the Alhambra rule).
+- **Heights:** tower 57 m as built (es.wikipedia; CNIG nDSM reads 53.7 m), rotunda / capilla
+  mayor 45 m, side naves 26.5 m, central nave ridge from the nDSM (34.5 m is the interior vault).
+  Parts that sit on other parts get `min_height` = the top of the part below. Every patched part
+  gets an explicit `roof:height` so the 0.3 x default does not return.
+- **Check:** `max_slenderness` must not clamp the spire after it is lifted onto the tower.
+- **Probe:** REDIAM 1 m ranged read over the cathedral (43 % cell coverage so far) to see whether
+  the missing cells are a reader fault or a data gap.
+
+Success: the cathedral prints with the tower stepping out of the roof, no ground-level spire, and
+per-part tops within 2 m of the CNIG nDSM p95 (or of the published figure where the nDSM is void).
+Risk: OSM part ids change on edit; a missing id is reported, not silently skipped.
+
 ## Target files
 
 `city2stl/roofs.py` (new), `city2stl/city_model.py` (parts + overrides), `city2stl/fetch.py`

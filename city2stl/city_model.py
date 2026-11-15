@@ -1148,8 +1148,7 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
         arr = np.asarray(polys, dtype=object)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
-        cap = (style.max_slenderness * _widths(arr)
-               if style.max_slenderness > 0 else np.full(len(polys), np.inf))
+        cap = _slender_cap(arr, props, style)
         height = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m
         out["clamped"] = int((height - base > cap).sum())
         if name in RING_LAYERS:   # as build_layer: ground-following pieces
@@ -1170,6 +1169,20 @@ def layer_preflight(name: str, features: list[dict], style: LayerStyle, terrain:
         out["volume_mm3"] = round(sign * float(area.sum()) * style.offset_mm, 1)
         out["faces_est"] = int(4 * (nverts.sum() + tin_density * area.sum()))
     return out
+
+
+def _slender_cap(arr, props, style) -> np.ndarray:
+    """Per-feature height cap (mm above its base): ``max_slenderness`` x width, or no cap.
+
+    Parts whose height came from a landmark override (``height_source == "landmark"``) are
+    not capped: their heights are surveyed or published, and a buttress or turret is held up
+    by the building it belongs to rather than standing alone.
+    """
+    if style.max_slenderness <= 0 or not len(arr):
+        return np.full(len(arr), np.inf)
+    cap = style.max_slenderness * _widths(arr)
+    exempt = np.array([p.get("height_source") == "landmark" for p in props], bool)
+    return np.where(exempt, np.inf, cap)
 
 
 def build_layer(name: str, features: list[dict], style: LayerStyle,
@@ -1199,8 +1212,7 @@ def build_layer(name: str, features: list[dict], style: LayerStyle,
         polys, props, stats["parts"], stats["outlines_replaced"] = assemble_parts(polys, props)
         z_per_m = terrain.scale.z_mm_per_m * style.height_scale
         base = np.array([min_height_from_tags(p) for p in props]) * z_per_m
-        cap = (style.max_slenderness * _widths(np.asarray(polys, dtype=object))
-               if style.max_slenderness > 0 and polys else np.full(len(polys), np.inf))
+        cap = _slender_cap(np.asarray(polys, dtype=object), props, style)
         # The slenderness rule applies to each solid's own extent: a spire part
         # stands on its tower, not on the ground.
         want = np.array([float(p.get("height_m") or 10.0) for p in props]) * z_per_m - base

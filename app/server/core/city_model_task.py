@@ -38,9 +38,10 @@ Request (``POST /api/export/start`` with ``format="city"``)::
                     lowest ground (city_model.level_pads), so its top is pad + height and
                     the wall is true on every side; false: the old seating (top from the
                     highest ground, buried skirt). report.json "level_ground" counts pads
-    landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"height"|"osm", ...}} buildings replaced by
+    landmark_overrides  {osm_id: {kind: "mesh"|"ndsm"|"height"|"parts"|"osm", ...}} buildings replaced by
                     an uploaded mesh or a surveyed nDSM solid, or rescaled to a known
-                    height (city2stl.landmarks;
+                    height, or per-part tag patches ("parts"; data/landmarks/*_parts.json
+                    files are merged under these, the request wins) (city2stl.landmarks;
                     resolved before the build, a bad mesh / no survey data fails the
                     task with the reason; report.json "landmarks" says what applied)
     reference_landmarks  bool, default false: swap the Alhambra's buildings for the stored
@@ -91,7 +92,7 @@ from app.server.core.preflight import build_check
 from app.server.core.puzzle import Heightfield, cut_to_zip
 from city2stl.canopy import canopy_layer
 from city2stl.city_model import build_on_terrain, is_downhill_piste, resolve_layers
-from city2stl.landmarks import LandmarkError, reference_landmarks
+from city2stl.landmarks import LandmarkError, parts_file_overrides, reference_landmarks
 from city2stl.panorama_heights import apply_panorama_heights
 from city2stl.panorama_heights import load_rows as load_panorama_rows
 
@@ -268,10 +269,20 @@ def run_city_model(data: dict, task: ExportTask) -> None:
         trail_context = {n: osm[n] for n in ("buildings", "roads") if isinstance(osm.get(n), dict)}
 
     landmark_overrides = {}
-    if data.get("landmark_overrides") and "buildings" in layers:
+    override_specs = data.get("landmark_overrides") or {}
+    if "buildings" in layers:
+        # data/landmarks/*_parts.json patches apply where their outline is in the city data;
+        # a request's (or region's) override for the same osm_id wins.
+        try:
+            override_specs = parts_file_overrides(layers["buildings"].get("features") or [],
+                                                  override_specs)
+        except LandmarkError as exc:
+            task.fail(str(exc))
+            return
+    if override_specs and "buildings" in layers:
         task.update(22, "Loading landmark overrides...")
         try:
-            landmark_overrides = resolve_landmarks(data["landmark_overrides"], layers["buildings"])
+            landmark_overrides = resolve_landmarks(override_specs, layers["buildings"])
         except LandmarkError as exc:
             task.fail(str(exc))
             return

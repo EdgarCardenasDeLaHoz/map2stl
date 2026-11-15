@@ -3,7 +3,8 @@
 * storage: one row per (region, OSM id) in ``region_landmarks`` (``core/db.py``);
 * ``resolve``: request specs -> ``city2stl.landmarks.LandmarkOverride`` (uploaded
   meshes found through ``core/mesh_import``, nDSM through the survey providers, a
-  height override checked: 0 < height_m < 1000);
+  height override checked: 0 < height_m < 1000, a parts
+  override's tag patches by ``lm.validate_parts``);
 * ``preview``: one landmark alone, built by the same ``build_on_terrain`` path the
   City Model export uses, on a flat plinth, as vertex / face lists for three.js.
 
@@ -58,6 +59,8 @@ def validate_spec(spec: dict) -> dict:
         spec = {**spec, "height_m": lm.override_height_m(spec)}
         if spec.get("source") is not None and not isinstance(spec["source"], str):
             raise lm.LandmarkError("source must be a text note")
+    if kind == "parts":
+        spec = lm.validate_parts(spec)
     return {**spec, "kind": kind}
 
 

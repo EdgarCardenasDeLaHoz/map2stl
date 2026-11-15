@@ -35,6 +35,17 @@ where they do not, the user can replace one building, identified by its OSM id
   local terrain (``local_ground``), and an entry may carry a ``footprint_lonlat`` of its own
   when OSM has no building with an id for it (the towers and churches layers).
 
+* ``{"kind": "parts", "source": "<note>", "parts": {"way/<id>": {patch}}}`` -- per-part tag
+  patches (F-LANDMARK §7, :func:`validate_parts`): the outline's members (itself plus the
+  features >= ``REPLACE_OVERLAP`` inside it, the same set a height override rescales) whose
+  ``osm_id`` is a key of ``parts`` get the patch merged into their properties; the others
+  stay as drawn. Patch keys: ``height_m``, ``min_height`` (m; the key ``city_model.build_layer``
+  reads through ``heights.min_height_from_tags``, so a part with one starts at that height
+  above the ground instead of at the ground), ``roof:shape`` (text) and ``roof:height`` (m);
+  numbers must be finite and >= 0. A key with no member is listed under ``missing`` in the
+  report, never skipped silently. Version-controlled patches live in
+  ``data/landmarks/*_parts.json`` (:func:`parts_file_overrides`).
+
 ``kind == "osm"`` (or no entry) keeps the tag-driven building.
 
 Resolution (file I/O, network) and geometry are split: :func:`resolve_overrides`
@@ -79,7 +90,12 @@ SEAT_OVERLAP_MM = 0.05
 MIN_NDSM_COVERAGE = 0.3
 #: Margin (m) added around a footprint when fetching its nDSM.
 NDSM_MARGIN_M = 5.0
-OVERRIDE_KINDS = ("osm", "mesh", "ndsm", "height", "reference")
+OVERRIDE_KINDS = ("osm", "mesh", "ndsm", "height", "reference", "parts")
+#: Tag patch keys a "parts" override may set, and which of them must be text.
+PARTS_PATCH_KEYS = ("height_m", "min_height", "roof:shape", "roof:height")
+PARTS_TEXT_KEYS = ("roof:shape",)
+#: Provenance notes a "parts" patch may carry; validated as text and dropped from the patch.
+PARTS_NOTE_KEYS = ("role", "height_from")
 #: A height override must be above 0 and below this (m).
 MAX_HEIGHT_M = 1000.0
 #: The height ``city_model`` extrudes a building without ``height_m`` to.
@@ -269,6 +285,50 @@ def override_height_m(spec: dict) -> float:
     return h
 
 
+def validate_parts(spec: dict) -> dict:
+    """A "parts" spec with its patches normalised (numbers as floats); LandmarkError if bad.
+
+    ``parts`` must be a non-empty ``{"way/<id>": {key: value}}``; every patch non-empty with
+    keys from :data:`PARTS_PATCH_KEYS`, numbers finite and >= 0, ``roof:shape`` a non-empty string.
+    Note keys (:data:`PARTS_NOTE_KEYS`, e.g. which survey a height came from) must be text and are
+    dropped; a patch of notes only is refused.
+    """
+    parts = spec.get("parts")
+    if not isinstance(parts, dict) or not parts:
+        raise LandmarkError("a parts override needs a non-empty parts object {osm_id: {tags}}")
+    if spec.get("source") is not None and not isinstance(spec["source"], str):
+        raise LandmarkError("source must be a text note")
+    out = {}
+    for pid, patch in parts.items():
+        if not isinstance(patch, dict) or not patch:
+            raise LandmarkError(f"parts {pid}: the patch must be a non-empty object")
+        clean = {}
+        for key, val in patch.items():
+            if key in PARTS_NOTE_KEYS:
+                if not isinstance(val, str):
+                    raise LandmarkError(f"parts {pid}: {key} must be a text note")
+                continue
+            if key not in PARTS_PATCH_KEYS:
+                raise LandmarkError(f"parts {pid}: unknown key {key!r} (one of "
+                                    f"{', '.join(PARTS_PATCH_KEYS)})")
+            if key in PARTS_TEXT_KEYS:
+                if not isinstance(val, str) or not val.strip():
+                    raise LandmarkError(f"parts {pid}: {key} must be a non-empty string")
+                clean[key] = val.strip()
+                continue
+            try:
+                num = float(val)
+            except (TypeError, ValueError):
+                raise LandmarkError(f"parts {pid}: {key} must be a number (got {val!r})") from None
+            if isinstance(val, bool) or not math.isfinite(num) or num < 0:
+                raise LandmarkError(f"parts {pid}: {key} must be a number >= 0 (got {val!r})")
+            clean[key] = num
+        if not clean:
+            raise LandmarkError(f"parts {pid}: the patch sets no tags (only notes)")
+        out[str(pid)] = clean
+    return {**spec, "parts": out}
+
+
 def load_mesh(path: str | Path):
     """A trimesh from STL / OBJ / glTF, made a closed solid or refused (LandmarkError).
 
@@ -339,6 +399,14 @@ def resolve_overrides(specs: dict | None, features: list[dict], *,
                 spec["height_m"] = override_height_m(spec)
             except LandmarkError as exc:
                 raise LandmarkError(f"landmark {oid}: {exc}") from exc
+        if kind == "parts":
+            try:
+                spec = validate_parts(spec)
+            except LandmarkError as exc:
+                raise LandmarkError(f"landmark {oid}: {exc}") from exc
+            # Like "height": a missing outline is reported by LandmarkPlan.take, not fatal.
+            out[oid] = LandmarkOverride(oid, kind, spec, source=str(spec.get("source") or kind))
+            continue
         if kind == "height":
             # Needs no footprint data of its own: a building the city data lacks is
             # reported as missing by LandmarkPlan.take instead of failing the build.
@@ -387,7 +455,7 @@ def _resolve_ndsm(oid: str, spec: dict, feats: list[dict], fetch) -> LandmarkOve
 
 def coerce_overrides(overrides: dict | None) -> dict[str, LandmarkOverride]:
     """``{osm_id: LandmarkOverride | dict}`` -> resolved overrides (dicts must carry
-    ``mesh`` or ``ndsm`` + ``transform`` already loaded, or a valid ``height_m``)."""
+    ``mesh`` or ``ndsm`` + ``transform`` already loaded, or a valid ``height_m`` / ``parts``)."""
     out = {}
     for oid, ov in (overrides or {}).items():
         if isinstance(ov, LandmarkOverride):
@@ -395,6 +463,9 @@ def coerce_overrides(overrides: dict | None) -> dict[str, LandmarkOverride]:
         elif isinstance(ov, dict) and ov.get("kind") == "height":
             out[oid] = LandmarkOverride(oid, "height", ov, source=str(ov.get("source") or "height"),
                                         height_m=override_height_m(ov))
+        elif isinstance(ov, dict) and ov.get("kind") == "parts":
+            spec = validate_parts(ov)
+            out[oid] = LandmarkOverride(oid, "parts", spec, source=str(spec.get("source") or "parts"))
         elif isinstance(ov, dict) and ov.get("kind") in ("mesh", "ndsm", "reference"):
             out[oid] = LandmarkOverride(oid, ov["kind"], ov, mesh=ov.get("mesh"),
                                         ndsm=ov.get("ndsm"), transform=ov.get("transform"),
@@ -647,6 +718,21 @@ def ndsm_solid(ov: LandmarkOverride, footprint: Polygon, terrain, z_floor: float
     return out
 
 
+def apply_parts_patch(props: dict, patch: dict) -> dict:
+    """A copy of one feature's properties with a "parts" patch merged in (input untouched).
+
+    ``min_height`` replaces any ``building:min_level`` (``min_height_from_tags`` reads
+    ``min_height`` first, so the stale level tag would otherwise be dead weight);
+    patching ``height_m`` marks ``height_source`` as ``"landmark"``.
+    """
+    out = {**props, **patch}
+    if "min_height" in patch:
+        out.pop("building:min_level", None)
+    if "height_m" in patch:
+        out["height_source"] = "landmark"
+    return out
+
+
 def scale_heights(props: dict, k: float) -> dict:
     """A copy of one feature's properties with every height scaled by ``k``.
 
@@ -767,6 +853,22 @@ class LandmarkPlan:
                 self.report[oid] = {"kind": ov.kind, "source": ov.source, "status": "applied",
                                     "height_m": round(ov.height_m, 2), "osm_height_m": round(old, 2),
                                     "scaled_features": int(mine.sum())}
+                continue
+            if ov.kind == "parts":
+                patches = ov.spec["parts"]
+                matched: list[str] = []
+                for k in np.flatnonzero(mine):
+                    pid = str(props[k].get("osm_id") or "")
+                    if pid in patches:
+                        props[k] = apply_parts_patch(props[k], patches[pid])
+                        matched.append(pid)
+                self.footprints[oid] = fp
+                found = sorted(set(matched))
+                self.report[oid] = {"kind": ov.kind, "source": ov.source,
+                                    "status": "applied" if found else "missing",
+                                    "matched": found,
+                                    "missing": sorted(set(patches) - set(found)),
+                                    "patched_features": len(matched)}
                 continue
             kept: list[int] = []
             if ov.kind == "reference":
@@ -915,3 +1017,48 @@ def reference_landmarks(bbox: dict, *, enabled: bool = False, raster=None, rule:
         stats["labels"] += len(u["labels"])
     stats["units"] = len(out)
     return out, stats
+
+
+# ---------------------------------------------------------------------------
+# Version-controlled "parts" patches (F-LANDMARK §7)
+# ---------------------------------------------------------------------------
+
+def load_parts_files(directory: Path | str | None = None) -> dict[str, dict]:
+    """``{outline osm_id: {"kind": "parts", ...}}`` from every ``*_parts.json`` in ``directory``
+    (default :data:`REFERENCE_DIR`), files read in name order, a later file winning an id.
+
+    File schema: ``{"source": ..., "licence": ..., "landmarks": {"<outline osm_id>":
+    {"kind": "parts", "parts": {...}}}}``; the file's ``source`` / ``licence`` fill an entry's
+    own when absent. A malformed file or entry raises :class:`LandmarkError` naming it.
+    """
+    import json
+
+    d = Path(directory) if directory else REFERENCE_DIR
+    out: dict[str, dict] = {}
+    for path in sorted(d.glob("*_parts.json")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            for oid, entry in doc["landmarks"].items():
+                spec = {"source": doc.get("source"), "licence": doc.get("licence"), **entry}
+                spec = {k: v for k, v in spec.items() if v is not None}
+                if spec.get("kind") != "parts":
+                    raise LandmarkError(f"{oid}: kind must be 'parts'")
+                out[str(oid)] = validate_parts(spec)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, LandmarkError) as exc:
+            raise LandmarkError(f"{path.name}: {exc}") from exc
+    return out
+
+
+def parts_file_overrides(features: list[dict], stored: dict | None = None,
+                         directory: Path | str | None = None) -> dict[str, dict]:
+    """File patches (:func:`load_parts_files`) that apply to these building ``features``,
+    merged under ``stored`` (``{osm_id: spec}``, e.g. a request's / region's overrides).
+
+    Only files whose outline id occurs in ``features`` are used, so a build elsewhere carries
+    no "missing" entries. For the same osm_id the ``stored`` spec wins, whatever its kind.
+    """
+    stored = dict(stored or {})
+    present = {str((f.get("properties") or {}).get("osm_id") or "") for f in features}
+    files = {oid: spec for oid, spec in load_parts_files(directory).items() if oid in present}
+    return {**files, **stored}

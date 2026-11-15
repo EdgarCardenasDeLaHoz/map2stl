@@ -5,6 +5,31 @@ overrides: which endpoints work, how they are read, and what they can and cannot
 Endpoint catalogue: [../reference/survey-sources.md](../reference/survey-sources.md). Related:
 [building-heights.md](building-heights.md), [roofs-landmarks.md](roofs-landmarks.md).
 
+### 2026-11-15 — Over Granada Cathedral, REDIAM's holes are in the source and CNIG's east half has a high ground model
+- **Decision:** both readers stay as they are. The cathedral's part heights
+  (`data/landmarks/granada_cathedral_parts.json`, F-LANDMARK §7) take the CNIG nDSM only west of
+  lon -3.5994. East of it they use REDIAM where at least 50 % of cells are valid, else the published
+  figure, else the OSM tag.
+- **Why:** REDIAM, checked with one range read of the original file at 1 m:
+  - 57 % of the cells in the outline hold -9999, which is not the declared nodata value of 255.
+  - The cache matches the source (valid 0.43 against 0.42, p95 34.1 m against 34.4 m).
+  - The product is a vegetation height model and drops cells classed as building
+    (`city2stl/height/providers/rediam_mdhn.py` docstring), so the holes are a data gap.
+- **Why:** CNIG reads 8-13 m low east of the line. A fresh read matches the cache, so the reader
+  is not the cause. The cause is the product's ground model:
+  - The roof surface is flat at 713 m across the building.
+  - The ground implied under it (surface minus building height) rises from 691 m to 701 m.
+  - The street rises only from 681 m to 685 m.
+  - So the ground model sits 12-15 m above the street under the apse, probably because roof
+    points were classed as ground.
+  - The fall in height is gradual and does not follow a sheet line, which rules out a tile seam.
+- **Rejected:** fixing either reader, since neither is at fault. A general guard (reject CNIG
+  where the implied ground is more than about 5 m above the nearby street) belongs in the
+  height-fill code. It is not built yet.
+- **Supersedes / superseded by:** —
+- **Source:** [F-LANDMARK §7](../plans/active/F-LANDMARK-roofs-and-building-parts.md); probe
+  scripts in the session scratchpad.
+
 ### 2026-10-13 — Granada is a survey-only truth city: REDIAM 1 m read by window over three screened areas
 - **Decision:** `benchmark.REGIONS["granada"] = "rediam_mdhn"`, `TRUTH_AREAS["granada"]` (cathedral,
   alhambra, centre; union ~1.7 x 2.3 km) in `scripts/19_refresh_survey_truth.py`, and
@@ -25,7 +50,7 @@ Endpoint catalogue: [../reference/survey-sources.md](../reference/survey-sources
     records. Stale: 0 (29 OSM `start_date`s in the bbox, 13 truth records predate the survey, none
     postdate it; `readings_2x` needs image readings, none yet).
   - Sanity: Cathedral outline (8,341 m2, tag 45 m) is void, as `survey-sources.md` says; its small
-    parts read 37-40 m, tags 40 m. The 81 m tower is not read (no record above 40.4 m). Alhambra:
+    parts read 37-40 m, tags 40 m. The tower (57 m as built; 81 m was the unbuilt design) is not read (no record above 40.4 m). Alhambra:
     Torre de la Vela 29.3 m, Homenaje 23.4 m, Alcazaba 22.4 m (p95), Palacio de Carlos V 22.5 m,
     against a 10 m tag; the REDIAM flight is 2020-21.
 - **Rejected:** reading the whole bbox (3.3 x 4.9 km) now; the three areas are what the drone

@@ -356,3 +356,108 @@ class TestHeightOverride:
         assert got["way/1"].kind == "height" and got["way/1"].height_m == 30.0
         with pytest.raises(lm.LandmarkError):
             lm.coerce_overrides({"way/1": {"kind": "height", "height_m": 5000}})
+
+
+class TestParts:
+    """kind "parts" (F-LANDMARK §7): per-part tag patches keyed by the outline's osm_id."""
+
+    @staticmethod
+    def _spec(parts, **kw):
+        return {"way/1": {"kind": "parts", "source": "test", "parts": parts, **kw}}
+
+    def test_patch_applies_to_members_only(self):
+        spec = self._spec({"way/2": {"height_m": 45, "min_height": 20, "roof:shape": "flat",
+                                     "roof:height": 0}})
+        before = [dict(f["properties"]) for f in BUILDINGS["features"]]
+        model = _build(BUILDINGS, spec)
+        assert [f["properties"] for f in BUILDINGS["features"]] == before    # input untouched
+        rep = model.report["landmarks"]["way/1"]
+        assert rep == {"kind": "parts", "source": "test", "status": "applied",
+                       "matched": ["way/2"], "missing": [], "patched_features": 1}
+        plan = lm.LandmarkPlan(lm.resolve_overrides(spec, BUILDINGS["features"]))
+        assert plan.overrides["way/1"].kind == "parts"
+        patched = lm.apply_parts_patch(TOWER["properties"], spec["way/1"]["parts"]["way/2"])
+        assert patched["height_m"] == 45 and patched["min_height"] == 20
+        assert patched["height_source"] == "landmark" and TOWER["properties"]["height_m"] == 57.0
+        assert model.report["merged"]["watertight"]
+
+    def test_min_height_lifts_the_base(self):
+        # build_layer reads the base from the props key "min_height" (heights.min_height_from_tags).
+        zpm = _build(_fc(TALL), None).scale.z_mm_per_m
+        flat = _build(_fc(TALL), None).parts["buildings"].bounds[0, 2]
+        spec = {"way/5": {"kind": "parts", "parts": {"way/5": {"min_height": 10, "height_m": 25}}}}
+        lifted = _build(_fc(TALL), spec)
+        assert lifted.report["landmarks"]["way/5"]["status"] == "applied"
+        assert lifted.parts["buildings"].bounds[0, 2] == pytest.approx(3.0 + 10 * zpm, abs=0.1)
+        assert lifted.parts["buildings"].bounds[0, 2] > flat + 5 * zpm
+        assert lifted.parts["buildings"].bounds[1, 2] == pytest.approx(3.0 + 25 * zpm, abs=0.1)
+
+    def test_missing_ids_are_reported(self):
+        model = _build(BUILDINGS, self._spec({"way/2": {"height_m": 50}, "way/99": {"height_m": 5}}))
+        rep = model.report["landmarks"]["way/1"]
+        assert rep["matched"] == ["way/2"] and rep["missing"] == ["way/99"]
+        none = _build(BUILDINGS, self._spec({"way/99": {"height_m": 5}}))
+        assert none.report["landmarks"]["way/1"]["status"] == "missing"
+        absent = _build(_fc(TALL), self._spec({"way/2": {"height_m": 5}}))
+        assert absent.report["landmarks"]["way/1"]["status"] == "missing"
+
+    @pytest.mark.parametrize("parts", [
+        {}, None, {"way/2": {}}, {"way/2": {"colour": "red"}}, {"way/2": {"height_m": -1}},
+        {"way/2": {"min_height": "high"}}, {"way/2": {"roof:height": float("nan")}},
+        {"way/2": {"roof:shape": 3}}, {"way/2": {"height_m": True}},
+        {"way/2": {"role": "nave"}}, {"way/2": {"height_m": 5, "role": 7}}])
+    def test_bad_specs_rejected(self, parts):
+        with pytest.raises(lm.LandmarkError):
+            lm.resolve_overrides(self._spec(parts), BUILDINGS["features"])
+        with pytest.raises(lm.LandmarkError):
+            lm.coerce_overrides(self._spec(parts))
+
+    def test_resolve_and_coerce_normalise(self):
+        spec = self._spec({"way/2": {"height_m": "45", "roof:shape": " flat "}})
+        got = lm.resolve_overrides(spec, BUILDINGS["features"])["way/1"]
+        assert got.kind == "parts" and got.source == "test"
+        assert got.spec["parts"]["way/2"] == {"height_m": 45.0, "roof:shape": "flat"}
+        assert lm.coerce_overrides(spec)["way/1"].spec["parts"]["way/2"]["height_m"] == 45.0
+        noted = self._spec({"way/2": {"height_m": 30, "role": "nave", "height_from": "survey"}})
+        assert lm.coerce_overrides(noted)["way/1"].spec["parts"]["way/2"] == {"height_m": 30.0}
+
+    def test_granada_cathedral_file_loads(self):
+        files = lm.load_parts_files()
+        assert len(files["way/124069145"]["parts"]) == 41
+        assert files["way/438126631"]["parts"]["way/438126631"]["height_m"] == 57.0
+
+    def test_file_loader_merges_and_stored_wins(self, tmp_path):
+        import json
+        doc = {"source": "survey", "licence": "CC0", "landmarks": {
+            "way/1": {"kind": "parts", "parts": {"way/2": {"height_m": 50}}},
+            "way/77": {"kind": "parts", "parts": {"way/78": {"height_m": 5}}}}}
+        (tmp_path / "x_parts.json").write_text(json.dumps(doc), encoding="utf-8")
+        (tmp_path / "other.json").write_text("{not read", encoding="utf-8")
+        files = lm.load_parts_files(tmp_path)
+        assert set(files) == {"way/1", "way/77"}
+        assert files["way/1"]["source"] == "survey" and files["way/1"]["licence"] == "CC0"
+        feats = BUILDINGS["features"]
+        merged = lm.parts_file_overrides(feats, None, tmp_path)
+        assert set(merged) == {"way/1"}               # way/77 is not in this city
+        stored = {"way/1": {"kind": "height", "height_m": 60}}
+        assert lm.parts_file_overrides(feats, stored, tmp_path)["way/1"]["kind"] == "height"
+        assert lm.parts_file_overrides(feats, {"way/9": {"kind": "osm"}}, tmp_path).keys() \
+            == {"way/1", "way/9"}
+        model = _build(BUILDINGS, lm.resolve_overrides(merged, feats))
+        assert model.report["landmarks"]["way/1"]["matched"] == ["way/2"]
+
+    def test_bad_file_names_itself(self, tmp_path):
+        (tmp_path / "bad_parts.json").write_text('{"landmarks": {"way/1": {"kind": "parts"}}}',
+                                                 encoding="utf-8")
+        with pytest.raises(lm.LandmarkError, match="bad_parts.json"):
+            lm.load_parts_files(tmp_path)
+
+    def test_validate_spec_server(self):
+        from app.server.core.landmarks import validate_spec
+        ok = validate_spec({"kind": "parts", "parts": {"way/2": {"height_m": "30"}}})
+        assert ok["parts"]["way/2"]["height_m"] == 30.0 and ok["kind"] == "parts"
+        for bad in ({"kind": "parts"}, {"kind": "parts", "parts": {}},
+                    {"kind": "parts", "parts": {"way/2": {"zzz": 1}}},
+                    {"kind": "parts", "parts": {"way/2": {"height_m": -3}}}):
+            with pytest.raises(lm.LandmarkError):
+                validate_spec(bad)

@@ -1,0 +1,356 @@
+{
+ "source": "OSM building:part geometry (Overpass cache 403ac47a); heights from REDIAM MDHN 1 m (2020-21) and CNIG MDSn edificacion 2.5 m p95 over each part's own area, es.wikipedia published figures, else OSM tag",
+ "licence": "Geometry ids: OpenStreetMap contributors, ODbL. Survey: REDIAM (Junta de Andalucia, free reuse with attribution, licence unconfirmed) and CNIG/IGN (CC BY 4.0). Published figures: es.wikipedia, CC BY-SA.",
+ "landmarks": {
+  "way/124069145": {
+   "kind": "parts",
+   "name": "Catedral de Granada",
+   "source": "REDIAM/CNIG nDSM p95 per part; CNIG not used east of lon -3.5994 (reads 8-13 m low there); published: nave 34.5 m, side naves 26.5 m (floors), rotunda 45 m top",
+   "parts": {
+    "way/1524283507": {
+     "height_m": 16.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "north-east chapels",
+     "height_from": "osm_tag"
+    },
+    "way/1525113054": {
+     "height_m": 25.7,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "north-west chapel",
+     "height_from": "rediam"
+    },
+    "way/1525113055": {
+     "height_m": 29.3,
+     "min_height": 0.0,
+     "roof:shape": "hipped",
+     "roof:height": 2.8,
+     "role": "side nave",
+     "height_from": "cnig"
+    },
+    "way/1525113056": {
+     "height_m": 26.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "side nave",
+     "height_from": "published"
+    },
+    "way/1525113057": {
+     "height_m": 29.0,
+     "min_height": 0.0,
+     "roof:shape": "hipped",
+     "roof:height": 2.5,
+     "role": "side nave",
+     "height_from": "cnig"
+    },
+    "way/1525113058": {
+     "height_m": 26.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "side nave",
+     "height_from": "published"
+    },
+    "way/1525113059": {
+     "height_m": 32.6,
+     "min_height": 0.0,
+     "roof:shape": "hipped",
+     "roof:height": 6.1,
+     "role": "side nave",
+     "height_from": "rediam"
+    },
+    "way/1525113060": {
+     "height_m": 29.5,
+     "min_height": 0.0,
+     "roof:shape": "hipped",
+     "roof:height": 3.0,
+     "role": "side nave",
+     "height_from": "rediam"
+    },
+    "way/1525113061": {
+     "height_m": 26.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "side nave",
+     "height_from": "published"
+    },
+    "way/1525113062": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "south-east chapels",
+     "height_from": "rediam"
+    },
+    "way/1525113063": {
+     "height_m": 35.8,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "west front block (facade/portal)",
+     "height_from": "cnig"
+    },
+    "way/1525113064": {
+     "height_m": 27.8,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "west front block (facade/portal)",
+     "height_from": "cnig"
+    },
+    "way/1525113065": {
+     "height_m": 23.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "west front block (facade/portal)",
+     "height_from": "cnig"
+    },
+    "way/1525113066": {
+     "height_m": 33.7,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "south portal gable",
+     "height_from": "rediam"
+    },
+    "way/1525113067": {
+     "height_m": 31.9,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "west front block (facade/portal)",
+     "height_from": "cnig"
+    },
+    "way/1525113068": {
+     "height_m": 28.7,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "west front block (facade/portal)",
+     "height_from": "cnig"
+    },
+    "way/1525113069": {
+     "height_m": 44.0,
+     "min_height": 43.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda upper stage",
+     "height_from": "osm_tag"
+    },
+    "way/1525113070": {
+     "height_m": 45.0,
+     "min_height": 44.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda lantern (top)",
+     "height_from": "published"
+    },
+    "way/1525113071": {
+     "height_m": 50.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "turret by rotunda (pyramidal spire)",
+     "height_from": "osm_tag"
+    },
+    "way/1525113072": {
+     "height_m": 43.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "turret by rotunda (gabled)",
+     "height_from": "osm_tag"
+    },
+    "way/1525113073": {
+     "height_m": 26.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "crossing-rotunda link",
+     "height_from": "osm_tag"
+    },
+    "way/1525113074": {
+     "height_m": 40.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "osm_tag"
+    },
+    "way/1525113075": {
+     "height_m": 39.1,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113076": {
+     "height_m": 38.2,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113077": {
+     "height_m": 38.4,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113078": {
+     "height_m": 38.7,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113079": {
+     "height_m": 41.7,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113080": {
+     "height_m": 41.2,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda buttress pier",
+     "height_from": "rediam"
+    },
+    "way/1525113081": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113082": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113083": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113084": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113085": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113086": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113087": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113088": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113089": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/1525113090": {
+     "height_m": 26.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory buttress",
+     "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
+    },
+    "way/438126632": {
+     "height_m": 35.8,
+     "min_height": 0.0,
+     "roof:shape": "hipped",
+     "roof:height": 1.3,
+     "role": "central nave",
+     "height_from": "ndsm_ridge_max"
+    },
+    "way/438126633": {
+     "height_m": 43.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "rotunda (capilla mayor) drum",
+     "height_from": "osm_tag"
+    },
+    "way/598422622": {
+     "height_m": 26.5,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "ambulatory (girola)",
+     "height_from": "published side-nave vault; REDIAM p95 35.6 likely caught the rotunda drum edge, median 24.8"
+    }
+   }
+  },
+  "way/438126631": {
+   "kind": "parts",
+   "name": "Torre de San Miguel",
+   "source": "published 57 m as built (es.wikipedia), matches OSM tag; CNIG p95 52.8 max 53.8",
+   "parts": {
+    "way/438126631": {
+     "height_m": 57.0,
+     "min_height": 0.0,
+     "roof:shape": "flat",
+     "roof:height": 0.0,
+     "role": "bell tower",
+     "height_from": "published"
+    }
+   }
+  }
+ }
+}
