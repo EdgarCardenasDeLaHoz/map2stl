@@ -154,10 +154,10 @@
     "way/1525113071": {
      "height_m": 50.0,
      "min_height": 0.0,
-     "roof:shape": "flat",
-     "roof:height": 0.0,
+     "roof:shape": "pyramidal",
+     "roof:height": 8.0,
      "role": "turret by rotunda (pyramidal spire)",
-     "height_from": "osm_tag"
+     "height_from": "osm_tag; pyramidal spire, 8 m"
     },
     "way/1525113072": {
      "height_m": 43.0,
@@ -320,12 +320,12 @@
      "height_from": "ndsm_ridge_max"
     },
     "way/438126633": {
-     "height_m": 43.0,
+     "height_m": 45.0,
      "min_height": 0.0,
-     "roof:shape": "flat",
-     "roof:height": 0.0,
+     "roof:shape": "dome",
+     "roof:height": 4.0,
      "role": "rotunda (capilla mayor) drum",
-     "height_from": "osm_tag"
+     "height_from": "published 45 m top; dome restored over the drum (eave 41 m), the stages above sit inside it"
     },
     "way/598422622": {
      "height_m": 26.5,
