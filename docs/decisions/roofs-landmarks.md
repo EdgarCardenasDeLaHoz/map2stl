@@ -7,6 +7,22 @@ per-building mesh/nDSM overrides, the Landmarks panel). Plan:
 [../research/roof-shape-research.md](../research/roof-shape-research.md); classifier reference:
 [../reference/roof-shape-model.md](../reference/roof-shape-model.md).
 
+### 2026-11-17 — Granada Cathedral upper parts are set from photo rays after a pose correction
+- **Decision:** in `data/landmarks/granada_cathedral_parts.json` the rotunda lantern (way/1525113070)
+  tops at 54 m (was 45), the dome over the drum (way/438126633) at 47 m with a 6 m dome roof (was
+  45 / 4), the ambulatory (way/598422622) at 24 m (was 26.5) and the central nave (way/438126632) at
+  39.5 m (was 35.8, low confidence, +/-3). Heights are above the scene's 689 m ground.
+- **Why:** rays from `runs/photo/granada_cathedral/photo.png` with the 57 m bell tower as yardstick.
+  The first overlay looked "shifted too high" (user); a fit of model-minus-photo offsets over city
+  edges 250 to 1300 m (off = -77 px + 19800 px m / d, sigma about 5 px) showed the camera 6.8 m too
+  high and pitched 1.52 deg too far down, not a terrain fault. After correcting the pose, the tower
+  (57) and drum cornice (41) match the model; the lantern rises about 9 m above the dome, which the
+  old model had flush. User chose to apply all four parts.
+- **Rejected:** raising the ground under the cathedral — the 30 m elevation model reads 717 m inside
+  the footprint because it averages the roof; the plazas around read 689 to 700 m.
+- **Supersedes / superseded by:** —
+- **Source:** scratch `cathedral_rays/ovl_named_corr.png` (session scratchpad, temporary).
+
 ### 2026-11-15 — A landmark's per-part heights come from a version-controlled "parts" patch and skip the slenderness cap
 - **Decision:** a new override kind, `"parts"` (`city2stl/landmarks.py::validate_parts`, `apply_parts_patch`), sets `height_m`, `min_height`, `roof:shape` and `roof:height` per OSM part. Patches live in `data/landmarks/*_parts.json` (`load_parts_files`, `parts_file_overrides`); a region's stored override for the same outline wins. A part whose height came from a landmark override (`height_source == "landmark"`) is not limited by `max_slenderness` (`city2stl/city_model.py::_slender_cap`). Granada Cathedral is the first file: 41 parts plus the bell tower (`way/438126631`, 57 m).
 - **Why:** none of the cathedral's 41 OSM parts has a `min_height`, so the rotunda's stages and the tower printed as columns from the ground, and the `"height"` kind scales every member by a single factor, so it cannot add the missing bases. The first build with the patch cut 18 of 42 parts short: the rotunda piers came out at 27-31 m instead of 38-42 m, the ambulatory buttresses at 12-17 m instead of 26 m, and a turret at 36 m instead of 50 m. The cap exists to stop free-standing needles; a buttress is held up by the building around it.

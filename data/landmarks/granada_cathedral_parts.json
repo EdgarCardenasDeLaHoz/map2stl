@@ -144,12 +144,12 @@
      "height_from": "osm_tag"
     },
     "way/1525113070": {
-     "height_m": 45.0,
+     "height_m": 54.0,
      "min_height": 44.0,
      "roof:shape": "flat",
      "roof:height": 0.0,
      "role": "rotunda lantern (top)",
-     "height_from": "published"
+     "height_from": "photo rays 2026-11-17 (pose-corrected camera_named, tower 57 m as yardstick): lantern top 54 +/-2; was published 45"
     },
     "way/1525113071": {
      "height_m": 50.0,
@@ -312,28 +312,28 @@
      "height_from": "OSM tag; parts of 5-8 m2 mix street cells at 1 m"
     },
     "way/438126632": {
-     "height_m": 35.8,
+     "height_m": 39.5,
      "min_height": 0.0,
      "roof:shape": "hipped",
      "roof:height": 1.3,
      "role": "central nave",
-     "height_from": "ndsm_ridge_max"
+     "height_from": "photo rays 2026-11-17 (pose-corrected camera_named, tower 57 m as yardstick): 39.5 +/-3, low confidence; was ndsm_ridge_max 35.8"
     },
     "way/438126633": {
-     "height_m": 45.0,
+     "height_m": 47.0,
      "min_height": 0.0,
      "roof:shape": "dome",
-     "roof:height": 4.0,
+     "roof:height": 6.0,
      "role": "rotunda (capilla mayor) drum",
-     "height_from": "published 45 m top; dome restored over the drum (eave 41 m), the stages above sit inside it"
+     "height_from": "photo rays 2026-11-17 (pose-corrected camera_named, tower 57 m as yardstick): drum cornice 41, dome apex 47 +/-1.5; was published 45 top"
     },
     "way/598422622": {
-     "height_m": 26.5,
+     "height_m": 24.0,
      "min_height": 0.0,
      "roof:shape": "flat",
      "roof:height": 0.0,
      "role": "ambulatory (girola)",
-     "height_from": "published side-nave vault; REDIAM p95 35.6 likely caught the rotunda drum edge, median 24.8"
+     "height_from": "photo rays 2026-11-17 (pose-corrected camera_named, tower 57 m as yardstick): 24 +/-2 (REDIAM median 24.8); was published side-nave vault 26.5"
     }
    }
   },
