@@ -97,7 +97,8 @@ export function drawBuildings() {
   drawMeasuredOutlines(order);
   ctx.restore();
 }
-// A building the pipeline measured tall but published low: a dashed outline at the measured height.
+// A building the pipeline measured tall but published low: a dashed outline at the measured height
+// (visible part only; the server already clipped it against nearer buildings).
 export function drawMeasuredOutlines(list) {
   ctx.save(); ctx.setLineDash([7, 4]); ctx.lineWidth = 2; ctx.strokeStyle = "#ffd60a";
   for (const b of list) {
@@ -131,7 +132,7 @@ export async function fetchBuildings() {
         res({ w: im.width, h: im.height, data: g.getImageData(0, 0, im.width, im.height).data }); };
       im.onerror = () => res(null); im.src = "data:image/png;base64," + r.ids_png; });
     if (!cur()) return;
-    st.bld = r.buildings; draw(); if (dv.tab === "or") dvOrient(); drawMapLines(); status(`${r.buildings.length} buildings in view.`); }
+    st.bld = r.buildings; draw(); if (dv.tab === "or") dvOrient(); drawMapLines(); status(`${r.buildings.length} buildings in view.` + (r.buildings.some(b => b.measured_outline && b.measured_outline.length) ? " Dashed yellow: measured height (visible part)." : "")); }
 }
 export async function loadBuildings() {
   try { await fetchBuildings(); } catch (e) { status("Could not project the buildings: " + (e.message || e)); }

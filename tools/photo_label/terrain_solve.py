@@ -344,8 +344,9 @@ def project_buildings(dem, fc: dict, cam, radius_m: float = PROJECT_RADIUS_M,
     and `project_dirs` / `project_ll` (a `pano_camera.PanoCamera`): faces are then projected vertex by
     vertex (edges subdivided), depth is the distance from the camera, and seam crossings are drawn twice.
     Each building also carries `height_source`, `measured_m`, `published_m` (from the footprint) and,
-    for a `measured_withheld` one, `measured_outline`: the silhouette rings (px, not occlusion-tested)
-    of a prism at the measured height. With `measured` the withheld buildings are drawn at that height. `min_dist_m` replaces `MIN_DIST_M`
+    for a `measured_withheld` one, `measured_outline`: the visible rings (px) of a prism at the measured
+    height: its silhouette minus the pixels a nearer building's drawn prism covers in the same
+    id buffer (a nearer slot owns the pixel), so the rings never run through nearer buildings. With `measured` the withheld buildings are drawn at that height. `min_dist_m` replaces `MIN_DIST_M`
     (photo screening wants the buildings a street-level camera stands beside). Each building also has
     `edge_m`: the distance from the camera to the footprint's nearest point."""
     import cv2
@@ -412,7 +413,8 @@ def project_buildings(dem, fc: dict, cam, radius_m: float = PROJECT_RADIUS_M,
         return [(float(cc[:, 2].mean()), np.clip(px, -_CLAMP, _CLAMP))]
 
     def outline(slot, m):
-        """Silhouette rings (px) of the slot's footprint as a prism `m` metres tall."""
+        """Visible rings (px) of the slot's footprint as a prism `m` metres tall: the silhouette
+        minus pixels owned by a nearer building (lower slot) in the id buffer."""
         pc, zb = base[slot]
         mask = np.zeros((h, w), np.uint8)
         area = 0.5 * float(np.sum(pc[:, 0] * np.roll(pc[:, 1], -1) - np.roll(pc[:, 0], -1) * pc[:, 1]))
@@ -422,8 +424,14 @@ def project_buildings(dem, fc: dict, cam, radius_m: float = PROJECT_RADIUS_M,
         for pl in polys:
             for _d, px in face_px(pl):
                 cv2.fillPoly(mask, [np.round(px * 16).astype(np.int32)], 1, lineType=cv2.LINE_8, shift=4)
-        cs, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        res = [cv2.approxPolyDP(c, 1.0, True)[:, 0, :].tolist() for c in cs]
+        ys, xs = np.nonzero(mask.any(axis=1))[0], np.nonzero(mask.any(axis=0))[0]
+        if not len(ys):
+            return []
+        sl = (slice(ys[0], ys[-1] + 1), slice(xs[0], xs[-1] + 1))                # work on the bounding box only
+        sub, near = mask[sl], ids[sl]
+        sub[(near > 0) & (near <= slot)] = 0                                     # ids = slot + 1; nearer: ids - 1 < slot
+        cs, _ = cv2.findContours(sub, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)    # holes too: a nearer tower mid-span
+        res = [(cv2.approxPolyDP(c, 1.0, True)[:, 0, :] + [sl[1].start, sl[0].start]).tolist() for c in cs]
         return [r for r in res if len(r) >= 3]
     for slot, (_d, k) in enumerate(keep):
         _, pts, pr = cand[k]

@@ -22,7 +22,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   to match the photo): `tools/photo_label/static/map2d.js::drawMapLines`, `fpBase`, checkbox `rayChk`.
 - **Buildings projected onto the photo:** `terrain_solve.py::project_buildings` (`MAX_VISIBLE`
   nearest in view, `MIN_DIST_M`, `MIN_VISIBLE_PX`).
-- **Mask heights (auto-correct loop, plan F):** `tools/photo_label/mask_heights.py` - per frame `analyse_frame` (`pose_gate` bad_pose check, `column_top` mask top edge, `classify` ok / too_short / too_tall, `unmatched_blobs`, `column_height` elevation angle x `ray_ring_dist`); across frames `aggregate` / `agree_group` (2+ views within ln 1.25), `find_reassignments`; output `to_readings` (method `photo_mask`), `merge_production` (backup + merge), `score`, `google3d_yardstick` (TODO). Runner `claude/scripts/run_mask_heights.py`; tests `tests/test_photo_label_mask_heights.py`.
+- **Mask heights (auto-correct loop, plan F):** `tools/photo_label/mask_heights.py` - per frame `analyse_frame` (`pose_gate` bad_pose check, `column_top` mask top edge, `classify` ok / too_short / too_tall, `assign_blobs` (F-MASKFIT: tower-class footprints shifted at most 6 deg onto one SegFormer blob, `linear_sum_assignment`, shared blob keeps both unshifted; unclaimed tall blob -> `missing_tower`, reported only), depth splits blobs (`load_depth`, needs `<stem>_depth.npy`); depth stop in `column_top` + `depth_base` drop opt-in (`analyse_frame(depth_stop=True)`), `unmatched_blobs`, `column_height` elevation angle x `ray_ring_dist`); across frames `aggregate` / `agree_group` (2+ views within ln 1.25), `find_reassignments`; output `to_readings` (method `photo_mask`), `merge_production` (backup + merge), `score`, `google3d_yardstick` (TODO). Runner `claude/scripts/run_mask_heights.py` (`--out DIR`, `--depth-stop`, passes depth, writes `missing_tower`, `height_mode`, `depth_stop`); tests `tests/test_photo_label_mask_heights.py`.
 - **Server, routes, config:** `tools/photo_label/server.py` — `LabelHandler.do_GET` / `do_POST`
   (route table; errors map `paths.py::BadRequest` / `NotFound` / `Conflict` to 400 / 404 / 409, `require_photo` checks a body's photo), `make_server`, `main`, `json_safe` (every JSON reply: NaN and infinity become
   `null`, because the browser's JSON parser rejects bare `NaN`), and re-exports of the names `app/server/core/photo_solve.py` (on master)
@@ -46,7 +46,7 @@ then open `http://localhost:<port>/`. Endpoint list: the module docstring of `se
   `measured_withheld` / `default`), `tier`, `measured_m` / `published_m` when they differ from the drawn
   height. `measured_withheld`: measured >= `WITHHELD_RATIO` (1.5) x published and `WITHHELD_MIN_M` (10 m)
   above it. `terrain_solve.py::project_buildings` returns the source and figures per building, a dashed
-  `measured_outline` for withheld ones, and with `measured=True` (`/api/project` `heights: "measured"`,
+  `measured_outline` for withheld ones (occlusion-tested against the id buffer: nearer buildings cut it), and with `measured=True` (`/api/project` `heights: "measured"`,
   `drawn_height`) draws them at the measured height. Page: `tools/photo_label/static/map2d.js::heightText`, `fpTip`,
   `drawMeasuredOutlines`, the `#hModeSel` Heights select. Satellite readings
   (`runs/satellite/<region>/readings.json`) are not read yet (no file exists). Tests:

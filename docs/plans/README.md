@@ -296,6 +296,8 @@ local-filesystem state, not dependency weight.
 - **Skyline photos from Wikimedia Commons** with a solved camera (any vantage, not only Street
   View); Miami first, judged on relative heights. [F-WEB2](active/F-WEB2-commons-skyline-photos.md)
 - **Research signals into publishing** (floors as a fusion source and check, high-rise flags,
+- **Match footprints to photo blobs before reading mask heights** (Cartagena: boxes one tower
+  width off, 64 percent of readings too short): [F-MASKFIT](active/F-MASKFIT-footprint-blob-matching.md)
   satellite readings): [F-SKY26](active/F-SKY26-skyline-signals-to-publish.md)
 - All skyline open items (F-DET, F-SKY13/16/18, F-SKY5 validation, tests, depth > 1.2 km) are
   kept in one list: [skyline README → Open items](../../city2stl/skyline/README.md#open-items).

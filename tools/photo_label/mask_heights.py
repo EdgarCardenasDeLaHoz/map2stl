@@ -6,13 +6,25 @@ Per frame, with the frame's pinhole camera (`views.json` + `pose.json`):
    the mask just above each visible footprint base. Outlines floating on sky / water, or a median
    base-row offset from the mask's building base over `GATE_MAX_DEG`, make the frame `bad_pose`:
    it gives no heights (the seed 6 `overhead` pose put outlines ~12 deg above the horizon).
-2. **Top edge** (`column_top`): from each visible base column walk up the mask through building /
+2. **Blob match** (`assign_blobs`, F-MASKFIT): the projected boxes sit about a tower width off their
+   towers, so each footprint's visible column span is matched to a connected SegFormer building
+   blob (split at depth jumps when `<stem>_depth.npy` exists) by an assignment (`linear_sum_assignment`,
+   cost = -overlap + `SHIFT_PENALTY` x |shift deg|), shift at most `MAX_SHIFT_DEG`; no blob is taken
+   twice, and a blob that holds two footprints leaves both unshifted. The mask is read at the shifted
+   span (`shift_deg` per row); the ray distance and the ground stay those of the footprint. A tall
+   blob nobody claims, above the tallest claimed one, is a `missing_tower` candidate (reported, never
+   written into readings).
+3. **Top edge** (`column_top`): from each visible base column walk up the mask through building /
    other pixels to sky. Columns ending in vegetation or water, clipped at the frame top, or whose
-   run goes on through a farther footprint's outline are dropped.
-3. **Class** (`classify`): `ok` / `too_short` (mask rises above the outline) / `too_tall` (outline
+   run goes on through a farther footprint's outline are dropped. With depth, the walk also stops at
+   a jump to a surface farther than the base's (disparity under base / `DEPTH_FAR_RATIO` for
+   `DEPTH_STOP_ROWS` rows): the near tower's silhouette ends there instead of climbing into the tower
+   behind (opt-in: `analyse_frame(depth_stop=True)`, runner `--depth-stop`). A column whose base disparity is more than `DEPTH_BASE_TOL` off the frame's robust fit
+   disparity = a / ray distance + b is dropped (`depth_base`). Depth is relative Depth Anything disparity (larger = nearer).
+4. **Class** (`classify`): `ok` / `too_short` (mask rises above the outline) / `too_tall` (outline
    rises into sky) by the median margin in px and degrees; mask building blobs that no outline
    covers are `unmatched_building` (`unmatched_blobs`).
-4. **Height** (`column_height`): elevation angle of the mask top x horizontal distance to the
+5. **Height** (`column_height`): elevation angle of the mask top x horizontal distance to the
    footprint's front wall + camera elevation - DEM ground at the footprint.
 
 Across frames and seeds (`aggregate`): a height is kept only when 2+ non-weak views agree within
@@ -59,6 +71,18 @@ NEIGHBOUR_M = 80.0
 MIN_BLOB_PX = 400
 BLOB_COVER = 0.15
 DEFAULT_H = 9.0
+MAX_SHIFT_DEG = 6.0          # footprint-to-blob sideways shift window (about one tower width)
+SHIFT_PENALTY = 0.04         # assignment cost per degree of shift (overlap fraction is the gain)
+MIN_OVERLAP = 0.5            # share of a footprint's visible box a blob must cover to be a candidate
+BLOB_WIDTH_RATIO = 4.0       # ... and the blob may be at most this many box widths wide (a sliver does not claim a tower)
+TOWER_MIN_PX = 40            # only boxes this tall (px, base to top) are matched to blobs
+PEAK_PROM_PX = 20            # a skyline peak this far above its saddles is its own blob
+SHARE_FRAC = 0.8             # unshifted cover by two footprints: the blob holds both, keep them put
+DEPTH_FAR_RATIO = 1.5        # stop at disparity < base disparity / this (a clearly farther surface)
+DEPTH_STOP_ROWS = 3          # consecutive far rows that make a stop
+DEPTH_BASE_TOL = 0.6         # base disparity within this x max(fitted, floor) of the frame's a / dist + b fit
+DEPTH_FLOOR_FRAC = 0.04      # floor (share of the frame's 99th disparity percentile) under which noise rules
+DEPTH_SPLIT_REL = 0.3        # relative disparity change over 4 px that splits a blob
 
 
 # --------------------------------------------------------------------------- inputs
@@ -80,6 +104,24 @@ def load_mask(path) -> np.ndarray:
     from PIL import Image
     with Image.open(path) as im:
         return np.array(im.convert("L"))
+
+
+def load_depth(path, image_path=None) -> np.ndarray | None:
+    """`<stem>_depth.npy` as float32 (relative disparity, larger = nearer), None when missing.
+    Non-finite values and, when `image_path` is given, pixels where that image is pure black (the
+    pano's wavy padding, which reads as non-sky) become NaN: they never stop a walk or split a blob."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    d = np.load(p).astype(np.float32)
+    d[~np.isfinite(d)] = np.nan
+    if image_path is not None and Path(image_path).is_file():
+        from PIL import Image
+        with Image.open(image_path) as im:
+            rgb = np.array(im.convert("RGB"))
+        if rgb.shape[:2] == d.shape:
+            d[rgb.sum(axis=2) == 0] = np.nan
+    return d
 
 
 def footprints(geojson_path, near: tuple[float, float] | None = None, radius_m: float | None = None) -> dict:
@@ -215,29 +257,84 @@ def pose_gate(mask: np.ndarray, ids: np.ndarray, f_px: float) -> dict:
     return out
 
 
-def column_top(mask: np.ndarray, ids: np.ndarray, x: int, base_row: int, osm_top: int):
+def _smooth_depth(depth):
+    """Median-filtered copy of a disparity map (NaN kept) or None."""
+    if depth is None:
+        return None
+    from scipy import ndimage
+    d = np.asarray(depth, np.float32)
+    ok = np.isfinite(d)
+    out = ndimage.median_filter(np.where(ok, d, 0.0), size=5)
+    return np.where(ok, out, np.nan).astype(np.float32)
+
+
+def _fit_disparity(pts: list, scale: float):
+    """Robust line disparity = a / dist + b through the (disparity, 1 / ray distance) pairs of a
+    frame's footprint bases (two trimmed least-squares passes), as (a, b, floor) where `floor` =
+    `DEPTH_FLOOR_FRAC` x the frame's 99th disparity percentile; None with fewer than 8 pairs."""
+    if len(pts) < 8 or scale <= 0:
+        return None
+    y, x = np.asarray(pts, float).T
+    keep = np.ones(len(x), bool)
+    a = b = 0.0
+    for _ in range(3):
+        if keep.sum() < 4:
+            return None
+        a, b = np.polyfit(x[keep], y[keep], 1)
+        res = np.abs(y - (a * x + b))
+        keep = res <= max(2.5 * 1.4826 * float(np.median(res[keep])), 0.04 * scale)
+    return float(a), float(b), DEPTH_FLOOR_FRAC * scale
+
+
+def _base_disp(depth, x: int, y0: int) -> float:
+    """Median disparity of the 4 rows ending at `y0` in column `x` (NaN when none is finite)."""
+    seg = depth[max(y0 - 3, 0): y0 + 1, x]
+    seg = seg[np.isfinite(seg)]
+    return float(np.median(seg)) if seg.size else float("nan")
+
+
+def column_top(mask: np.ndarray, ids: np.ndarray, x: int, base_row: int, osm_top: int,
+               depth=None, x_mask: int | None = None):
     """Mask top row of the building at column `x` or None (why: second value). Walk up from just
     above the base through building / other pixels; the run must end in sky, hold mostly building,
-    and not run on through a farther footprint's outline above this outline's top."""
+    and not run on through a farther footprint's outline above this outline's top.
+    `x_mask` reads the mask / depth at another column (the blob matched to the footprint); `ids` stay
+    at `x`. With `depth` (smoothed disparity, larger = nearer) the run also ends at the first
+    `DEPTH_STOP_ROWS` rows whose disparity is under the base's / `DEPTH_FAR_RATIO`: the top is the
+    row below them and the reason `depth_stop`. Without depth the result is the plain mask walk."""
+    xm = x if x_mask is None else x_mask
     y0 = base_row - BASE_INSET_PX
     if y0 < 1:
         return None, "edge"
-    bo = (mask[: y0 + 1, x][::-1] == BUILDING) | (mask[: y0 + 1, x][::-1] == OTHER)
-    if bo.all():
-        return None, "clipped"
-    r = int(np.argmin(bo))
-    stop = mask[y0 - r, x]
-    if stop != SKY:
-        return None, "veg" if stop == VEG else "water"
+    col = mask[: y0 + 1, xm][::-1]
+    bo = (col == BUILDING) | (col == OTHER)
+    clipped = bool(bo.all())
+    r = len(bo) if clipped else int(np.argmin(bo))      # rows of the run above y0
+    why = "ok"
+    if depth is not None and r > DEPTH_STOP_ROWS:
+        ref = _base_disp(depth, xm, y0)
+        if math.isfinite(ref):
+            far = depth[y0 - r + 1: y0 + 1, xm][::-1] < ref / DEPTH_FAR_RATIO
+            hit = np.where(np.convolve(far.astype(int), np.ones(DEPTH_STOP_ROWS, int), "valid")
+                           == DEPTH_STOP_ROWS)[0]
+            if hit.size:
+                r = int(hit[0])
+                why, clipped = "depth_stop", False
+    if why == "ok":
+        if clipped:
+            return None, "clipped"
+        stop = mask[y0 - r, xm]
+        if stop != SKY:
+            return None, "veg" if stop == VEG else "water"
     top = y0 - r + 1
-    run = mask[top: y0 + 1, x]
+    run = mask[top: y0 + 1, xm]
     if run.size == 0 or (run == BUILDING).mean() < 0.5:
         return None, "not_building"
-    if top < osm_top:
+    if why == "ok" and top < osm_top:
         above = ids[top: osm_top, x]
         if above.size and (above > 0).mean() > 0.5:
             return None, "ambiguous"
-    return top, "ok"
+    return top, why
 
 
 def classify(margin_deg: float | None) -> str:
@@ -246,11 +343,18 @@ def classify(margin_deg: float | None) -> str:
     return "too_short" if margin_deg > TOL_DEG else "too_tall" if margin_deg < -TOL_DEG else "ok"
 
 
-def unmatched_blobs(mask: np.ndarray, ids: np.ndarray, cam) -> list[dict]:
-    """Mask building blobs (>= `MIN_BLOB_PX`) that no projected outline covers."""
+def unmatched_blobs(mask: np.ndarray, ids: np.ndarray, cam, shifts: dict | None = None) -> list[dict]:
+    """Mask building blobs (>= `MIN_BLOB_PX`) that no projected outline covers. `shifts` ({building
+    value: shift px}, from `assign_blobs`) moves each outline sideways before the test."""
     from scipy import ndimage
     lab, n = ndimage.label(mask == BUILDING)
-    cover = ndimage.binary_dilation(ids > 0, iterations=6)
+    cov = ids > 0
+    if shifts:
+        cov = cov.copy()
+        for k, sx in shifts.items():
+            if sx:
+                cov |= np.roll(ids == k, int(sx), axis=1)
+    cover = ndimage.binary_dilation(cov, iterations=6)
     out = []
     for i, sl in enumerate(ndimage.find_objects(lab), start=1):
         m = lab[sl] == i
@@ -268,31 +372,206 @@ def unmatched_blobs(mask: np.ndarray, ids: np.ndarray, cam) -> list[dict]:
     return out
 
 
-def analyse_frame(mask: np.ndarray, cam, fc: dict, dem, ground_of=None) -> dict:
-    """Gate, per-footprint rows and unmatched blobs of one frame. `fc`: `footprints()` output."""
+def _split_at_valleys(lab: np.ndarray, n: int) -> tuple[np.ndarray, int]:
+    """Split each connected blob at the valleys of its top profile: a merged skyline (towers joined
+    through the low-rise mass at their feet) gives one piece per peak that rises `PEAK_PROM_PX`
+    above its saddles, cut at the lowest column between two peaks."""
+    from scipy.signal import find_peaks
+    h, w = lab.shape
+    out, nxt = lab.copy(), n + 1
+    for i in range(1, n + 1):
+        ys, xs = np.nonzero(lab == i)
+        if xs.size < MIN_BLOB_PX:
+            continue
+        x0, x1 = int(xs.min()), int(xs.max())
+        top = np.full(w, h)
+        np.minimum.at(top, xs, ys)
+        prof = (h - top[x0: x1 + 1]).astype(float)
+        pk, _ = find_peaks(np.pad(prof, 1), prominence=PEAK_PROM_PX)
+        pk = pk - 1
+        cuts = [x0 + int(a + np.argmin(prof[a: b + 1])) for a, b in zip(pk[:-1], pk[1:])]
+        if not cuts:
+            continue
+        piece = np.searchsorted(cuts, np.arange(w), side="left")        # column -> piece index
+        for q in range(1, len(cuts) + 1):
+            out[(lab == i) & (piece[None, :] == q)] = nxt
+            nxt += 1
+    return out, nxt - 1
+
+
+def _building_labels(mask: np.ndarray, depth):
+    """(label image, count) of building blobs: connected pixels, cut first where the disparity
+    changes by more than `DEPTH_SPLIT_REL` (relative) over 4 px, in x or y (two towers at different
+    distances), then split at the valleys of each blob's top profile (`_split_at_valleys`).
+    Padding / invalid depth (NaN) never cuts."""
+    from scipy import ndimage
+    bm = mask == BUILDING
+    if depth is not None:
+        ok = np.isfinite(depth)
+        d = np.where(ok, depth, 0.0)
+        cut = np.zeros(bm.shape, bool)
+        for ax in (0, 1):
+            a, b = np.roll(d, 2, ax), np.roll(d, -2, ax)
+            both = np.roll(ok, 2, ax) & np.roll(ok, -2, ax)
+            rel = np.abs(a - b) / np.maximum(np.maximum(np.abs(a), np.abs(b)), 0.25)
+            cut |= both & (rel > DEPTH_SPLIT_REL)
+        bm = bm & ~cut
+    lab, n = ndimage.label(bm)
+    return _split_at_valleys(lab, n)
+
+
+def assign_blobs(mask: np.ndarray, ids: np.ndarray, cam, depth=None) -> dict:
+    """Match each tower-class footprint (visible box at least `TOWER_MIN_PX` tall) to a building
+    blob of the mask (see the module docstring). The gain of a shift is the share of the footprint's
+    visible box on the blob; cost = -gain + `SHIFT_PENALTY` x |shift deg|, solved by
+    `linear_sum_assignment` with a free "stay put" option, so no blob is taken twice. Returns
+    {"assign": {building value k: {blob, shift_px, shift_deg, overlap}}, "missing_tower": [...],
+    "n_blobs"}; footprints missing from "assign" (small boxes) stay unshifted. `blob` None (shift 0)
+    when no blob of fitting width (at most `BLOB_WIDTH_RATIO` x box width) covers `MIN_OVERLAP` of
+    the box within the window. A blob that two footprints cover (>= `SHARE_FRAC`) without any shift
+    holds both: they stay put. A blob nobody claims whose top rises above every claimed blob is a
+    `missing_tower` candidate (bearing, top elevation angle, px area): reported only."""
+    from scipy.optimize import linear_sum_assignment
+    lab, n = _building_labels(mask, depth)
+    area = np.bincount(lab.ravel(), minlength=n + 1)
+    blobs = [b for b in range(1, n + 1) if area[b] >= MIN_BLOB_PX]
+    bw = {b: int(np.ptp(np.nonzero((lab == b).any(0))[0])) + 1 for b in blobs}
+    out: dict = {"assign": {}, "missing_tower": [], "n_blobs": len(blobs)}
+    h, w = mask.shape
+    S = int(round(cam.f_px * math.tan(math.radians(MAX_SHIFT_DEG))))
+    shifts = np.arange(-S, S + 1)
+    pen = SHIFT_PENALTY * np.degrees(np.arctan(np.abs(shifts) / cam.f_px))
+    labp = np.pad(lab, ((0, 0), (S, S)))
+    fps, ov = [], {}
+    for k in range(1, int(ids.max()) + 1):
+        cols, base, otop = _visible_bases(ids, k)
+        if len(cols) < MIN_COLS or float(np.median(base - otop)) < TOWER_MIN_PX:
+            continue
+        ys, xs = np.nonzero(ids == k)
+        y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+        box = ids[y0:y1, x0:x1] == k
+        tab = np.zeros((len(shifts), n + 1))
+        for j, sx in enumerate(shifts):
+            crop = labp[y0:y1, x0 + S + sx: x1 + S + sx]
+            tab[j] = np.bincount(crop[box], minlength=n + 1)
+        fps.append(k)
+        out["assign"][k] = {"blob": None, "shift_px": 0, "shift_deg": 0.0, "overlap": 0.0}
+        for b in blobs:
+            if tab[:, b].max() > 0 and bw[b] <= BLOB_WIDTH_RATIO * (x1 - x0):
+                ov[(k, b)] = tab[:, b] / float(box.sum())          # share of the box on the blob, per shift
+    frac = zero = {kb: float(v[S]) for kb, v in ov.items()}
+    shared = {}
+    for b in blobs:
+        own = [k for k in fps if frac.get((k, b), 0.0) >= SHARE_FRAC]
+        if len(own) >= 2:
+            shared[b] = own
+    fixed = {k for own in shared.values() for k in own}
+    for b, own in shared.items():
+        for k in own:
+            if out["assign"][k]["blob"] is None:
+                out["assign"][k].update(blob=b, overlap=frac[(k, b)])
+    free_k = [k for k in fps if k not in fixed]
+    free_b = [b for b in blobs if b not in shared and any((k, b) in ov for k in free_k)]
+    chosen = set()
+    if free_k and free_b:
+        cost = np.ones((len(free_k), len(free_b) + len(free_k)))
+        cost[:, len(free_b):] = 0.0                      # dummy: leave the footprint unshifted
+        best = {}
+        for i, k in enumerate(free_k):
+            for j, b in enumerate(free_b):
+                v = ov.get((k, b))
+                if v is None:
+                    continue
+                c = np.where(v >= MIN_OVERLAP, -v + pen, 1.0)
+                m = int(np.argmin(c))
+                cost[i, j] = c[m]
+                best[(i, j)] = m
+        for i, j in zip(*linear_sum_assignment(cost)):
+            if j < len(free_b) and cost[i, j] < 0:
+                k, b = free_k[i], free_b[j]
+                sx = int(shifts[best[(i, j)]])
+                out["assign"][k] = {"blob": b, "shift_px": sx, "overlap": float(ov[(k, b)][best[(i, j)]]),
+                                    "shift_deg": float(np.degrees(np.arctan(sx / cam.f_px)))}
+                chosen.add(b)
+    explained = chosen | set(shared) | {b for (k, b), v in zero.items() if v >= MIN_OVERLAP}
+    tops = {}
+    for b in blobs:
+        ys, xs = np.nonzero(lab == b)
+        colmin = np.full(w, h)
+        np.minimum.at(colmin, xs, ys)
+        tops[b] = (float(np.percentile(colmin[colmin < h], 10)), float(xs.mean()))
+    claimed_tops = [tops[b][0] for b in chosen | set(shared)]
+    if claimed_tops:
+        ref = min(claimed_tops)
+        for b in blobs:
+            if b in explained or tops[b][0] >= ref:
+                continue
+            ty, cx = tops[b]
+            d = pixel_dirs(cam, [cx], [ty])[0]
+            out["missing_tower"].append({
+                "bearing_deg": float((cam.heading_deg + math.degrees(math.atan((cx - w / 2) / cam.f_px))) % 360.0),
+                "top_elev_deg": float(math.degrees(math.asin(max(-1.0, min(1.0, d[2]))))),
+                "area_px": int(area[b]), "top_row": int(ty), "cx": int(cx)})
+    return out
+
+
+def analyse_frame(mask: np.ndarray, cam, fc: dict, dem, ground_of=None, depth=None, assign: bool = True,
+                  depth_stop: bool = False) -> dict:
+    """Gate, per-footprint rows, unmatched blobs and `missing_tower` candidates of one frame. `fc`:
+    `footprints()` output; `depth`: `load_depth()` array (relative disparity) or None; `assign`
+    False reads the mask at the unshifted spans (the pre-F-MASKFIT behaviour). Depth always splits
+    blobs for `assign_blobs`; `depth_stop` True also applies the depth stop in `column_top` and the
+    `depth_base` drop (off by default: on Cartagena it added too-short readings, see
+    docs/decisions/photo-label.md)."""
     import terrain_solve as ts
     proj = ts.project_buildings(dem, fc, cam)
     ids = proj["ids"]
     by_id = {f["properties"]["id"]: f for f in fc["features"]}
     gate = pose_gate(mask, ids, cam.f_px)
-    rows = []
+    dep = _smooth_depth(depth)
+    ab = assign_blobs(mask, ids, cam, dep) if assign and not gate["bad_pose"] else {"assign": {}, "missing_tower": []}
+    rows, work = [], []
     for k, b in enumerate(proj["buildings"], start=1):
         feat = by_id[b["id"]]
         cols, base, otop = _visible_bases(ids, k)
+        a = ab["assign"].get(k, {})
         row = {"id": b["id"], "dist_m": round(b["dist_m"], 1), "visible_px": b["visible_px"],
                "osm_height_m": b["height_m"], "n_base_cols": int(len(cols)), "class": "no_reading",
-               "height_m": None, "n_cols": 0, "margin_px": None, "margin_deg": None, "dropped": {}}
+               "height_m": None, "n_cols": 0, "margin_px": None, "margin_deg": None, "dropped": {},
+               "shift_deg": round(float(a.get("shift_deg", 0.0)), 2), "blob": a.get("blob")}
         if len(cols) < MIN_COLS or gate["bad_pose"]:
             row["class"] = "bad_pose" if gate["bad_pose"] else "no_reading"
             rows.append(row)
             continue
         ring = np.asarray(feat["geometry"]["coordinates"][0], float)
         zb = float(np.nanmin(np.asarray(ground_of(ring[:, 1], ring[:, 0]), float)))
+        sx = int(a.get("shift_px", 0))
         sel = np.unique(np.linspace(0, len(cols) - 1, min(len(cols), MAX_COL_SAMPLES)).astype(int))
-        hs, mg, drops = [], [], {}
+        ring_m = _local(cam, ring)
+        cs = []                                       # (x, x read, base row, osm top row, disp x dist)
         for j in sel:
             x, br, ot = int(cols[j]), int(base[j]), int(otop[j])
-            top, why = column_top(mask, ids, x, br, ot)
+            xr = min(max(x + sx, 0), mask.shape[1] - 1)
+            kd = None
+            if dep is not None:
+                db = _base_disp(dep, xr, br - BASE_INSET_PX)
+                d = pixel_dirs(cam, [x], [br])[0]
+                hz = math.hypot(d[0], d[1])
+                dist = ray_ring_dist(ring_m, d[:2] / hz) if hz > 1e-6 else None
+                if dist is not None and math.isfinite(db):
+                    kd = (db, 1.0 / dist)
+            cs.append((x, xr, br, ot, kd))
+        work.append((row, feat, ring, zb, cs))
+        rows.append(row)
+    fit = _fit_disparity([c[4] for w_ in work for c in w_[4] if c[4] is not None],
+                         float(np.nanpercentile(dep, 99)) if dep is not None and np.isfinite(dep).any() else 0.0)
+    for row, feat, ring, zb, cs in work:
+        hs, mg, drops = [], [], {}
+        for x, xr, br, ot, kd in cs:
+            if depth_stop and kd is not None and fit is not None and abs(kd[0] - fit[0] * kd[1] - fit[1]) >                     DEPTH_BASE_TOL * max(fit[0] * kd[1] + fit[1], fit[2]):
+                drops["depth_base"] = drops.get("depth_base", 0) + 1
+                continue
+            top, why = column_top(mask, ids, x, br, ot, dep if depth_stop else None, x_mask=xr)
             if top is None:
                 drops[why] = drops.get(why, 0) + 1
                 continue
@@ -301,6 +580,8 @@ def analyse_frame(mask: np.ndarray, cam, fc: dict, dem, ground_of=None) -> dict:
                 drops["no_ray"] = drops.get("no_ray", 0) + 1
                 continue
             hs.append(h)
+            if why == "depth_stop":
+                row["n_depth_stop"] = row.get("n_depth_stop", 0) + 1
             if ot > 0:
                 mg.append(ot - top)
         row["dropped"] = drops
@@ -311,9 +592,10 @@ def analyse_frame(mask: np.ndarray, cam, fc: dict, dem, ground_of=None) -> dict:
             row["margin_deg"] = float(math.degrees(math.atan(row["margin_px"] / cam.f_px)))
             row["class"] = classify(row["margin_deg"])
             row["height_spread_ln"] = float(np.log(max(hs) / max(min(hs), 0.1))) if min(hs) > 0 else None
-        rows.append({**row, "lat": feat["properties"]["lat"], "lon": feat["properties"]["lon"]})
-    blobs = [] if gate["bad_pose"] else unmatched_blobs(mask, ids, cam)
-    return {"gate": gate, "rows": rows, "unmatched": blobs}
+        row["lat"], row["lon"] = feat["properties"]["lat"], feat["properties"]["lon"]
+    shifts = {k: a["shift_px"] for k, a in ab["assign"].items()}
+    blobs = [] if gate["bad_pose"] else unmatched_blobs(mask, ids, cam, shifts)
+    return {"gate": gate, "rows": rows, "unmatched": blobs, "missing_tower": ab["missing_tower"]}
 
 
 # --------------------------------------------------------------------------- across frames
@@ -331,12 +613,14 @@ def agree_group(vals: list[float]) -> list[int]:
 
 def find_reassignments(rows: list[dict], prior_of) -> list[dict]:
     """Within one frame: a `too_tall` outline A (rises into sky) whose neighbour B (<= 80 m) has a
-    mask height within `ln 1.25` of A's prior height: A's height belongs to B."""
+    mask height within `ln 1.25` of A's prior height: A's height belongs to B. An A that
+    `assign_blobs` matched to a blob (`blob` set) is skipped: its mask was found, the outline is just
+    too tall."""
     out = []
     cand = [r for r in rows if r.get("height_m")]
     for a in rows:
-        if a.get("class") != "too_tall" or "lat" not in a:
-            continue
+        if a.get("class") != "too_tall" or "lat" not in a or a.get("blob") is not None:
+            continue          # a footprint matched to a blob is truly too tall; only unmatched ones lend their height
         pa = prior_of(a["id"], a)
         best = None
         for b in cand:

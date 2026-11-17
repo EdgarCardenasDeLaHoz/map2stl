@@ -7,6 +7,25 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-11-17 — Photo mask heights match footprints to blobs; the depth stop is opt-in
+- **Decision:** `tools/photo_label/mask_heights.py::assign_blobs` shifts each tower-class footprint
+  (visible box at least 40 px tall) by up to 6 deg onto one SegFormer building blob, solved with
+  `linear_sum_assignment`; blobs are cut at depth jumps and at valleys of the top profile. An
+  unclaimed tall blob is reported as `missing_tower`, never written as a reading. The depth stop in
+  `column_top` and the `depth_base` drop stay in the code but are off by default
+  (`analyse_frame(depth_stop=True)`, runner `--depth-stop`). Page outlines are occlusion-tested.
+- **Why:** a Cartagena review (39 frames) found projected boxes about one tower width off their
+  towers. Re-score on 4 seeds, median abs ln error against published towers: 0.476 (n 23) before,
+  0.510 (n 25) with the depth stop, 0.464 (n 24) with matching only. Seed 5's ok share fell from 24 to
+  14 percent with the stop on. Most remaining "too short" readings are real: 132 of 182 footprints in
+  view carry no OSM height (9 m default), and published Bocagrande heights in the data are 13 to 31 m
+  against 100 to 190 m measured. User: "Matching on, depth stop opt-in".
+- **Rejected:** depth stop on by default — it cut columns at Depth Anything's soft edges and added
+  too-short readings. Target "too_short under 35 percent" — not reachable by matching while the OSM
+  heights themselves are low.
+- **Supersedes / superseded by:** —
+- **Source:** [F-MASKFIT plan](../plans/active/F-MASKFIT-footprint-blob-matching.md)
+
 ### 2026-10-23 — Google 3D Tiles ground can be a sloped plane per window (`ground="plane"`), opt-in
 - **Problem:** `_ground_from_dsm` takes a per-window p5 of the DSM as flat ground. On a hillside the
   window's low corner sets the ground, so buildings uphill read tall: about +1.26 m per 1 % of slope.

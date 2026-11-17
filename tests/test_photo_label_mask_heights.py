@@ -37,14 +37,15 @@ def tower_fc(h_osm, north=300.0, half=20.0, east=0.0):
         "properties": {"id": 0, "name": "t", "height": h_osm, "levels": None, "lat": lat0, "lon": lon0}}]}
 
 
-def synth_mask(cam_, true_h, north=300.0, half=20.0):
+def synth_mask(cam_, true_h, north=300.0, half=20.0, east=0.0, m=None):
     """Sky above the horizon, ground (other) below; a building column from the front wall base to the
-    true top, rendered by projecting the front face."""
-    m = np.full((H, W), mh.OTHER, np.uint8)
-    m[: int(cam_.height / 2)] = mh.SKY
+    true top, rendered by projecting the front face (drawn onto `m` when given)."""
+    if m is None:
+        m = np.full((H, W), mh.OTHER, np.uint8)
+        m[: int(cam_.height / 2)] = mh.SKY
     d = north - half
     z0, z1 = 0.0, true_h
-    xs = [tuple(float(v) for v in cam_.project_ll(LAT + d / mh.M_PER_DEG_LAT, LON + s * half / KX, z))
+    xs = [tuple(float(v) for v in cam_.project_ll(LAT + d / mh.M_PER_DEG_LAT, LON + (east + s * half) / KX, z))
           for s in (-1, 1) for z in (z0, z1)]
     x0, x1 = int(min(p[0] for p in xs)), int(max(p[0] for p in xs))
     y_top, y_base = int(round(min(p[1] for p in xs))), int(round(max(p[1] for p in xs)))
@@ -158,3 +159,95 @@ def test_readings_and_merge(tmp_path):
     assert sorted(r.method for r in data["b0001"]["readings"]) == ["lean", "photo_mask"]
     assert mh.merge_production(tmp_path / "missing.json", rs, where) == {
         "written": False, "expected": str(tmp_path / "missing.json")}
+
+
+# ------------------------------------------------------------------ F-MASKFIT: blob match, depth stop
+
+def two_fc(h_osm, east=(-35.0, 35.0)):
+    feats = []
+    for i, e in enumerate(east):
+        f = tower_fc(h_osm, east=e)["features"][0]
+        f["properties"]["id"] = i
+        feats.append(f)
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def test_shift_recovers_displaced_box():
+    c = cam()
+    m = synth_mask(c, 120.0)
+    dx = 40                                              # ~5.5 deg: nearly a box width off
+    shifted = np.full_like(m, mh.OTHER)
+    shifted[: H // 2] = mh.SKY
+    b = m == mh.BUILDING
+    shifted[:, dx:][b[:, :-dx]] = mh.BUILDING
+    fc = tower_fc(120.0)
+    kept = mh.analyse_frame(shifted, c, fc, flat, ground_of=flat, assign=False)["rows"][0]
+    res = mh.analyse_frame(shifted, c, fc, flat, ground_of=flat)
+    r = res["rows"][0]
+    assert r["blob"] is not None
+    assert r["shift_deg"] == pytest.approx(math.degrees(math.atan(dx / F)), abs=0.4)
+    assert r["height_m"] == pytest.approx(120.0, rel=0.05) and r["class"] == "ok"
+    assert r["n_cols"] > kept["n_cols"]                  # the unshifted span mostly reads ground
+    assert res["missing_tower"] == []
+
+
+def test_two_footprints_do_not_share_one_blob():
+    c = cam()
+    m = synth_mask(c, 120.0, east=-35.0)
+    m = synth_mask(c, 120.0, east=35.0, m=m)
+    y = int(np.nonzero((m == mh.BUILDING).any(1))[0].max())
+    cols = np.nonzero((m == mh.BUILDING).any(0))[0]
+    m[int(np.nonzero((m == mh.BUILDING).any(1))[0].min()):y + 1, cols.min():cols.max() + 1] = mh.BUILDING    # one merged blob holds both
+    res = mh.analyse_frame(m, c, two_fc(120.0), flat, ground_of=flat)
+    assert len(res["rows"]) == 2
+    assert all(r["shift_deg"] == 0.0 for r in res["rows"])
+    assert res["rows"][0]["blob"] == res["rows"][1]["blob"] is not None
+
+
+def test_unclaimed_tall_blob_is_missing_tower_candidate_only():
+    c = cam()
+    m = synth_mask(c, 120.0)
+    m[40:330, 20:90] = mh.BUILDING                       # a taller tower with no footprint
+    res = mh.analyse_frame(m, c, tower_fc(120.0), flat, ground_of=flat)
+    assert len(res["missing_tower"]) == 1
+    mt = res["missing_tower"][0]
+    assert mt["bearing_deg"] == pytest.approx((math.degrees(math.atan((55 - W / 2) / F))) % 360.0, abs=1.0)
+    assert mt["top_elev_deg"] > 5.0 and mt["area_px"] > 10000
+    assert [r["id"] for r in res["rows"]] == [0]          # candidates never become readings
+
+
+def _near_far_scene():
+    """One column: near tower rows 200..400 (disparity 4), the tower behind rows 100..199 (disparity
+    1.5), sky above; the mask is building all the way up."""
+    m = np.full((H, W), mh.OTHER, np.uint8)
+    m[:100] = mh.SKY
+    m[100:401, 100:140] = mh.BUILDING
+    d = np.zeros((H, W), np.float32)
+    d[200:401] = 4.0
+    d[100:200] = 1.5
+    return m, d, np.zeros((H, W), np.uint16)
+
+
+def test_depth_stop_prevents_climbing_into_the_farther_tower():
+    m, d, ids = _near_far_scene()
+    assert mh.column_top(m, ids, 120, 400, 300) == (100, "ok")                       # old walk: up to the sky
+    assert mh.column_top(m, ids, 120, 400, 300, depth=d) == (200, "depth_stop")
+
+
+def test_no_depth_gives_the_old_result():
+    res, _, _ = run(true_h=150.0, osm_h=60.0)
+    r = res["rows"][0]
+    old = mh.analyse_frame(synth_mask(cam(), 150.0), cam(), tower_fc(60.0), flat, ground_of=flat, assign=False)["rows"][0]
+    assert r["height_m"] == old["height_m"] and r["class"] == old["class"] == "too_short"
+    m, _, ids = _near_far_scene()
+    assert mh.column_top(m, ids, 120, 400, 300, depth=None) == (100, "ok")
+
+
+def test_depth_stop_is_opt_in():
+    """Depth given but `depth_stop` off: same height as no depth (depth only splits blobs)."""
+    m = synth_mask(cam(), 150.0)
+    d = np.ones(m.shape, np.float32)
+    base = mh.analyse_frame(m, cam(), tower_fc(60.0), flat, ground_of=flat)["rows"][0]
+    off = mh.analyse_frame(m, cam(), tower_fc(60.0), flat, ground_of=flat, depth=d)["rows"][0]
+    assert off["height_m"] == base["height_m"] and "n_depth_stop" not in off
+    assert "depth_base" not in off["dropped"]

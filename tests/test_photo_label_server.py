@@ -628,6 +628,30 @@ def test_project_buildings_outlines_withheld_at_measured_height():
     assert both["height_m"] == 148.0 and "measured_outline" not in both
 
 
+def test_measured_outline_is_occlusion_tested():
+    from city2stl.skyline import photo_view as pv
+    _load()
+    import terrain_solve as ts
+    cam = pv.PinholeCamera(LAT0, LON0, 705.0, 0.0, 0.0, 0.0, 600.0, 640, 480)
+    dem = lambda lat, lon: np.full(np.shape(lat), 700.0)  # noqa: E731
+    # far tall box (measured 148 m, published 31 m) straight ahead; a near 10 m box hides its lower part
+    fc = _prism_fc([(-10, 200, 10, 220, 31.0), (-30, 60, 30, 70, 10.0)])
+    pr = fc["features"][0]["properties"]
+    pr.update(height_source="measured_withheld", measured_m=148.0, published_m=None)
+    res = ts.project_buildings(dem, fc, cam)
+    far = next(b for b in res["buildings"] if b["id"] == 0)
+    near = next(b for b in res["buildings"] if b["id"] == 1)
+    near_top = min(y for r in near["contours"] for _x, y in r)
+    ys = [y for r in far["measured_outline"] for _x, y in r]
+    assert min(ys) < near_top - 20                      # the tall part still shows above the near box
+    assert max(ys) <= near_top + 2                      # nothing below the near box's roofline
+    # unoccluded: the full silhouette reaches the horizon-side base
+    solo = _prism_fc([(-10, 200, 10, 220, 31.0)])
+    solo["features"][0]["properties"].update(height_source="measured_withheld", measured_m=148.0, published_m=None)
+    full = ts.project_buildings(dem, solo, cam)["buildings"][0]
+    assert max(y for r in full["measured_outline"] for _x, y in r) > near_top + 2
+
+
 def _raw(base, path):
     import http.client
     c = http.client.HTTPConnection(base.split("//")[1], timeout=10)
