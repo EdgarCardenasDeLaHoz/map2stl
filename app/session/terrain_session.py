@@ -132,6 +132,8 @@ _DEFAULT_SETTINGS: dict = {
         "road_depression_m":   0.0,    # road surface depression (metres)
         "water_depression_m": -2.0,    # waterway depression (metres)
         "simplify_terrain":    True,   # reduce terrain triangle count in 3MF export
+        # Street View / photo building heights: "auto" | "off" | a skyline report name
+        "panorama_heights":    "auto",
     },
     # ── View / display ────────────────────────────────────────────────────
     # Not sent to any API — used by show_dem() and local visualisation only
@@ -1479,6 +1481,7 @@ class TerrainSession:
             "layers":             self.settings["city"]["layers"],
             "simplify_tolerance": self.settings["city"]["simplify_tolerance"],
             "min_area":           self.settings["city"]["min_area"],
+            "panorama_heights":   self.settings["city"].get("panorama_heights", "auto"),
         }
         logger.info(f"Fetching OSM city data (bbox: {diag_km:.1f} km diagonal)…")
         try:
@@ -1770,6 +1773,7 @@ class TerrainSession:
             "height":     height or dim,
             "projection": proj["projection"],
             "clip_valid_region": proj["clip_valid_region"],
+            "panorama_heights":  self.settings["city"].get("panorama_heights", "auto"),
         }
         self.city_raster = self._api_request(
             "post", "/api/composite/city-raster", json=payload, timeout=60
@@ -1885,6 +1889,7 @@ class TerrainSession:
             # The OSM cache entry fetch_cities() used, so the build reuses it.
             "simplify_tolerance": self.settings["city"]["simplify_tolerance"],
             "min_area": self.settings["city"]["min_area"],
+            "panorama_heights": self.settings["city"].get("panorama_heights", "auto"),
         }
         if puzzle:
             body["puzzle"] = puzzle

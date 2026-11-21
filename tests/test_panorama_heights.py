@@ -346,3 +346,124 @@ def test_height_reports_endpoint(client):
     every = client.get("/api/cities/height-reports", params={**q, "all": True}).json()
     assert [r["superseded_by"] for r in every["reports"]] == [None, "Demo_v2"]
     assert every["rows"] == 3
+
+
+# ---------------------------------------------------------------- Phase 5 wiring: preflight, composite, session
+
+def _seed_cache(tmp_data_dir):
+    from app.server.core.cache import osm_cache_key, write_osm_cache
+    from city2stl.cache_policy import CITY_PIPELINE_VERSION
+
+    bbox = dict(north=BOX[0], south=BOX[1], east=BOX[2], west=BOX[3])
+    payload = {"buildings": _fc(_feature(0, 0)), "city_pipeline_version": CITY_PIPELINE_VERSION}
+    write_osm_cache(osm_cache_key(*BOX, 0.5, 5.0), payload, {**bbox, "tol": 0.5, "min_area": 5.0})
+    return bbox
+
+
+def test_preflight_cached_layers_honour_the_mode(tmp_data_dir):
+    from app.server.core import preflight
+
+    root, _ = _roots()
+    _report(root, "Demo_v1", [_row(0, 0, "corroborated", 41.0)])
+    bbox = _seed_cache(tmp_data_dir)
+    data = {"simplify_tolerance": 0.5, "min_area": 5.0}
+
+    def height(extra):
+        have, _, _ = preflight._cached_layers(bbox, ["buildings"], {**data, **extra})
+        return have["buildings"]["features"][0]["properties"]
+
+    assert height({})["height_m"] == 41.0                                # default is auto
+    assert height({"panorama_heights": "auto"})["height_source"] == "panorama_corroborated"
+    assert height({"panorama_heights": "off"})["height_source"] == "default"
+    assert height({"panorama_heights": "Demo_v1"})["height_m"] == 41.0   # a named report
+
+
+def test_composite_raster_key_follows_the_signature(tmp_data_dir, monkeypatch):
+    from app.server.routers import composite
+
+    keys = []
+    monkeypatch.setattr(composite, "read_array_cache", lambda ns, key: keys.append(key))
+    monkeypatch.setattr(composite, "write_array_cache", lambda *a, **k: None)
+    monkeypatch.setattr(composite, "_rasterize_city", lambda req: {
+        n: [0.0] * 4 for n in (*composite._CITY_CHANNELS,)} | {"width": 2, "height": 2})
+
+    def key(mode="auto"):
+        req = composite.CompositeCityRasterRequest(
+            north=BOX[0], south=BOX[1], east=BOX[2], west=BOX[3], width=2, height=2,
+            panorama_heights=mode)
+        composite._city_raster_arrays(req)
+        return keys[-1]
+
+    root, _ = _roots()
+    before, off_before = key(), key("off")
+    assert before == off_before                        # nothing covers the bbox: old keys valid
+    _report(root, "Demo_v1", [_row(0, 0)], mtime=1_000_000)
+    after = key()
+    assert after != before and key("off") == off_before
+    _report(root, "Demo_v2", [_row(0, 0)], mtime=2_000_000)
+    assert key() != after
+
+
+def test_composite_raster_passes_the_mode_to_the_reader(tmp_data_dir, monkeypatch):
+    from app.server.routers import composite
+
+    seen = []
+    monkeypatch.setattr(composite, "read_array_cache", lambda *a: None)
+    monkeypatch.setattr(composite, "write_array_cache", lambda *a, **k: None)
+    monkeypatch.setattr(composite, "read_city_layers_any_tolerance",
+                        lambda *a, **k: seen.append(k.get("panorama_heights")) or ({}, None))
+    for mode in ("auto", "off"):
+        composite._city_raster_arrays(composite.CompositeCityRasterRequest(
+            north=BOX[0], south=BOX[1], east=BOX[2], west=BOX[3], width=2, height=2,
+            panorama_heights=mode))
+    assert seen == ["auto", "off"]
+
+
+def test_osm_layer_source_forwards_the_option(monkeypatch):
+    from app.server.routers import composite
+
+    got = []
+    monkeypatch.setattr(composite, "_city_raster_arrays",
+                        lambda req: got.append(req.panorama_heights) or {
+                            "buildings": __import__("numpy").zeros((2, 2))})
+    provider = composite._make_city_layer_source("buildings")
+    provider(*BOX, 2, {"panorama_heights": "off"})
+    provider(*BOX, 2, {})
+    assert got == ["off", "auto"]
+
+
+def test_composite_dem_layers_carry_the_signature(tmp_data_dir):
+    from app.server.routers.composite import _composite_cache_key, _with_panorama_signature
+    from app.server.schemas import MergeLayerSpec
+
+    specs = [MergeLayerSpec(source="local"), MergeLayerSpec(source="osm_buildings")]
+    key = lambda s: _composite_cache_key(*BOX, 64, _with_panorama_signature(s, BOX))  # noqa: E731
+    root, _ = _roots()
+    off = [specs[0], MergeLayerSpec(source="osm_buildings", options={"panorama_heights": "off"})]
+    k0, off0 = key(specs), key(off)
+    _report(root, "Demo_v1", [_row(0, 0)], mtime=1_000_000)
+    assert key(specs) != k0
+    assert key(off) == off0                             # "off": a new report changes nothing
+    only_local = [specs[0]]
+    assert key(only_local) == _composite_cache_key(*BOX, 64, only_local)
+    assert specs[1].options == {}                       # the caller's specs are not mutated
+
+
+def test_terrain_session_sends_the_setting(monkeypatch):
+    from app.session.terrain_session import TerrainSession
+
+    s = TerrainSession.__new__(TerrainSession)
+    s.settings = {"city": {"layers": ["buildings"], "simplify_tolerance": 0.5, "min_area": 5.0,
+                           "panorama_heights": "off"},
+                  "dem": {"dim": 64}, "projection": {"projection": "none", "clip_valid_region": True}}
+    s.bbox = dict(north=0.5, south=0.4, east=0.5, west=0.4)
+    s.city_data = {"buildings": {"features": []}}
+    sent = []
+    s._api_request = lambda method, ep, **kw: sent.append((ep, kw["json"])) or {
+        "width": 1, "height": 1, "task_id": "t"}
+    s.composite_city_raster()
+    assert sent[-1][0] == "/api/composite/city-raster"
+    assert sent[-1][1]["panorama_heights"] == "off"
+    s.settings["city"].pop("panorama_heights")             # unset: the server default applies
+    s.composite_city_raster()
+    assert sent[-1][1]["panorama_heights"] == "auto"

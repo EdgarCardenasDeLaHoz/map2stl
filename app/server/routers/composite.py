@@ -52,6 +52,7 @@ from app.server.core.cache import (
 from app.server.core.city_data import read_city_layers_any_tolerance
 from app.server.core.validation import model_to_dict, run_sync
 from app.server.schemas import MergeRequest
+from city2stl.panorama_heights import signature as panorama_signature
 from geo2stl.geo import m_per_deg_lon
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,10 @@ class CompositeCityRasterRequest(BaseModel):
     # exactly geo2stl.projections.projected_shape - the DEM's grid - whatever
     # width x height was rasterised; without it the legacy projected size.
     dim: int | None = Field(default=None, ge=1, le=MAX_DIM)
+    # Street View heights on the buildings read from the OSM cache: as
+    # CityRequest.panorama_heights. Part of the raster cache key (its signature) when a
+    # report or photo reading covers the bbox.
+    panorama_heights: str | bool | list[str] = "auto"
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +223,8 @@ def _rasterize_city(req: CompositeCityRasterRequest) -> dict:
     # key (which is hashed from bbox + tol + min_area) will miss entirely.
     from app.server.config import COARSE_MIN_BUILDING_AREA_M2
     min_area = COARSE_MIN_BUILDING_AREA_M2 if req.detail == "coarse" else 5.0
-    osm_data, _osm_key = read_city_layers_any_tolerance(N, S, E, W, min_area=min_area)
+    osm_data, _osm_key = read_city_layers_any_tolerance(
+        N, S, E, W, min_area=min_area, panorama_heights=req.panorama_heights)
     if not osm_data:
         logger.debug("No OSM cache for composite city-raster")
         return _empty_result()
@@ -262,10 +268,16 @@ def _city_raster_arrays(req: CompositeCityRasterRequest) -> dict:
     projects it fresh.  ``detail`` is part of the key because the coarse tier
     drops small buildings, so the two tiers are different rasters.
     """
+    key_extra = {"w": req.width, "h": req.height, "detail": req.detail, "burn": 2}
+    # A new skyline report / photo reading changes the building heights: part of the key
+    # (absent when nothing covers the bbox, so older entries stay valid).
+    if sig := panorama_signature((req.north, req.south, req.east, req.west),
+                                 req.panorama_heights):
+        key_extra["ph"] = sig
     comp_key = make_cache_key(
         "composite", req.north, req.south, req.east, req.west,
         # "burn": 2 = buildings burnt with max + holes (was additive, holes ignored)
-        {"w": req.width, "h": req.height, "detail": req.detail, "burn": 2},
+        key_extra,
     )
     cached = read_array_cache("composite", comp_key)
     if cached:
@@ -296,6 +308,7 @@ def _make_city_layer_source(channel: str):
             north=north, south=south, east=east, west=west,
             width=dim, height=dim,
             detail=str((options or {}).get("detail", "full")),
+            panorama_heights=(options or {}).get("panorama_heights", "auto"),
         )
         return _city_raster_arrays(req)[channel].astype(np.float64)
 
@@ -406,6 +419,21 @@ def _composite_cache_key(north: float, south: float, east: float, west: float,
                            "maintain": bool(maintain_dimensions)})
 
 
+def _with_panorama_signature(specs: list, bbox4: tuple) -> list:
+    """``specs`` with ``options["panorama_sig"]`` on each ``osm_buildings`` layer: the
+    signature of the Street View / photo heights it would burn (``panorama_heights`` option,
+    default "auto"), so a new report changes both the composite's key and the layer's own
+    cache key (``geo2stl.dem`` hashes the options). Nothing added when none covers the bbox."""
+    out = []
+    for spec in specs:
+        if spec.source == "osm_buildings":
+            sig = panorama_signature(bbox4, spec.options.get("panorama_heights", "auto"))
+            if sig:
+                spec = spec.model_copy(update={"options": {**spec.options, "panorama_sig": sig}})
+        out.append(spec)
+    return out
+
+
 #: How long a composite built with a skipped (failed) layer is reused before
 #: the failed source is tried again (seconds).
 RETRY_SKIPPED_S = 15 * 60
@@ -513,6 +541,7 @@ def compute_composite_dem(bbox: dict, dim: int, layers: list,
              for spec in layers]
     clip_valid = bool(clip_valid_region)
 
+    specs = _with_panorama_signature(specs, (north, south, east, west))
     cache_key = _composite_cache_key(north, south, east, west, dim, specs,
                                      projection, clip_valid,
                                      maintain_dimensions)

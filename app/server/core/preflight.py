@@ -108,6 +108,7 @@ def _cached_layers(bbox: dict, names: list[str], data: dict) -> tuple[dict, list
     (``city_data.lookup_city_layers``)."""
     from app.server.core import city_data
     from app.server.core.city_model_task import city_osm_params
+    from city2stl.panorama_heights import heights_mode as panorama_mode
 
     tol, min_area = city_osm_params(data)
     cached, status = city_data.lookup_city_layers(
@@ -116,6 +117,10 @@ def _cached_layers(bbox: dict, names: list[str], data: dict) -> tuple[dict, list
     # counts and the estimate see the same heights.
     cached = city_data.with_survey_heights(
         cached, bbox["north"], bbox["south"], bbox["east"], bbox["west"])
+    # ... and the Street View / photo heights, from the request's setting (build default "auto").
+    cached = city_data.with_panorama_heights(
+        cached, bbox["north"], bbox["south"], bbox["east"], bbox["west"],
+        panorama_mode(data.get("panorama_heights")))
     stale = status in ("stale", "stale_buildings")
     have = {n: cached[n] for n in names if isinstance(cached.get(n), dict)}
     return have, [n for n in names if n not in have], stale

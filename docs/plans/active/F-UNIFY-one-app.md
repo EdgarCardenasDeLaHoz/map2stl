@@ -272,8 +272,16 @@ the header, as pages in the same app shell, with the same header, region pill an
     - 03 off.
   - Left:
     - Build the UI after mockup approval: the Building heights card, the legend and colour-by-source, and hover in the Vue Extrude (Phase 6) or `model-viewer.js`.
-    - Wire `preflight._cached_layers`, the terrain session and `routers/terrain.py`.
+    - ~~Wire `preflight._cached_layers`, the terrain session and `routers/terrain.py`.~~ Done (2026-11-21, `p7panowire`), see below.
     - Plate-align heights.
+
+- **Wiring (2026-11-21, worktree `p7panowire`):**
+  - `preflight._cached_layers` applies `with_panorama_heights` with the request's `panorama_heights` (default "auto"). The pre-flight has no cache of its own, so there is no key to change.
+  - `routers/composite.py`: `CompositeCityRasterRequest.panorama_heights` goes to `read_city_layers_any_tolerance`; the raster cache key gets the `signature` (`ph`, absent when no report covers the bbox, so old entries stay valid). The `osm_buildings` layer source forwards `options["panorama_heights"]`, and `_with_panorama_signature` adds `options["panorama_sig"]` so the DEM-merge key and the layer cache key change with a new report.
+  - `routers/terrain.py` builds no buildings or city layers: nothing to wire.
+  - `TerrainSession`: `settings["city"]["panorama_heights"]` (default "auto") is sent by `fetch_cities`, `composite_city_raster` and `export_city_model`. `rasterize_city` sends the client's buildings, so it needs none.
+  - Legacy JS: no UI setting exists, so nothing is sent and the server default "auto" applies. The Vue Extrude card passes it later.
+  - Tests: `tests/test_panorama_heights.py` (mode passed through, "off" unchanged, a new report changes the keys).
 
 ## Phase 6: legacy JS → Vue (full restructure)
 
