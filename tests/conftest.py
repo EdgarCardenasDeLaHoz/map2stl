@@ -320,3 +320,17 @@ def _isolate_google_usage(request, tmp_path, monkeypatch):
     if request.node.get_closest_marker("integration"):
         return
     monkeypatch.setenv("MAP2STL_GOOGLE_USAGE_FILE", str(tmp_path / "_google_usage.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_panorama_reports(request, tmp_path_factory, monkeypatch):
+    """City reads apply Street View heights from the skyline reports and photo-solve readings
+    on disk (``city2stl.panorama_heights``); in the worktree those are the real reports. Each
+    test sees empty folders instead, so its city payload is the OSM data it set up."""
+    if request.node.get_closest_marker("integration"):
+        return
+    # outside the test's own tmp_path, which some tests list
+    reports = tmp_path_factory.mktemp("skyline_reports")
+    photos = tmp_path_factory.mktemp("photo_heights")
+    monkeypatch.setenv("MAP2STL_SKYLINE_REPORTS", str(reports))
+    monkeypatch.setenv("MAP2STL_PHOTO_ANNOTATIONS_DIR", str(photos))

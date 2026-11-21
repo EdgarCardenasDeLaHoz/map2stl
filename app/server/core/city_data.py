@@ -38,6 +38,7 @@ from city2stl.fetch import FetchCancelled, OverpassUpstreamError, fetch_osm_data
 from city2stl.height.service import enhance_city_data
 from city2stl.height.survey_fill import fill_layer_heights, fillable
 from city2stl.heights import apply_levels_heights, apply_low_default_heights
+from city2stl.panorama_heights import apply_heights as _apply_panorama
 from geo2stl.cache import list_osm_cache_params, write_osm_cache_params
 from geo2stl.geo import M_PER_DEG_LAT, bbox_diagonal_km
 
@@ -71,7 +72,8 @@ def get_city_layers(north: float, south: float, east: float, west: float,
                     layers: list[str], simplify_tolerance: float = 0.5,
                     min_area: float = 5.0, *, progress=None, on_mirror=None,
                     should_cancel=None, allow_large: bool = False,
-                    roof_shapes="auto", roof_progress=None) -> dict:
+                    roof_shapes="auto", roof_progress=None,
+                    panorama_heights="auto") -> dict:
     """Return {layer: FeatureCollection, ...} for ``layers`` (plus whatever else is cached).
 
     Cached layers come from :func:`lookup_city_layers` (the exact entry, or one
@@ -90,6 +92,10 @@ def get_city_layers(north: float, south: float, east: float, west: float,
     (:func:`with_roof_shapes`); ``"off"`` returns the payload exactly as before.
     ``roof_progress(done, total)`` reports that classification's progress.
 
+    ``panorama_heights`` (``"auto"`` | ``"off"`` | report name(s)) is the Street View heights
+    setting, applied last (:func:`with_panorama_heights`); stats in
+    ``payload["panorama_heights"]``.
+
     Raises :class:`CityAreaTooLarge` when layers are asked for on a bbox over
     ``CITY_LAYERS_MAX_DIAGONAL_KM`` diagonal, unless ``allow_large``.
     """
@@ -104,9 +110,10 @@ def get_city_layers(north: float, south: float, east: float, west: float,
             if name in cached:
                 progress(name, "cached")
     if not missing:
-        return with_roof_shapes(
+        return with_panorama_heights(with_roof_shapes(
             with_survey_heights(with_low_default_heights(cached), north, south, east, west),
-            north, south, east, west, roof_shapes, roof_progress)
+            north, south, east, west, roof_shapes, roof_progress),
+            north, south, east, west, panorama_heights)
 
     logger.info("OSM layers %s not cached for %s; fetching", missing, key[:8])
     hooks = {k: v for k, v in (("progress", progress), ("on_mirror", on_mirror),
@@ -139,9 +146,45 @@ def get_city_layers(north: float, south: float, east: float, west: float,
     if not any("error" in v for v in fetched.values() if isinstance(v, dict)):
         write_osm_cache(key, result, _params(north, south, east, west,
                                              simplify_tolerance, min_area))
-    return with_roof_shapes(
+    return with_panorama_heights(with_roof_shapes(
         with_survey_heights(with_low_default_heights(result), north, south, east, west),
-        north, south, east, west, roof_shapes, roof_progress)
+        north, south, east, west, roof_shapes, roof_progress),
+        north, south, east, west, panorama_heights)
+
+
+def with_panorama_heights(payload: dict, north: float, south: float, east: float,
+                          west: float, mode="auto") -> dict:
+    """``payload`` with the Street View (skyline report) and photo-solve heights on its
+    ``buildings`` (``city2stl.panorama_heights.apply_heights``), applied on read after the
+    survey fill and the roofs, like :func:`with_survey_heights` (no cache version bump).
+
+    One code path for the preview (``/api/cities``), the raster readers
+    (:func:`read_city_layers_any_tolerance`) and the export (``city_model_task`` calls it
+    again after merging the client's edited layer). ``mode``: ``"auto"`` (default) finds the
+    newest report of each region whose footprints cover the bbox, plus the photo readings;
+    ``"off"`` removes heights a client copy carried; a report name (or list) uses exactly
+    those. Rules: tiers corroborated / single / photo, IoU >= 0.5, never over a tag,
+    levels, landmark, survey, lidar or user height (``KEEP_SOURCES``). Each changed building
+    has ``height_source`` ``panorama_<tier>`` / ``photo_solve``, ``height_tier``,
+    ``height_report`` and the previous ``height_prev_m`` / ``height_prev_source``.
+
+    The stats go in ``payload["panorama_heights"]``: ``mode``, ``buildings`` (changed),
+    ``reports`` ([{name, region, generated_at, rows, rows_in_bbox, applied}]), ``photo``,
+    ``rows`` / ``applied`` / ``skipped`` / ``by_report``, ``error`` when a named report is
+    missing. Absent when the payload has no buildings. Failures leave the payload as it was;
+    the payload passed in is not mutated."""
+    if not isinstance(payload, dict) or not _is_fc(payload.get("buildings")):
+        return payload
+    try:
+        fc, stats = _apply_panorama(payload["buildings"], (north, south, east, west), mode)
+    except Exception as exc:  # noqa: BLE001 - extra heights must not fail a city read
+        logger.warning("Panorama heights skipped: %s", exc)
+        return {**payload, "panorama_heights": {"mode": str(mode), "buildings": 0,
+                                                "reports": [], "error": str(exc)}}
+    if stats["buildings"]:
+        logger.info("Panorama heights: %d buildings from %s", stats["buildings"],
+                    [r["name"] for r in stats["reports"] if r["applied"]])
+    return {**payload, "buildings": fc, "panorama_heights": stats}
 
 
 def with_survey_heights(payload: dict, north: float, south: float, east: float,
@@ -637,7 +680,8 @@ def lookup_city_layers(north: float, south: float, east: float, west: float,
 
 
 def read_city_layers_any_tolerance(north: float, south: float, east: float, west: float,
-                                   min_area: float = 5.0) -> tuple[dict, str | None]:
+                                   min_area: float = 5.0,
+                                   panorama_heights="auto") -> tuple[dict, str | None]:
     """A cached city payload for this bbox, whatever tolerance it was
     fetched at: ``(payload, cache_key)``, or ``({}, None)``. Never fetches.
 
@@ -649,7 +693,8 @@ def read_city_layers_any_tolerance(north: float, south: float, east: float, west
 
     The best candidate (exact bbox first, then the smallest enclosing one) is
     clipped to the bbox and filtered at ``min_area``; it is not re-simplified.
-    The payload has the survey heights applied (:func:`with_survey_heights`), so the
+    The payload has the survey heights applied (:func:`with_survey_heights`) and the
+    Street View heights (:func:`with_panorama_heights`, ``panorama_heights``), so the
     raster readers see the same heights as the export.
     """
     for cand in _candidates(north, south, east, west, _ANY_TOLERANCE_M, min_area):
@@ -662,11 +707,12 @@ def read_city_layers_any_tolerance(north: float, south: float, east: float, west
         tol = float(cand["tol"])
         if _bbox4(cand["north"], cand["south"], cand["east"], cand["west"]) \
                 == _bbox4(north, south, east, west) and float(cand["min_area"]) == min_area:
-            return (with_survey_heights(with_low_default_heights(src), north, south, east, west),
-                    cand["key"])
-        return (with_survey_heights(with_low_default_heights(derive_city_payload(
-                    src, tol, float(cand["min_area"]), north, south, east, west, tol,
-                    float(min_area))), north, south, east, west),
+            payload = src
+        else:
+            payload = derive_city_payload(src, tol, float(cand["min_area"]), north, south,
+                                          east, west, tol, float(min_area))
+        payload = with_survey_heights(with_low_default_heights(payload), north, south, east, west)
+        return (with_panorama_heights(payload, north, south, east, west, panorama_heights),
                 cand["key"])
     return {}, None
 

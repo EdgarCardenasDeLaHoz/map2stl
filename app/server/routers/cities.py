@@ -26,6 +26,7 @@ from app.server.schemas import (
     LandmarkPreviewRequest,
     LandmarksRequest,
 )
+from city2stl.panorama_heights import find_reports, photo_rows, signature
 from city2stl.rasterize import rasterize_city_data as _rasterize_city_data
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,8 @@ async def get_city_data(city_req: CityRequest):
     try:
         result = await run_sync(get_city_layers, north, south, east, west, layers,
                                 city_req.simplify_tolerance, min_area,
-                                roof_shapes=city_req.roof_shapes)
+                                roof_shapes=city_req.roof_shapes,
+                                panorama_heights=city_req.panorama_heights)
     except Exception as e:
         logger.error(f"OSM fetch error: {e}")
         return error_response(f"OSM fetch failed: {str(e)}")
@@ -106,6 +108,37 @@ async def get_city_data(city_req: CityRequest):
 # ---------------------------------------------------------------------------
 # Background city fetch (per-layer progress, mirror, cancel)
 # ---------------------------------------------------------------------------
+
+@router.get("/api/cities/height-reports")
+async def city_height_reports(north: float, south: float, east: float, west: float,
+                              all: bool = False):
+    """The Street View height sources for a bbox, for the Extrude page's switch, before (or
+    without) loading the city: ``{reports: [...], photo_readings, rows}``.
+
+    ``reports`` is ``city2stl.panorama_heights.find_reports``: the newest report of each region
+    whose corroborated / single footprints intersect the bbox (``all=true`` adds the older runs
+    with ``superseded_by``), each with ``name``, ``region``, ``generated_at``, ``rows`` (per tier)
+    and ``rows_in_bbox``. ``rows`` sums ``rows_in_bbox`` of the reports used plus the photo
+    readings: an upper bound on the buildings changed; the city payload's
+    ``panorama_heights.buildings`` is the count after matching."""
+    bbox = (north, south, east, west)
+
+    def run():
+        reports = find_reports(bbox, include_superseded=all)
+        photos = photo_rows(bbox)
+        keep = ("name", "region", "generated_at", "rows", "rows_in_bbox", "superseded_by",
+                "sidecar", "bbox_nsew")
+        used = [r for r in reports if not r.get("superseded_by")]
+        return {"reports": [{k: r.get(k) for k in keep} for r in reports],
+                "photo_readings": len(photos),
+                "rows": sum(r["rows_in_bbox"] for r in used) + len(photos)}
+
+    try:
+        return JSONResponse(content=await run_sync(run))
+    except Exception as exc:
+        logger.warning("Height reports failed: %s", exc)
+        return error_response(f"Height reports failed: {exc}")
+
 
 @router.post("/api/cities/start")
 async def start_city_fetch(city_req: CityRequest):
@@ -120,7 +153,7 @@ async def start_city_fetch(city_req: CityRequest):
     task = city_fetch_tasks.start_city_fetch(
         city_req.north, city_req.south, city_req.east, city_req.west,
         layers, city_req.simplify_tolerance, min_area, diagonal_km=diag_km,
-        roof_shapes=city_req.roof_shapes)
+        roof_shapes=city_req.roof_shapes, panorama_heights=city_req.panorama_heights)
     return JSONResponse(content=task.snapshot())
 
 
@@ -218,7 +251,9 @@ async def get_city_raster(req: CityRasterRequest):
     # Raw city raster is cached once per bbox; projection/clipping applied on fetch.
     cache_key = hashlib.md5(
         f"cityRaster|{req.north:.4f}_{req.south:.4f}_{req.east:.4f}_{req.west:.4f}"
-        f"_dim{sdim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}".encode()
+        f"_dim{sdim}_bs{req.building_scale}_rd{req.road_depression_m}_wd{req.water_depression_m}"
+        f"{signature((req.north, req.south, req.east, req.west), req.panorama_heights)}"
+        .encode()
     ).hexdigest()
 
     # Cache check
@@ -255,7 +290,7 @@ async def get_city_raster(req: CityRasterRequest):
     if (not buildings.get("features") and not roads.get("features")
             and not waterways.get("features")):
         osm_data, osm_key = read_city_layers_any_tolerance(
-            req.north, req.south, req.east, req.west)
+            req.north, req.south, req.east, req.west, panorama_heights=req.panorama_heights)
         if osm_data:
             buildings = osm_data.get("buildings", buildings)
             roads = osm_data.get("roads", roads)

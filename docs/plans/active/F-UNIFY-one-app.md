@@ -256,6 +256,25 @@ the header, as pages in the same app shell, with the same header, region pill an
 - Photo-solve readings and plate-align results write into the same height store, with
   `height_source = photo_*` and their own tier.
 
+- **Progress (2026-11-02, worktree `p5heights`, uncommitted):**
+  - Done, backend:
+    - `find_reports`, `apply_heights` and `signature` in `city2stl/panorama_heights.py`.
+    - Applied on read in `get_city_layers`; `city_model_task` uses the same `with_panorama_heights`.
+    - `panorama_heights` ("auto" / "off" / report name(s)) on `CityRequest` and `CityRasterRequest`.
+    - `GET /api/cities/height-reports` (reports in the bbox, rows, `superseded_by`, photo readings).
+    - Proof on Cartagena: the new path equals the old one, 90 buildings changed. See [decisions/building-heights.md](../../decisions/building-heights.md) 2026-11-02.
+  - Height store:
+    - Photo solve already writes `<region>_photo_heights.json` (`photo_solve.save_heights`). It is now read as tier "photo", `height_source` "photo_solve", ranked first.
+    - Plate align produces no heights yet. Design: when it does, it writes `<region>_plate_heights.json` in the same row format with `height_source` "photo_plate" and tier "photo". `photo_rows` globs both, so no new reader is needed.
+  - UI mockups (not built): `Code/claude/mockups/2026-11-02-pano-heights/png/`:
+    - 01 switch on, "90 buildings from 1 report";
+    - 02 hover and "Height source" legend;
+    - 03 off.
+  - Left:
+    - Build the UI after mockup approval: the Building heights card, the legend and colour-by-source, and hover in the Vue Extrude (Phase 6) or `model-viewer.js`.
+    - Wire `preflight._cached_layers`, the terrain session and `routers/terrain.py`.
+    - Plate-align heights.
+
 ## Phase 6: legacy JS → Vue (full restructure)
 
 - Migrate the 68 `modules/**` files (22k lines) page by page, behind the existing

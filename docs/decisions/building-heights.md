@@ -7,6 +7,32 @@ providers are merged and ranked, and how height accuracy is measured. Related:
 
 Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`, `ob25/`, `support/`, `tri/`, `modeleval/`, `depthstudy/`, `docs_*.md`, `new_cities/README.md`) were temporary; copies (no images, no file over 50 MB) are in `Code/claude/scratch_backup_2026-10-09/`; `anchors/` (2026-10-10) is in `Code/claude/scratch_backup_2026-10-10/` (scripts, logs, tables and the changed-row list, no pickles or tiles).
 
+### 2026-11-02 — Panorama heights are on by default in every city read, found by region (F-UNIFY Phase 5)
+
+- **Decision:**
+  - `city_data.get_city_layers` (and `read_city_layers_any_tolerance`) apply skyline-report heights on read with `panorama_heights="auto"`. The preview, the city overlay, the raster and the export all go through one function, `city2stl/panorama_heights.py::apply_heights`.
+  - `city_model_task` reads the layers with "off", merges the client copy, then calls the same `with_panorama_heights`.
+  - Supersedes the 2026-10-17 opt-in entry below; its rules stay: tiers corroborated + single, IoU ≥ 0.5, `KEEP_SOURCES` never replaced.
+- **Rules:**
+  - Discovery is `find_reports(bbox)`. It reads the `report_summary.json` sidecar first and ignores it when it is older than `heights.json`, then the head of `heights.json`, then a full parse, memoised by mtime and size.
+  - Only the newest run per region is used; older runs are `superseded_by` it. Different regions are all used, newest first.
+  - Photo-solve readings (`<annotations>/<region>_photo_heights.json`) rank first, as `height_source` "photo_solve", tier "photo".
+  - Each changed building carries `height_source`, `height_tier`, `height_report`, `height_prev_m` and `height_prev_source`. `strip_applied` restores the previous height first, so re-applying is idempotent and "off" undoes it on a client copy.
+  - The raster cache key adds `signature()`, which is empty when no report covers the bbox, so existing keys stay valid. Nothing is written to the OSM cache, so there is no version bump.
+- **Why:**
+  - Measured heights were reaching only the export, and only when named. The preview showed 10 m estimates for buildings we had measured, so what you saw was not what you printed.
+  - "Newest per region" because runs of one region overlap and later runs fix earlier ones. Mixing v19 and v20 would apply readings that v20 rejected.
+  - Photo readings come first because a person solved them by hand.
+- **Proof (Cartagena cached bbox 10.4295/10.3845/-75.5221/-75.5679, 3,149 buildings, cache only):**
+  - The old path (`apply_panorama_heights(load_rows(name))`) and the new path (`get_city_layers(panorama_heights=name)`) give 0 feature mismatches for both v19_extras (134 buildings changed: 22 corroborated, 112 single, 12 kept measured, 1 no match) and v20_agree (90 changed: 17 corroborated, 73 single, 13 kept measured).
+  - Auto mode picks v20_agree; the three v19 runs are superseded. The legend counts are 17 / 73 / 163 OSM tag or floors / 2,896 estimate.
+  - Read time is about 1.9 s with or without panorama heights.
+- **Not wired:**
+  - `preflight._cached_layers` (survey only).
+  - The terrain session and `routers/terrain.py`.
+  - The legacy JS client, which does not send `panorama_heights` and so gets "auto".
+  - UI mockups: `Code/claude/mockups/2026-11-02-pano-heights/png/`.
+
 ### 2026-10-31 — Commons photo pipeline is a library; script 17 has no rival rule of its own
 - **Decision:** scripts 13-17 are thin wrappers over `city2stl/skyline/commons_pipeline/`. The search route's accept gate is `skyline_match.gate_margin`, nothing else.
 - **Why:** the plan (F-UNIFY Phase 2) listed "17's own 500 m rival rule" as work. Checking showed it was already replaced by `gate_margin` (T18); the 500 m is the `refine(radius_m=500)` search radius, which is not a gate. So no photo's outcome changes and no old-rule switch was kept.
@@ -176,7 +202,7 @@ Scratch paths cited below (`bench/`, `tiers/`, `sat/`, `sat2/`, `own/`, `own2/`,
 - **Source:** conflict copy `city2stl/height/survey_fill-DESKTOP-TMJM22C.py`. Granada cached payload then: 113 tags checked, 77
   replaced (Vela 10 -> 28.8 m, Comares 10 -> 36.5 m, Homenaje 10 -> 23.0 m).
 
-### 2026-10-17 — The city export can take corroborated + single panorama heights, opt-in; tag and prior rows stay out
+### 2026-10-17 — The city export can take corroborated + single panorama heights, opt-in; tag and prior rows stay out [superseded 2026-11-02: on by default, see above]
 - **Decision (user, 2026-10-17):** a city export request may carry `panorama_heights` (a region report
   name, folder or `heights.json`). `city2stl/panorama_heights.py` replaces the height of a footprint
   that has the default or a raster height with the report's `effective_height_m`, for tiers

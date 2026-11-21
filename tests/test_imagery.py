@@ -123,6 +123,7 @@ def test_pooled_stitch_threads_own_sessions(monkeypatch):
 def test_default_tile_cache_dir_follows_cache_root(tmp_path, monkeypatch):
     from geo2stl import cache as geo_cache
     monkeypatch.setattr(geo_cache, "CACHE_ROOT", tmp_path)
+    monkeypatch.delenv("MAP2STL_IMAGES", raising=False)   # set on machines with an image root
     assert imagery.default_tile_cache_dir() == tmp_path / "tiles" / "esri"
     assert imagery.default_tile_cache_dir("other") == tmp_path / "tiles" / "other"
 
