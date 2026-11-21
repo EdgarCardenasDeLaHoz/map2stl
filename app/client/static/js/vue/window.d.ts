@@ -16,9 +16,8 @@ interface Window {
 
     // Sidebar state management (app.js / view-management.js)
     setSidebarState?: (mode: string) => void;
-    _setSidebarViews?: (mode: string) => void;
 
-    // Leaflet map instance (set by map-globe.js::initMap via window.setMap)
+    // Leaflet map instance (set by vue/explore/leafletMap.ts::initMap via window.setMap)
     getMap?: () => { invalidateSize?: (options?: { animate?: boolean }) => void } | null;
 
     // DEM stack update trigger

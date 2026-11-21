@@ -33,8 +33,10 @@ def test_no_horizontal_page_overflow(strict_page, live_server_url):
 def test_dem_strip_buttons_all_reachable(strict_page, live_server_url):
     """Every button in the DEM settings tab strip must be fully on-screen.
 
-    Direct regression test for the jsonViewToggleBtn overflow: it previously
-    sat at x=1656 in a 1600px viewport (off-screen, unreachable by click).
+    Direct regression test for the strip overflow: a button once sat at x=1656
+    in a 1600px viewport (off-screen, unreachable by click). #jsonViewToggleBtn
+    is hidden on purpose (v-show="false": the JSON editor is retired), so only
+    the visible strip buttons are checked.
     """
     page = strict_page
     page.goto(live_server_url, wait_until="networkidle")
@@ -42,7 +44,7 @@ def test_dem_strip_buttons_all_reachable(strict_page, live_server_url):
     page.locator("#tabEdit").click()
     page.wait_for_timeout(500)
 
-    for btn_id in ("settingsHideBtn", "jsonViewToggleBtn"):
+    for btn_id in ("settingsHideBtn",):
         box = page.locator(f"#{btn_id}").bounding_box()
         assert box is not None, f"#{btn_id} not found or not visible"
         assert box["x"] + box["width"] <= 1600 + 1, (

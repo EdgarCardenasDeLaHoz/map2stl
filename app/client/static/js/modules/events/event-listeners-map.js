@@ -1,8 +1,8 @@
 /**
  * modules/events/event-listeners-map.js
  *
- * Map, DEM display, terrain overlays, grid, globe,
- * draw tool, and bbox fine-tune event listeners.
+ * DEM display, Edit's terrain overlays and grid, and bbox fine-tune event listeners.
+ * (The Explore map controls, draw tool and globe are Vue: vue/explore/.)
  *
  * Exposes on window:
  *   window._setupMapAndDemListeners()
@@ -16,11 +16,6 @@ import { afterPaint, awaitNewestDemLoad } from '../dem/projection-switch.js';
 import { nextDemGrid } from '../layers/hydrology-print.js';
 
 window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
-    // New-region flow (modules/map/new-region.js): draw mode with a live size label.
-    function activateDrawTool() {
-        window.newRegion?.startDraw();
-    }
-
     let _colormapTimer = null;
     document.getElementById('demColormap')?.addEventListener('change', () => {
         window._invalidateLutCache?.();
@@ -316,131 +311,13 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
         window.showToast?.(`Map style: ${e.target.options[e.target.selectedIndex].text}`, 'info');
     });
 
+    // Edit's own terrain switch. The Explore Map menu (vue/explore/MapMenu.vue) drives the same
+    // overlay through leafletMap.ts and ExploreMap.vue mirrors its state into these inputs.
     document.getElementById('showTerrainOverlay')?.addEventListener('change', e => {
         const on = e.target.checked;
         window.toggleTerrainOverlay?.(on);
-        window.updateFloatingTerrainButton?.(on);
-        // The Explore tab's settings popover drives the same overlay through its
-        // own checkbox, and the floating button routes through this one, so
-        // clicking the button used to leave the popover reading "off" with its
-        // opacity slider hidden. Assign rather than dispatch, so the two
-        // checkboxes cannot ping-pong through each other's change handlers.
-        const exploreCb = document.getElementById('showTerrainOverlayExplore');
-        if (exploreCb) exploreCb.checked = on;
-        const exploreRow = document.getElementById('terrainOpacityRowExplore');
-        if (exploreRow) exploreRow.style.display = on ? 'flex' : 'none';
         window.showToast?.(on ? 'Terrain relief enabled' : 'Terrain relief disabled', 'info');
     });
-    document.getElementById('floatingTerrainToggle')?.addEventListener('click', () => {
-        const cb = document.getElementById('showTerrainOverlay');
-        if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
-    });
-
-    function _setLabels(show) {
-        window.toggleMapLabels?.(show);
-        const btn = document.getElementById('floatingLabelsToggle');
-        btn?.classList.toggle('active', show);
-        const cb = document.getElementById('showLabelsExplore');
-        if (cb) cb.checked = show;
-    }
-    document.getElementById('floatingLabelsToggle')?.addEventListener('click', () => {
-        const cb = document.getElementById('showLabelsExplore');
-        _setLabels(cb ? !cb.checked : true);
-    });
-    document.getElementById('showLabelsExplore')?.addEventListener('change', e => {
-        _setLabels(e.target.checked);
-    });
-
-    document.getElementById('floatingGridToggle')?.addEventListener('click', () => {
-        const cur = window.getMapGridEnabled?.() ?? false;
-        const next = !cur;
-        window.setMapGridEnabled?.(next);
-        window.toggleMapGrid?.(next);
-        window.showToast?.(next ? 'Grid enabled' : 'Grid disabled', 'info');
-    });
-
-    document.getElementById('floatingGlobeToggle')?.addEventListener('click', () => {
-        const gc = document.getElementById('globeContainer');
-        const btn = document.getElementById('floatingGlobeToggle');
-        if (gc.classList.contains('hidden')) {
-            Object.assign(gc.style, {
-                position: 'absolute', top: '0', left: '0',
-                width: '100%', height: '100%', zIndex: '500'
-            });
-            gc.classList.remove('hidden');
-            btn?.classList.add('active');
-            window.initGlobe?.();
-        } else {
-            gc.classList.add('hidden');
-            gc.style.position = '';
-            btn?.classList.remove('active');
-        }
-    });
-
-    const mapSettingsBtn = document.getElementById('floatingMapSettingsBtn');
-    const mapSettingsPanel = document.getElementById('mapSettingsPanel');
-    mapSettingsBtn?.addEventListener('click', () => {
-        mapSettingsPanel?.classList.toggle('hidden');
-        mapSettingsBtn.classList.toggle('active', !mapSettingsPanel?.classList.contains('hidden'));
-    });
-    document.getElementById('closeMapSettingsBtn')?.addEventListener('click', () => {
-        mapSettingsPanel?.classList.add('hidden');
-        mapSettingsBtn?.classList.remove('active');
-    });
-
-    const mapTileLayerExplore = document.getElementById('mapTileLayerExplore');
-    const mapTileLayerEdit = document.getElementById('mapTileLayer');
-    mapTileLayerExplore?.addEventListener('change', () => {
-        window.setTileLayer?.(mapTileLayerExplore.value);
-        try { localStorage.setItem('map2stl_mapStyle', mapTileLayerExplore.value); } catch (_) { /* per-browser preference */ }
-        if (mapTileLayerEdit) mapTileLayerEdit.value = mapTileLayerExplore.value;
-    });
-    mapTileLayerEdit?.addEventListener('change', () => {
-        if (mapTileLayerExplore) mapTileLayerExplore.value = mapTileLayerEdit.value;
-    });
-
-    const terrainCheckboxExplore = document.getElementById('showTerrainOverlayExplore');
-    const terrainRowExplore = document.getElementById('terrainOpacityRowExplore');
-    const terrainOpacityExplore = document.getElementById('terrainOverlayOpacityExplore');
-    const terrainOpacityLabelExplore = document.getElementById('terrainOpacityValueExplore');
-    terrainCheckboxExplore?.addEventListener('change', () => {
-        const on = terrainCheckboxExplore.checked;
-        window.toggleTerrainOverlay?.(on);
-        // Mirror of the #showTerrainOverlay handler above. The floating button is
-        // the same control by another name, so it has to follow this checkbox as
-        // well; without it the button stayed unlit over a visible overlay.
-        window.updateFloatingTerrainButton?.(on);
-        if (terrainRowExplore) terrainRowExplore.style.display = on ? 'flex' : 'none';
-        const editCb = document.getElementById('showTerrainOverlay');
-        if (editCb) editCb.checked = on;
-    });
-    terrainOpacityExplore?.addEventListener('input', () => {
-        const val = parseInt(terrainOpacityExplore.value);
-        window.setTerrainOverlayOpacity?.(val);
-        if (terrainOpacityLabelExplore) terrainOpacityLabelExplore.textContent = val + '%';
-        const editSlider = document.getElementById('terrainOverlayOpacity');
-        if (editSlider) {
-            editSlider.value = val;
-            document.getElementById('terrainOpacityValue').textContent = val + '%';
-        }
-    });
-
-    document.getElementById('showGridlinesExplore')?.addEventListener('change', e => {
-        window.setMapGridEnabled?.(e.target.checked);
-        window.toggleMapGrid?.(e.target.checked);
-    });
-
-    document.getElementById('floatingDrawBtn')?.addEventListener('click', activateDrawTool);
-    const _map = window.getMap?.();
-    if (_map) {
-        _map.on(L.Draw.Event.CREATED, (e) => {
-            // The drawn box becomes the pending new region, named in NewRegionCard.vue.
-            window.newRegion?.onCreated(e.layer);
-        });
-        _map.on(L.Draw.Event.DRAWSTOP, () => {
-            document.getElementById('floatingDrawBtn')?.classList.remove('drawing');
-        });
-    }
 
     document.getElementById('gridPixelModeBtn')?.addEventListener('click', () => {
         const btn = document.getElementById('gridPixelModeBtn');
@@ -485,7 +362,7 @@ window._setupMapAndDemListeners = function _setupMapAndDemListeners() {
     document.getElementById('terrainOverlayOpacity')?.addEventListener('input', e => {
         const val = e.target.value;
         document.getElementById('terrainOpacityValue').textContent = `${val}%`;
-        window.setTerrainOverlayOpacity?.(val);
+        window.setTerrainOverlayOpacity?.(Number(val));
     });
 
     document.getElementById('paramDim')?.addEventListener('input', () => {

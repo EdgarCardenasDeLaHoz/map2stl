@@ -1,7 +1,7 @@
 /**
  * modules/regions/viewport-regions.js — which saved regions the Explore map draws
  * and the sidebar list shows. Pure (no DOM, no Leaflet); used by
- * region-boxes.js::refreshRegionViewSet for both, so the map and the list cannot
+ * stores/regions.ts::mapRegions for both, so the map and the list cannot
  * drift apart. Tested in tests/js/viewportRegions.test.js.
  *
  * The rule:

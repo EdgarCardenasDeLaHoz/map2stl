@@ -33,7 +33,7 @@ from app.server.schemas import RegionCreate, RegionParameters  # noqa: E402
 _PARAM_FIELDS = ("dim", "depth_scale", "water_scale",
                  "height", "base", "subtract_water", "sat_scale")
 # Every regions column except the `name` key (copied as-is by a rename).
-_REGION_COLUMNS = ("label", "description", "north", "south", "east", "west", *_PARAM_FIELDS)
+_REGION_COLUMNS = ("label", "description", "notes", "north", "south", "east", "west", *_PARAM_FIELDS)
 
 
 def _row_to_region(row) -> dict:
@@ -144,7 +144,7 @@ async def list_regions():
         with get_db() as conn:
             rows = conn.execute(
                 "SELECT name, label, description, north, south, east, west, "
-                "dim, depth_scale, water_scale, height, base, subtract_water, sat_scale "
+                "dim, depth_scale, water_scale, height, base, subtract_water, sat_scale, notes "
                 "FROM regions ORDER BY name"
             ).fetchall()
         regions = [_row_to_region(r) for r in rows]
@@ -275,6 +275,42 @@ async def update_region(name: str, region: RegionCreate):
     except Exception as e:
         logger.error(f"Error updating region: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+_MAX_NOTES = 20000
+
+
+@router.get("/api/regions/{name}/notes")
+async def get_region_notes(name: str):
+    """The free-text notes kept with a region (empty string when none)."""
+    _ensure_db()
+    with get_db() as conn:
+        row = conn.execute("SELECT notes FROM regions WHERE name=?", (name,)).fetchone()
+    if row is None:
+        return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
+    return JSONResponse(content={"name": name, "notes": row["notes"] or ""})
+
+
+@router.put("/api/regions/{name}/notes")
+async def save_region_notes(name: str, request: Request):
+    """Replace a region's notes. Body: ``{"notes": "text"}``."""
+    try:
+        payload = await request.json()
+    except ValueError:
+        return JSONResponse(content={"error": "Body must be JSON"}, status_code=400)
+    notes = payload.get("notes") if isinstance(payload, dict) else None
+    if not isinstance(notes, str):
+        return JSONResponse(content={"error": "Body must be {\"notes\": string}"}, status_code=400)
+    if len(notes) > _MAX_NOTES:
+        return JSONResponse(content={"error": f"Notes are limited to {_MAX_NOTES} characters"},
+                            status_code=413)
+    _ensure_db()
+    with get_db() as conn:
+        cur = conn.execute("UPDATE regions SET notes=? WHERE name=?", (notes, name))
+        conn.commit()
+    if cur.rowcount == 0:
+        return JSONResponse(content={"error": f"Region '{name}' not found"}, status_code=404)
+    return JSONResponse(content={"status": "saved", "name": name, "notes": notes})
 
 
 @router.delete("/api/regions/{name}")

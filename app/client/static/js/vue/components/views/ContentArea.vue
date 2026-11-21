@@ -4,9 +4,7 @@
     <MapContainer />
 
     <!-- Three.js 3D Globe -->
-    <div id="globeContainer" class="globe-container hidden">
-      <div id="globe"></div>
-    </div>
+    <GlobeView />
 
     <!-- DEM/Edit view with canvas layers and settings panel -->
     <DemContainer />
@@ -29,6 +27,7 @@
 </template>
 <script setup lang="ts">
 import MapContainer   from './MapContainer.vue';
+import GlobeView      from '../../explore/GlobeView.vue';
 import DemContainer   from './DemContainer.vue';
 import ModelContainer from './ModelContainer.vue';
 import BenchmarkPage  from './BenchmarkPage.vue';

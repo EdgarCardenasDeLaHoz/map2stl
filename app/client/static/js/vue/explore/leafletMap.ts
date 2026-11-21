@@ -1,69 +1,33 @@
-﻿/**
- * modules/map-globe.js
- * ====================
- * Leaflet 2D map initialisation, tile layers, grid overlay,
- * bounding box drawing tools, and Three.js globe.
+/**
+ * explore/leafletMap.ts - the Explore page's Leaflet map: base map, labels, terrain relief
+ * overlay, grid and the rectangle draw tool (F-UNIFY Phase 6; was modules/map/map-globe.js).
  *
- * Public API (exposed on window):
- *   window.setTileLayer(layerKey)
- *   window.toggleMapLabels(show)
- *   window.toggleTerrainOverlay(show)
- *   window.setTerrainOverlayOpacity(opacity)
- *   window.updateFloatingTerrainButton(active)
- *   window.initMap()
- *   window.toggleMapGrid(show)
- *   window.initGlobe()
- *   window.BBOX_COLORS        (array)
- *   window.getDrawControl()
- *   window.getMapGridEnabled()
- *   window.setMapGridEnabled(v)
+ * ExploreMap.vue calls initMap() once the app-state bridge is ready. The map and its feature
+ * groups are registered through the legacy window accessors (setMap, setPreloadedLayer, ...),
+ * so Edit, Extrude and new-region.js keep reading `window.getMap()` as before. Every layer
+ * change is mirrored into mapLayers.ts, which the Map menu renders.
  *
- * Dependencies (resolved at call-time via window):
- *   window.api.dem.load(...)
- *   window.showToast(...)
- *   window.mapElevationToColor(...)   (from dem-loader.js)
- *   window.setBoundingBox(bounds)     (setter in app.js)
- *   window.setMap(map)
- *   window.setPreloadedLayer(layer)
- *   window.setEditMarkersLayer(layer)
- *   window.setDrawnItems(items)
- *   window.setGlobeScene(scene)
- *   window.setGlobe(globe)
+ * Depends on globals: L (Leaflet + Leaflet.draw), window.showToast, window.api.dem,
+ * window.decodeDemValues, window.mapElevationToColor, window.newRegion.
  */
+import { DEFAULT_STYLE, isTileStyle, mapLayers, STYLE_KEY } from './mapLayers';
 
-// ── Module-scope state ──────────────────────────────────────────────────────
+declare const L: any;
 
-let _map = null;
-let _preloadedLayer = null;
-let _editMarkersLayer = null;
-let _drawnItems = null;
-let _globeScene = null;
-let _globeCamera = null;
-let _globeRenderer = null;
-let _globe = null;
+let _map: any = null;
+let _preloadedLayer: any = null;
+let _editMarkersLayer: any = null;
+let _drawnItems: any = null;
 
-let currentTileLayer = null;
-let demOverlayLayer = null;
+let currentTileLayer: any = null;
+let demOverlayLayer: any = null;
 let demOverlayLoading = false;
-let terrainOverlayLayer = null;
-let mapGridLayer = null;
+let terrainOverlayLayer: any = null;
+let mapGridLayer: any = null;
 let mapGridEnabled = true;  // every grid starts on (2026-10-14)
-let _drawControl = null;
+let _drawControl: any = null;
 
-// Color palette for different bounding boxes (distinct, easy to tell apart)
-const BBOX_COLORS = [
-    { color: '#ff4444', name: 'Red' },
-    { color: '#44aaff', name: 'Blue' },
-    { color: '#44ff44', name: 'Green' },
-    { color: '#ffaa00', name: 'Orange' },
-    { color: '#ff44ff', name: 'Magenta' },
-    { color: '#00ffff', name: 'Cyan' },
-    { color: '#ffff44', name: 'Yellow' },
-    { color: '#aa44ff', name: 'Purple' },
-];
-let currentBboxColorIndex = 0;
-
-const TILE_LAYERS = {
+const TILE_LAYERS: Record<string, { url: string; attribution: string }> = {
     'osm': {
         url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -100,9 +64,9 @@ const TILE_LAYERS = {
 /**
  * Switch the active Leaflet tile layer.
  * Removes the previous tile layer and adds the new one.
- * @param {string} layerKey - Key from the `TILE_LAYERS` object (e.g. 'osm', 'esri-world')
+ * @param layerKey - Key from the `TILE_LAYERS` object (e.g. 'osm', 'esri-world')
  */
-function setTileLayer(layerKey) {
+export function setTileLayer(layerKey: string): void {
     const layerConfig = TILE_LAYERS[layerKey];
     if (!layerConfig || !_map) return;
 
@@ -115,19 +79,20 @@ function setTileLayer(layerKey) {
     currentTileLayer = L.tileLayer(layerConfig.url, {
         attribution: layerConfig.attribution
     }).addTo(_map);
+    mapLayers.style = layerKey;
+    try { localStorage.setItem(STYLE_KEY, layerKey); } catch (_) { /* per-browser preference */ }
 }
-window.setTileLayer = setTileLayer;
 
 // ── Labels overlay ───────────────────────────────────────────────────────────
 
-let _labelsLayer = null;
+let _labelsLayer: any = null;
 
 /**
  * Add or remove a labels-only tile overlay on the map.
  * Uses CartoDB Voyager labels (transparent background, works on any base layer).
  * @param {boolean} show
  */
-window.toggleMapLabels = function toggleMapLabels(show) {
+export function toggleMapLabels(show: boolean): void {
     if (!_map) return;
     if (show && !_labelsLayer) {
         _labelsLayer = L.tileLayer(
@@ -138,7 +103,8 @@ window.toggleMapLabels = function toggleMapLabels(show) {
         _map.removeLayer(_labelsLayer);
         _labelsLayer = null;
     }
-};
+    mapLayers.labels = !!show;
+}
 
 // ── DEM overlay ─────────────────────────────────────────────────────────────
 
@@ -148,7 +114,7 @@ const MERCATOR_MAX_LAT = 85.0511287798;
 const DEM_OVERLAY_PANE = 'demOverlayPane';
 
 /** Web Mercator y for a latitude in degrees, in radians of projected space. */
-function _mercatorY(latDeg) {
+function _mercatorY(latDeg: number): number {
     const lat = Math.max(-MERCATOR_MAX_LAT, Math.min(MERCATOR_MAX_LAT, latDeg)) * Math.PI / 180;
     return Math.log(Math.tan(Math.PI / 4 + lat / 2));
 }
@@ -182,8 +148,8 @@ function ensureDemOverlayPane() {
  * @param {object|null} meta - Parsed global_dem_meta.json, for the source bounds.
  * @returns {Promise<L.ImageOverlay|null>} null if the image or its pixels are unreadable.
  */
-function buildGlobalDemOverlay(meta) {
-    return new Promise(resolve => {
+function buildGlobalDemOverlay(meta: any): Promise<any> {
+    return new Promise((resolve) => {
         const img = new Image();
         img.onerror = () => resolve(null);
         img.onload = () => {
@@ -198,9 +164,9 @@ function buildGlobalDemOverlay(meta) {
 
             const src = document.createElement('canvas');
             src.width = w; src.height = h;
-            const srcCtx = src.getContext('2d');
+            const srcCtx = src.getContext('2d')!;
             srcCtx.drawImage(img, 0, 0);
-            let srcData;
+            let srcData: Uint8ClampedArray;
             try {
                 srcData = srcCtx.getImageData(0, 0, w, h).data;
             } catch (_) {
@@ -218,7 +184,7 @@ function buildGlobalDemOverlay(meta) {
 
             const dst = document.createElement('canvas');
             dst.width = w; dst.height = outH;
-            const dstCtx = dst.getContext('2d');
+            const dstCtx = dst.getContext('2d')!;
             const dstImg = dstCtx.createImageData(w, outH);
             for (let y = 0; y < outH; y++) {
                 const mv = mercN - (y / (outH - 1)) * mercRange;
@@ -247,7 +213,7 @@ function buildGlobalDemOverlay(meta) {
  * @param {boolean} show - true to enable the overlay, false to remove it
  * @returns {Promise<boolean>} Resolves to the new overlay state
  */
-async function toggleDemOverlay(show) {
+async function toggleDemOverlay(show: boolean): Promise<boolean | undefined> {
     if (!_map) return;
 
     if (show) {
@@ -257,7 +223,7 @@ async function toggleDemOverlay(show) {
         if (demOverlayLayer) { _map.removeLayer(demOverlayLayer); demOverlayLayer = null; }
 
         try {
-            window.showToast('Loading terrain overlay...', 'info');
+            (window as any).showToast('Loading terrain overlay...', 'info');
 
             // ── Strategy 1: pre-cached global DEM PNG ──────────────────
             // Generated at server startup; always covers the full globe.
@@ -274,7 +240,7 @@ async function toggleDemOverlay(show) {
                     const layer = await buildGlobalDemOverlay(meta);
                     if (layer) {
                         demOverlayLayer = layer.addTo(_map);
-                        window.showToast('Terrain overlay loaded', 'success');
+                        (window as any).showToast('Terrain overlay loaded', 'success');
                         usedGlobal = true;
                     }
                 }
@@ -285,13 +251,13 @@ async function toggleDemOverlay(show) {
                 const bounds = _map.getBounds();
                 const north = bounds.getNorth(), south = bounds.getSouth();
                 const east = bounds.getEast(), west = bounds.getWest();
-                const colormap = document.getElementById('demColormap')?.value || 'terrain';
-                const { data, error: demErr } = await window.api.dem.load(
+                const colormap = (document.getElementById('demColormap') as HTMLSelectElement | null)?.value || 'terrain';
+                const { data, error: demErr } = await (window as any).api.dem.load(
                     `north=${north}&south=${south}&east=${east}&west=${west}&dim=150&colormap=${colormap}&projection=none&subtract_water=false&depth_scale=1`
                 );
                 if (demErr) throw new Error(demErr);
                 if (data && (data.dem_values || data.dem_values_b64) && data.dimensions) {
-                    let demVals = window.decodeDemValues(data);
+                    let demVals: any = (window as any).decodeDemValues(data);
                     let h = Number(data.dimensions[0]);
                     let w = Number(data.dimensions[1]);
                     if (Array.isArray(demVals) && demVals.length && Array.isArray(demVals[0])) {
@@ -301,12 +267,12 @@ async function toggleDemOverlay(show) {
                     const vmax = data.max_elevation ?? 1;
                     const canvas = document.createElement('canvas');
                     canvas.width = w; canvas.height = h;
-                    const ctx = canvas.getContext('2d');
+                    const ctx = canvas.getContext('2d')!;
                     const imgData = ctx.createImageData(w, h);
                     for (let i = 0; i < demVals.length; i++) {
                         let t = (demVals[i] - vmin) / ((vmax - vmin) || 1);
                         t = Math.max(0, Math.min(1, t));
-                        const [r, g, b] = window.mapElevationToColor(t, colormap);
+                        const [r, g, b] = (window as any).mapElevationToColor(t, colormap);
                         imgData.data[i * 4] = Math.round(r * 255); imgData.data[i * 4 + 1] = Math.round(g * 255);
                         imgData.data[i * 4 + 2] = Math.round(b * 255); imgData.data[i * 4 + 3] = 200;
                     }
@@ -315,13 +281,13 @@ async function toggleDemOverlay(show) {
                     const ob = data.bbox;
                     const _bN = ob ? ob[3] : north, _bS = ob ? ob[1] : south;
                     const _bE = ob ? ob[2] : east, _bW = ob ? ob[0] : west;
-                    const _toRad = d => d * Math.PI / 180;
-                    const _mercY = l => Math.log(Math.tan(Math.PI / 4 + _toRad(Math.max(-85, Math.min(85, l))) / 2));
+                    const _toRad = (d: number) => d * Math.PI / 180;
+                    const _mercY = (l: number) => Math.log(Math.tan(Math.PI / 4 + _toRad(Math.max(-85, Math.min(85, l))) / 2));
                     const _mN = _mercY(_bN), _mS = _mercY(_bS), _mRange = _mN - _mS;
                     const _latRange = _bN - _bS;
                     const projCanvas = document.createElement('canvas');
                     projCanvas.width = w; projCanvas.height = h;
-                    const projCtx = projCanvas.getContext('2d');
+                    const projCtx = projCanvas.getContext('2d')!;
                     const projImg = projCtx.createImageData(w, h);
                     const srcData = imgData.data;
                     for (let dstY = 0; dstY < h; dstY++) {
@@ -336,196 +302,154 @@ async function toggleDemOverlay(show) {
                         [[_bS, _bW], [_bN, _bE]],
                         { opacity: 0.7, interactive: false, pane: ensureDemOverlayPane() }
                     ).addTo(_map);
-                    window.showToast('Terrain overlay loaded', 'success');
+                    (window as any).showToast('Terrain overlay loaded', 'success');
                 }
             }
         } catch (err) {
             console.error('DEM overlay error:', err);
-            window.showToast('Failed to load terrain overlay', 'error');
+            (window as any).showToast('Failed to load terrain overlay', 'error');
         } finally {
             demOverlayLoading = false;
         }
 
-        // Show opacity control
-        document.getElementById('terrainOpacityGroup')?.classList.remove('hidden');
-        document.getElementById('terrainOpacityLabel')?.classList.remove('hidden');
-        return true;
-    } else {
-        if (demOverlayLayer) {
-            _map.removeLayer(demOverlayLayer);
-            demOverlayLayer = null;
-        }
-        // Hide opacity control
-        document.getElementById('terrainOpacityGroup')?.classList.add('hidden');
-        document.getElementById('terrainOpacityLabel')?.classList.add('hidden');
-        return false;
-    }
-}
 
-// Fallback: terrain relief overlay (hillshade tiles)
+        // The overlay was drawn at a fixed 70%: apply the slider's value.
+        demOverlayLayer?.setOpacity?.(mapLayers.terrainOpacity / 100);
+        const on = !!demOverlayLayer;
+        mapLayers.terrain = on;
+        document.getElementById('terrainOpacityGroup')?.classList.toggle('hidden', !on);
+        document.getElementById('terrainOpacityLabel')?.classList.toggle('hidden', !on);
+        return on;
+    }
+    if (demOverlayLayer) {
+        _map.removeLayer(demOverlayLayer);
+        demOverlayLayer = null;
+    }
+    mapLayers.terrain = false;
+    document.getElementById('terrainOpacityGroup')?.classList.add('hidden');
+    document.getElementById('terrainOpacityLabel')?.classList.add('hidden');
+    return false;
+}
 
 /**
- * Toggle the terrain overlay (delegates to toggleDemOverlay).
- * @param {boolean} show - true to show, false to hide
+ * Toggle the terrain relief overlay (the DEM of the current viewport, or the global one).
+ * @param show - true to show, false to hide
  */
-function toggleTerrainOverlay(show) {
+export function toggleTerrainOverlay(show: boolean): void {
     if (!_map) return;
-    // Always use DEM overlay from current map viewport
-    toggleDemOverlay(show);
+    mapLayers.terrain = !!show;   // the switch moves at once; it falls back if the overlay fails
+    void toggleDemOverlay(show);
 }
-window.toggleTerrainOverlay = toggleTerrainOverlay;
 
 /**
  * Set opacity of the active DEM/terrain overlay layer.
- * @param {number} opacity - Opacity value 0–100 (converted to 0–1 internally)
+ * @param opacity - Opacity value 0-100 (converted to 0-1 internally)
  */
-function setTerrainOverlayOpacity(opacity) {
-    if (demOverlayLayer) {
-        demOverlayLayer.setOpacity(opacity / 100);
-    }
-    if (terrainOverlayLayer) {
-        terrainOverlayLayer.setOpacity(opacity / 100);
-    }
+export function setTerrainOverlayOpacity(opacity: number): void {
+    const pct = Number(opacity);
+    mapLayers.terrainOpacity = pct;
+    if (demOverlayLayer) demOverlayLayer.setOpacity(pct / 100);
+    if (terrainOverlayLayer) terrainOverlayLayer.setOpacity(pct / 100);
 }
-window.setTerrainOverlayOpacity = setTerrainOverlayOpacity;
-
-/**
- * Update the floating terrain toggle button appearance to reflect active state.
- * @param {boolean} active - true if terrain overlay is currently on
- */
-function updateFloatingTerrainButton(active) {
-    const btn = document.getElementById('floatingTerrainToggle');
-    if (btn) {
-        if (active) {
-            btn.classList.add('active');
-            btn.title = 'DEM overlay ON (click to disable)';
-        } else {
-            btn.classList.remove('active');
-            btn.title = 'Toggle DEM overlay';
-        }
-    }
-}
-window.updateFloatingTerrainButton = updateFloatingTerrainButton;
 
 // ── Map initialisation ──────────────────────────────────────────────────────
 
+/** Hide edit markers when their bbox is too small on screen (< 40px diagonal). */
+function _updateEditMarkerVisibility(): void {
+    if (!_editMarkersLayer || !_map) return;
+    _editMarkersLayer.eachLayer((marker: any) => {
+        if (!marker._regionBounds) return;
+        const ne = _map.latLngToContainerPoint(marker._regionBounds.getNorthEast());
+        const sw = _map.latLngToContainerPoint(marker._regionBounds.getSouthWest());
+        const pxDiag = Math.hypot(ne.x - sw.x, ne.y - sw.y);
+        const el = marker.getElement?.();
+        if (el) el.style.display = pxDiag < 40 ? 'none' : '';
+    });
+}
+
 /**
- * Initialise the Leaflet map: tile layer, draw controls, feature groups,
- * bounding box draw event, and map grid.
+ * Initialise the Leaflet map on `el`: tile layer, draw controls, feature groups, the draw
+ * event and the grid. Registers the map and its layers with the legacy window accessors
+ * (`getMap`, `getPreloadedLayer`, ...) that Edit, Extrude and new-region.js read.
  */
-function initMap() {
-    _map = L.map('map', {
+export function initMap(el: string | HTMLElement = 'map'): any {
+    if (_map) return _map;
+    _map = L.map(el, {
         minZoom: 2,
         maxZoom: 18,
-        worldCopyJump: true
+        worldCopyJump: true,
     }).setView([20, 0], 2);
 
-    window.setMap?.(_map);
+    const w = window as any;
+    w.setMap?.(_map);
 
-    // Use tile layer system
     // Relief (OpenTopoMap) by default, so mountains and valleys show while choosing an area to
-    // print (F-DESIGN new-region flow, 2026-10-02); the Map ▾ choice is remembered.
-    let style = 'osm-topo';
-    try { style = localStorage.getItem('map2stl_mapStyle') || style; } catch (_) { /* default */ }
-    if (!TILE_LAYERS[style]) style = 'osm-topo';
+    // print (F-DESIGN new-region flow, 2026-10-02); the Map menu's choice is remembered.
+    let style = DEFAULT_STYLE;
+    try { style = localStorage.getItem(STYLE_KEY) || style; } catch (_) { /* default */ }
+    if (!isTileStyle(style)) style = DEFAULT_STYLE;
     setTileLayer(style);
-    for (const id of ['mapTileLayerExplore', 'mapTileLayer']) {
-        const sel = document.getElementById(id);
-        if (sel) sel.value = style;
-    }
 
     _preloadedLayer = new L.FeatureGroup().addTo(_map);
     _editMarkersLayer = new L.FeatureGroup().addTo(_map);
     _drawnItems = new L.FeatureGroup().addTo(_map);
+    w.setPreloadedLayer?.(_preloadedLayer);
+    w.setEditMarkersLayer?.(_editMarkersLayer);
+    w.setDrawnItems?.(_drawnItems);
 
-    window.setPreloadedLayer?.(_preloadedLayer);
-    window.setEditMarkersLayer?.(_editMarkersLayer);
-    window.setDrawnItems?.(_drawnItems);
-
-    // Hide edit markers when their bbox is too small on screen (< 40px diagonal)
-    function _updateEditMarkerVisibility() {
-        if (!_editMarkersLayer) return;
-        _editMarkersLayer.eachLayer(marker => {
-            if (!marker._regionBounds) return;
-            const ne = _map.latLngToContainerPoint(marker._regionBounds.getNorthEast());
-            const sw = _map.latLngToContainerPoint(marker._regionBounds.getSouthWest());
-            const pxDiag = Math.sqrt(Math.pow(ne.x - sw.x, 2) + Math.pow(ne.y - sw.y, 2));
-            const el = marker.getElement?.();
-            if (el) el.style.display = pxDiag < 40 ? 'none' : '';
-        });
-    }
     _map.on('zoomend', _updateEditMarkerVisibility);
     _map.on('moveend', _updateEditMarkerVisibility);
-
-    // Get next color for drawn rectangles
-    /**
-     * Return the next colour string from `BBOX_COLORS` in round-robin order.
-     * @returns {string} CSS colour string
-     */
-    function getNextBboxColor() {
-        const colorObj = (window.BBOX_COLORS || BBOX_COLORS)[currentBboxColorIndex % (window.BBOX_COLORS || BBOX_COLORS).length];
-        currentBboxColorIndex++;
-        return colorObj.color;
-    }
 
     _drawControl = new L.Control.Draw({
         draw: {
             rectangle: {
                 shapeOptions: {
-                    color: '#0a84ff',   // the selection accent (F-DESIGN), was red
+                    color: '#0a84ff',   // the selection accent (F-DESIGN)
                     weight: 2,
-                    fillOpacity: 0.1
-                }
+                    fillOpacity: 0.1,
+                },
             },
             polygon: false,
             circle: false,
             marker: false,
-            polyline: false
+            polyline: false,
         },
-        edit: {
-            featureGroup: _drawnItems
-        }
+        edit: { featureGroup: _drawnItems },
     });
     _map.addControl(_drawControl);
 
-    _map.on(L.Draw.Event.CREATED, function (event) {
-        // Don't clear - keep old boxes visible with different colors
-        const layer = event.layer;
-        const bboxColor = getNextBboxColor();
-        layer.setStyle({
-            color: bboxColor,
-            weight: 3,
-            fillColor: bboxColor,
-            fillOpacity: 0.15
-        });
-        _drawnItems.addLayer(layer);
-        window.setBoundingBox?.(layer.getBounds());
-        const b = layer.getBounds();
-        window.events?.emit(window.EV?.BBOX_CHANGED, {
-            north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
+    // A drawn box becomes the pending new region (new-region.js), named in NewRegionCard.vue.
+    _map.on(L.Draw.Event.CREATED, (event: any) => {
+        _drawnItems.addLayer(event.layer);
+        w.newRegion?.onCreated(event.layer);
     });
 
-    // Initialize map grid (on by default, like the Edit map's grids)
-    initMapGrid();
+    mapGridLayer = L.layerGroup();
     toggleMapGrid(mapGridEnabled);
+    return _map;
 }
-window.initMap = initMap;
+
+/** Remove the map (the Explore page is gone), so a remount starts clean. */
+export function destroyMap(): void {
+    if (!_map) return;
+    const w = window as any;
+    _map.remove();
+    _map = null;
+    _preloadedLayer = _editMarkersLayer = _drawnItems = _drawControl = null;
+    currentTileLayer = demOverlayLayer = _labelsLayer = mapGridLayer = null;
+    w.setMap?.(null);
+    w.setPreloadedLayer?.(null);
+    w.setEditMarkersLayer?.(null);
+    w.setDrawnItems?.(null);
+}
 
 // ── Map grid (graticule) ────────────────────────────────────────────────────
-
-/**
- * Initialise the Leaflet layer group used for the map graticule (grid).
- */
-function initMapGrid() {
-    // Create a custom graticule layer
-    mapGridLayer = L.layerGroup();
-}
 
 /**
  * Redraw the map graticule (grid) for the current viewport and zoom level.
  * Called on map moveend events when the grid is enabled.
  */
-function updateMapGrid() {
+function updateMapGrid(): void {
     if (!_map || !mapGridLayer) return;
 
     mapGridLayer.clearLayers();
@@ -594,112 +518,39 @@ function updateMapGrid() {
     }
 }
 
+
 /**
  * Show or hide the map graticule overlay.
- * @param {boolean} show - true to enable the grid, false to remove it
+ * @param show - true to enable the grid, false to remove it
  */
-function toggleMapGrid(show) {
+export function toggleMapGrid(show: boolean): void {
     mapGridEnabled = show;
-
+    mapLayers.grid = show;
+    if (!_map || !mapGridLayer) return;
     if (show) {
-        if (mapGridLayer) {
-            mapGridLayer.addTo(_map);
-            updateMapGrid();
-
-            // Update grid on zoom/pan
-            _map.on('moveend', updateMapGrid);
-        }
+        mapGridLayer.addTo(_map);
+        updateMapGrid();
+        _map.on('moveend', updateMapGrid);   // Leaflet ignores a listener it already has
     } else {
-        if (mapGridLayer) {
-            _map.removeLayer(mapGridLayer);
-            _map.off('moveend', updateMapGrid);
-        }
-    }
-
-    // Update button state
-    const btn = document.getElementById('floatingGridToggle');
-    if (btn) {
-        btn.classList.toggle('active', show);
-        btn.title = show ? 'Grid ON (click to hide)' : 'Toggle grid lines';
+        _map.removeLayer(mapGridLayer);
+        _map.off('moveend', updateMapGrid);
     }
 }
-window.toggleMapGrid = toggleMapGrid;
 
-// ── Globe ───────────────────────────────────────────────────────────────────
+export const getMap = (): any => _map;
+export const getDrawControl = (): any => _drawControl;
+export const getMapGridEnabled = (): boolean => mapGridEnabled;
+export const setMapGridEnabled = (v: boolean): void => { mapGridEnabled = v; mapLayers.grid = v; };
 
-/**
- * Initialise the Three.js globe: scene, camera, renderer, sphere geometry,
- * lighting, and the RAF animation loop.
- */
-function initGlobe() {
-    try {
-        const container = document.getElementById('globe');
-        if (!container || container.clientWidth === 0 || container.clientHeight === 0) {
-            return; // Globe tab not yet visible — init deferred until first activation
-        }
-
-        _globeScene = new THREE.Scene();
-        _globeCamera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-        _globeRenderer = new THREE.WebGLRenderer({ antialias: true });
-        _globeRenderer.setSize(container.clientWidth, container.clientHeight);
-        container.appendChild(_globeRenderer.domElement);
-
-        window.setGlobeScene?.(_globeScene);
-
-        // Create globe geometry
-        const geometry = new THREE.SphereGeometry(5, 64, 64);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0x2233ff,
-            transparent: true,
-            opacity: 0.8
-        });
-        _globe = new THREE.Mesh(geometry, material);
-        _globeScene.add(_globe);
-
-        window.setGlobe?.(_globe);
-
-        // Add lighting
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        _globeScene.add(ambientLight);
-
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        directionalLight.position.set(1, 1, 1);
-        _globeScene.add(directionalLight);
-
-        _globeCamera.position.z = 10;
-
-        // Add coordinate markers group
-        _globeScene.add(new THREE.Group()); // Index 2 will be for markers
-
-        animateGlobe();
-    } catch (error) {
-        console.error('Error initializing globe:', error);
-        // Hide globe toggle if WebGL is unavailable
-        const globeToggle = document.getElementById('floatingGlobeToggle');
-        if (globeToggle) {
-            globeToggle.classList.add('hidden');
-            globeToggle.title = 'Globe unavailable (WebGL not supported)';
-        }
-    }
+/** The legacy window names other modules call (Edit's map controls, new-region.js). */
+export function installLeafletGlobals(): void {
+    const w = window as any;
+    w.setTileLayer = setTileLayer;
+    w.toggleMapLabels = toggleMapLabels;
+    w.toggleTerrainOverlay = toggleTerrainOverlay;
+    w.setTerrainOverlayOpacity = setTerrainOverlayOpacity;
+    w.toggleMapGrid = toggleMapGrid;
+    w.getDrawControl = getDrawControl;
+    w.getMapGridEnabled = getMapGridEnabled;
+    w.setMapGridEnabled = setMapGridEnabled;
 }
-window.initGlobe = initGlobe;
-
-/**
- * RAF animation loop for the Three.js globe.
- * Rotates the globe on the Y axis each frame.
- */
-function animateGlobe() {
-    requestAnimationFrame(animateGlobe);
-    _globe.rotation.y += 0.005;
-    _globeRenderer.render(_globeScene, _globeCamera);
-}
-
-// ── Expose BBOX_COLORS and other constants ──────────────────────────────────
-
-window.BBOX_COLORS = BBOX_COLORS;
-
-// ── Expose drawControl and mapGridEnabled accessors ─────────────────────────
-
-window.getDrawControl = () => _drawControl;
-window.getMapGridEnabled = () => mapGridEnabled;
-window.setMapGridEnabled = (v) => { mapGridEnabled = v; };

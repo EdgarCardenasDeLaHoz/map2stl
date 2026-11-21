@@ -1,6 +1,6 @@
 # Known Issues — map2stl
 
-_Last updated: 2026-10-28_
+_Last updated: 2026-11-21_
 
 - Live bugs and technical debt only. Planned work is in the roadmap,
   [plans/README.md](plans/README.md); ideas are in [proposals.md](proposals.md).
@@ -8,6 +8,11 @@ _Last updated: 2026-10-28_
   full write-ups (the fixed §2–§2e, §4, §0, §0d and all older resolved entries are there).
 - Section ids `0c` and `3` are cited from code (`city2stl/height/providers/google_3d.py`,
   `city2stl/height/providers/gba.py`): keep them.
+
+## e2e tests wait for removed Edit-strip buttons (found 2026-11-21, open)
+- **Symptom:** 6 tests in `tests/e2e/test_export_pipeline.py` (3) and `tests/e2e/test_mesh_import.py` (3) wait for `.dem-strip-btn` buttons labelled "Export", "Composite" or "View". The Edit strip now has only "Guide" and "Hide" (an earlier F-UNIFY change), so they time out. The e2e suite is outside the default pytest run, so nothing flagged it.
+- **Fix:** rewrite their navigation to reach Extrude and Composite the way the app does now, when the Edit and Extrude pages move to Vue (F-UNIFY Phase 6).
+- **Running e2e offline:** needs `pytest-playwright` (not in the venv), `NO_PROXY=127.0.0.1,localhost` when a dead proxy is set, `MAP2STL_DB_PATH` set to a scratch copy of `data.db`, and `MAP2STL_MICROPOLITAN_DIR` when running outside the OneDrive folder.
 
 ## Align tool plate heightmap fills with its own pixel rule, untested (found 2026-10-28, open)
 - **Symptom:** `tools/align_tool/plate_vectors.py::polygons_to_heightmap` burns footprints with `cv2.fillPoly` on rounded vertices. Everything else uses `numpy2stl.raster.burn_polygons` and its cell-centre rule, so plate footprint edges can sit up to a pixel off the app's.

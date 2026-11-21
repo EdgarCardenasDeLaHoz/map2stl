@@ -61,10 +61,11 @@ def _open_edit_and_load_dem(page):
         region.click()
 
     page.locator("#tabEdit").click()
-    load_btn = page.locator("#loadDemBtn")
+    # The visible control is the Terrain panel's "Reload terrain" button (#loadDemBtn itself is hidden).
+    load_btn = page.get_by_role("button", name="Reload terrain")
     if not load_btn.is_visible():
-        section = page.locator(".collapsible-section", has=page.locator("#loadDemBtn")).first
-        section.locator(".collapsible-header").first.click()
+        # The Terrain panel keeps it on its "Fetch" tab (View / Fetch / Composite).
+        page.get_by_role("tab", name="Fetch", exact=True).click()
     load_btn.wait_for(state="visible", timeout=10_000)
     with page.expect_response(lambda r: "/api/terrain/dem" in r.url, timeout=15_000) as resp:
         load_btn.click()

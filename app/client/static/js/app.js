@@ -15,7 +15,7 @@
 // Do NOT reassign window.appState — that would destroy the Proxy and its listeners.
 if (!window.appState?.set) window.appState = {};   // fallback if state.js not loaded
 
-// Map & globe instances (set once during init by map-globe.js)
+// Map & globe instances (set once during init by vue/explore/leafletMap.ts)
 window.appState.map = null;
 window.appState.globeScene = null;
 window.appState.globe = null;
@@ -204,9 +204,6 @@ function isLayerCurrent(layerName) {
 }
 window.getCurrentBboxObject = getCurrentBboxObject;
 
-// BBOX_COLORS and currentBboxColorIndex defined in modules/map-globe.js
-// and exposed as window.BBOX_COLORS there.
-
 // ============================================================
 // INITIALIZATION
 // ============================================================
@@ -221,18 +218,8 @@ document.addEventListener('DOMContentLoaded', async function () {
         return;
     }
 
-    try {
-        window.initMap?.();
-    } catch (e) {
-        console.error('Error initializing map:', e);
-    }
-
-    try {
-        window.initGlobe?.();
-    } catch (e) {
-        console.error('Error initializing globe:', e);
-    }
-
+    // The Leaflet map and the globe start themselves (vue/explore/ExploreMap.vue, GlobeView.vue)
+    // when main-vue.ts announces the app-state bridge, which happened just before this handler.
     await window.loadCoordinates?.();
 
     window.setupEventListeners?.();

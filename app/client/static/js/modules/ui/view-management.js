@@ -1,8 +1,8 @@
 ﻿// ============================================================
 // VIEW MANAGEMENT — modules/ui/view-management.js
-// Handles top-level tab switching, sidebar state machine,
-// sidebar table rendering, bbox layer visibility, status panel,
-// region load/save/submit/delete, and DEM sub-tab wiring.
+// Handles top-level tab switching, the new-region save, "Load DEM ›" and DEM sub-tab
+// wiring. The region list, table, editor, delete and box visibility moved to Vue in
+// F-UNIFY Phase 6 (vue/explore/, vue/stores/regions.ts).
 //
 // All functions exposed on window.*
 // Closure vars accessed via window.appState.* or window.get*()/set*() getters.
@@ -86,10 +86,7 @@ window.switchView = function switchView(view) {
         // Force Leaflet to recalculate size after container becomes visible.
         // Two passes are used because panel transitions can lag one frame.
         requestAnimationFrame(_invalidateMapSize);
-        setTimeout(() => {
-            _invalidateMapSize();
-            _syncBboxLayerVisibility();
-        }, 120);
+        setTimeout(_invalidateMapSize, 120);
     } else if (view === 'globe') {
         window.initGlobe?.();
     } else if (view === 'dem') {
@@ -118,178 +115,6 @@ window.switchView = function switchView(view) {
         _ensureDemForExtrude();
     }
     window.events?.emit(window.EV?.VIEW_CHANGED, view);
-};
-
-// ---------------------------------------------------------------------------
-// _setSidebarViews
-// ---------------------------------------------------------------------------
-
-/**
- * Apply a sidebar state to the DOM: show/hide the list and table views, and
- * close the region editor (SidebarPanel.vue::setRegionEditorOpen).
- * @param {'normal'|'expanded'|'hidden'} state
- */
-window._setSidebarViews = function _setSidebarViews(state) {
-    const listView = document.getElementById('sidebarListView');
-    const tableView = document.getElementById('sidebarTableView');
-    window.setRegionEditorOpen?.(false);
-    if (state === 'expanded') {
-        listView?.classList.add('hidden');
-        tableView?.classList.remove('hidden');
-        window.renderSidebarTable?.();
-    } else {
-        listView?.classList.remove('hidden');
-        tableView?.classList.add('hidden');
-    }
-};
-
-// ---------------------------------------------------------------------------
-// renderSidebarTable
-// ---------------------------------------------------------------------------
-
-/**
- * Render the compact sidebar table of all regions, grouped by continent.
- * @param {string} [filter] - Filter string; defaults to the sidebar search input value
- */
-window.renderSidebarTable = function renderSidebarTable(filter) {
-    const tbody = document.getElementById('sidebarRegionsTableBody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    const q = (filter || document.getElementById('sidebarTableSearch')?.value || '').toLowerCase();
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    const list = q ? coordinatesData.filter(r => r.name.toLowerCase().includes(q)) : coordinatesData;
-    const groups = window.groupRegionsByContinent?.(list) || [];
-    const selectedRegion = window.appState.selectedRegion;
-
-    groups.forEach(({ continent, regions: groupRegions }) => {
-        // Group header row
-        const headerTr = document.createElement('tr');
-        headerTr.className = 'tbl-group-header';
-        headerTr.innerHTML = `<td colspan="7" class="tbl-group-label">${continent} <span class="tbl-group-count">${groupRegions.length}</span></td>`;
-        let groupCollapsed = false;
-        headerTr.onclick = () => {
-            groupCollapsed = !groupCollapsed;
-            headerTr.classList.toggle('collapsed', groupCollapsed);
-            let sibling = headerTr.nextElementSibling;
-            while (sibling && !sibling.classList.contains('tbl-group-header')) {
-                sibling.style.display = groupCollapsed ? 'none' : '';
-                sibling = sibling.nextElementSibling;
-            }
-        };
-        tbody.appendChild(headerTr);
-
-        groupRegions.forEach(region => {
-            let originalIndex = coordinatesData.indexOf(region);
-            if (originalIndex < 0) {
-                // Fallback for non-identical object refs: match full bbox first,
-                // then fall back to name-only as a last resort.
-                originalIndex = coordinatesData.findIndex(r =>
-                    r.name === region.name
-                    && Number(r.north) === Number(region.north)
-                    && Number(r.south) === Number(region.south)
-                    && Number(r.east) === Number(region.east)
-                    && Number(r.west) === Number(region.west)
-                );
-            }
-            if (originalIndex < 0) {
-                originalIndex = coordinatesData.findIndex(r => r.name === region.name);
-            }
-            if (originalIndex < 0) return;
-            const tr = document.createElement('tr');
-            if (selectedRegion && selectedRegion.name === region.name) tr.classList.add('selected');
-            tr.dataset.label = region.label || '';
-            tr.dataset.category = (region.label && region.label.trim()) ? region.label.trim() : continent;
-            const safeName = window.escapeHtml ? window.escapeHtml(region.name) : region.name;
-            tr.innerHTML = `
-                <td class="tbl-name" title="${safeName}">${safeName}</td>
-                <td class="tbl-coord">${region.north?.toFixed(2) ?? ''}</td>
-                <td class="tbl-coord">${region.south?.toFixed(2) ?? ''}</td>
-                <td class="tbl-coord">${region.east?.toFixed(2) ?? ''}</td>
-                <td class="tbl-coord">${region.west?.toFixed(2) ?? ''}</td>
-                <td class="tbl-actions">
-                    <button class="tbl-btn edit" onclick="goToEdit(${originalIndex})" title="Open in Edit view">✏ Edit</button>
-                    <button class="tbl-btn danger" data-action="delete" title="Delete region">🗑</button>
-                </td>
-            `;
-            tr.querySelector('[data-action="delete"]')
-                ?.addEventListener('click', () => { void window.deleteRegion?.(originalIndex); });
-            tr.onclick = (e) => {
-                if (e.target.tagName === 'BUTTON') return;
-                window.selectCoordinate?.(originalIndex);
-                tbody.querySelectorAll('tr:not(.tbl-group-header)').forEach(r => r.classList.remove('selected'));
-                tr.classList.add('selected');
-            };
-            tbody.appendChild(tr);
-        });
-    });
-    // Re-apply label filter if any active (set by Vue RegionListTable component)
-    window._applyRegionLabelFilter?.();
-};
-
-// ---------------------------------------------------------------------------
-// toggleBboxLayerVisibility
-// ---------------------------------------------------------------------------
-
-// Module-scoped visibility state (mirrors the old closure var in app.js)
-let _bboxLayersVisible = true;
-
-/**
- * Add or remove the saved-region rectangles and their edit markers on the
- * Leaflet map to match `_bboxLayersVisible`.
- */
-function _syncBboxLayerVisibility() {
-    const map = window.getMap?.();
-    if (!map) return;
-    [window.getPreloadedLayer?.(), window.getEditMarkersLayer?.()].forEach(layer => {
-        if (!layer) return;
-        const onMap = map.hasLayer(layer);
-        if (_bboxLayersVisible && !onMap) layer.addTo(map);
-        else if (!_bboxLayersVisible && onMap) map.removeLayer(layer);
-    });
-}
-
-/**
- * Toggle visibility of the preloaded-region and edit-marker Leaflet layers.
- */
-window.toggleBboxLayerVisibility = function toggleBboxLayerVisibility() {
-    _bboxLayersVisible = !_bboxLayersVisible;
-    _syncBboxLayerVisibility();
-    const btn = document.getElementById('bboxVisToggleBtn');
-    if (!btn) return;
-    if (_bboxLayersVisible) {
-        btn.textContent = '👁'; btn.classList.remove('hidden-state'); btn.title = 'Hide region boxes on map';
-    } else {
-        btn.textContent = '🙈'; btn.classList.add('hidden-state'); btn.title = 'Show region boxes on map';
-    }
-};
-
-// ---------------------------------------------------------------------------
-// deleteRegion
-// ---------------------------------------------------------------------------
-
-/**
- * Delete a saved region (DELETE /api/regions/{name}) after a confirm prompt,
- * then reload the region list. Clears the selection if it was the deleted one.
- * @param {number} index - Index into getCoordinatesData()
- * @returns {Promise<boolean>} true when the region was deleted
- */
-window.deleteRegion = async function deleteRegion(index) {
-    const region = (window.getCoordinatesData?.() || [])[index];
-    if (!region) return false;
-    if (!confirm(`Delete region "${region.name}"? Its saved settings are deleted too.`)) return false;
-
-    const { error } = await window.api.regions.delete(region.name);
-    if (error) {
-        window.showToast?.(`Failed to delete region: ${error}`, 'error');
-        return false;
-    }
-    if (window.appState.selectedRegion?.name === region.name) {
-        window.setSelectedRegion?.(null);
-        window.appState.selectedRegion = null;
-    }
-    window.showToast?.(`Region "${region.name}" deleted`, 'success');
-    await window.loadCoordinates?.();
-    return true;
 };
 
 // ---------------------------------------------------------------------------

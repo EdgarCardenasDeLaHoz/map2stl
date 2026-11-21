@@ -4,18 +4,13 @@
  * Load, render, select, save, and delete geographic regions.
  *
  * Public API (exposed on window):
- *   window.loadCoordinates()       → Promise<void>
  *   window.selectCoordinate(index) → Promise<void>
  *   window.goToEdit(index)
  *
  * Dependencies (resolved at call-time via window):
- *   window.api.regions.list()
  *   window.getCoordinatesData()     / window.setCoordinatesData(data)
  *   window.setSelectedRegion(r)
- *   window.drawRegionBoxes(regions) (region-boxes.js)
  *   window.getMap()
- *   window.getGlobeScene()
- *   window.BBOX_COLORS
  *   window.getSidebarState()        / window.setSidebarState(s)
  *   window.clearCityOverlay?.()
  *   window.haversineDiagKm(n, s, e, w)
@@ -26,8 +21,6 @@
  *   window.loadWaterMask?.()
  *   window._updateCitiesLoadButton?.(region)
  *   window.appState._updateWorkflowStepper?.()
- *   renderCoordinatesList()         (global from region-ui.js)
- *   detectContinent(lat, lon)       (global from region-ui.js)
  *   clearLayerCache()               (global function in app.js)
  *   clearLayerDisplays()            (global function in app.js)
  *   switchView(view)                (global function in app.js)
@@ -50,106 +43,6 @@ const AUTO_SCALE = {
         { maxKm: Infinity, dim: 600 },
     ],
 };
-
-// ── loadCoordinates ─────────────────────────────────────────────────────────
-
-/**
- * Fetch all saved regions from `/api/regions` and populate the UI: the sidebar
- * list, the outline boxes on the map (region-boxes.js::drawRegionBoxes) and the
- * globe markers.
- * @returns {Promise<void>}
- */
-async function loadCoordinates() {
-    const list = document.getElementById('coordinatesList');
-
-    if (!list) {
-        console.error('coordinatesList element not found!');
-        return;
-    }
-
-    list.innerHTML = '<div class="loading"><span class="spinner"></span>Loading coordinates...</div>';
-
-    try {
-        const { data, error } = await window.api.regions.list();
-        if (error) throw new Error(error);
-
-        window.setCoordinatesData?.(data.regions || []);
-
-        // Map boxes and the sidebar list, which show the same viewport set
-        // (region-boxes.js::drawRegionBoxes renders the list too).
-        window.drawRegionBoxes(window.getCoordinatesData?.() || []);
-
-        // Add markers to globe
-        updateGlobeMarkers();
-
-    } catch (error) {
-        console.error('Error loading coordinates:', error);
-        list.innerHTML = '<div class="loading" style="color:red;">Error loading coordinates: ' + error.message + '</div>';
-    }
-}
-window.loadCoordinates = loadCoordinates;
-
-// ── updateGlobeMarkers ──────────────────────────────────────────────────────
-
-/**
- * Refresh all coordinate markers on the Three.js globe from `coordinatesData`.
- */
-function updateGlobeMarkers() {
-    const globeScene = window.getGlobeScene?.();
-
-    // Check if globeScene exists and has the markers group
-    if (!globeScene || !globeScene.children || globeScene.children.length < 3) {
-        return; // Globe not initialized yet
-    }
-
-    // Clear existing markers
-    const markersGroup = globeScene.children[2];
-    if (!markersGroup || !markersGroup.children) {
-        return;
-    }
-
-    while (markersGroup.children.length > 0) {
-        markersGroup.remove(markersGroup.children[0]);
-    }
-
-    const coordinatesData = window.getCoordinatesData?.() || [];
-    const BBOX_COLORS = window.BBOX_COLORS || [];
-
-    // Add markers for each region
-    coordinatesData.forEach((region, i) => {
-        const centerLat = (region.north + region.south) / 2;
-        const centerLng = (region.east + region.west) / 2;
-        const cssColor = BBOX_COLORS[i % BBOX_COLORS.length]?.color;
-        const color = cssColor ? parseInt(cssColor.slice(1), 16) : 0xff0000;
-
-        const marker = createGlobeMarker(centerLat, centerLng, color);
-        markersGroup.add(marker);
-    });
-}
-
-// ── createGlobeMarker ───────────────────────────────────────────────────────
-
-/**
- * Create a Three.js sprite marker positioned on the globe surface.
- * @param {number} lat   - Latitude in degrees
- * @param {number} lng   - Longitude in degrees
- * @param {number} color - Three.js integer color (default red 0xff0000)
- * @returns {THREE.Mesh} The created marker mesh
- */
-function createGlobeMarker(lat, lng, color = 0xff0000) {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lng + 180) * (Math.PI / 180);
-
-    const geometry = new THREE.SphereGeometry(0.05, 8, 8);
-    const material = new THREE.MeshBasicMaterial({ color });
-    const marker = new THREE.Mesh(geometry, material);
-
-    marker.position.x = 5 * Math.sin(phi) * Math.cos(theta);
-    marker.position.y = 5 * Math.cos(phi);
-    marker.position.z = 5 * Math.sin(phi) * Math.sin(theta);
-
-    return marker;
-}
 
 // ── selectCoordinate ────────────────────────────────────────────────────────
 

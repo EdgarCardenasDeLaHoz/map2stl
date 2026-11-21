@@ -15,6 +15,7 @@ import App from './App.vue';
 // Registered globally so the Export tab mounts it with one template line (F-LANDMARK 6).
 import ModelScorePanel from './components/views/ModelScorePanel.vue';
 import { useAppStore } from './stores/app';
+import { useRegionsStore } from './stores/regions';
 
 // ─── 1. Bootstrap Vue ────────────────────────────────────────────────────────
 
@@ -143,4 +144,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // register their appState.on(...) listeners against the Pinia-backed bridge.
     // app.js will set its initial values through the bridge (into Pinia) afterward.
     installAppStateBridge();
+    // Components that register with appState (the Explore map: setMap, setPreloadedLayer ...)
+    // wait for this: before it, those writes would go to the discarded pre-bridge proxy.
+    (window as any).__map2stlBridgeReady = true;
+    window.dispatchEvent(new Event('map2stl:bridge-ready'));
 });
+
+// The legacy modules (import, save-new-region, Edit's save) reload the saved regions through
+// this name; the list, the boxes and the table all rebuild from the Pinia store.
+(window as any).loadCoordinates = () => useRegionsStore().load();

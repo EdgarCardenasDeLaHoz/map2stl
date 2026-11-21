@@ -1,7 +1,7 @@
 /**
  * modules/regions/region-geometry.js — pure helpers for region boxes.
  *
- * No DOM, no Leaflet, no window: imported by region-editor.js, region-boxes.js,
+ * No DOM, no Leaflet, no window: imported by RegionEditor.vue, regionBoxes.ts,
  * viewport-regions.js and map/bbox-panel.js,
  * and unit-tested in tests/js/regionGeometry.test.js.
  *

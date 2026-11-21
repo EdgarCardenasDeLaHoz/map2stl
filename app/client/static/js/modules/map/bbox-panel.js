@@ -3,7 +3,7 @@ import { REGION_ACCENT } from '../regions/region-geometry.js';
 // === Constants ===
 // Shared by every caller of setBboxRectangle, so the box looks the same however
 // the user got to it. The working extent: a dashed accent outline that sits on
-// the selected region's solid box (region-boxes.js) and moves off it while the
+// the selected region's solid box (vue/explore/regionBoxes.ts) and moves off it while the
 // region editor's N/S/E/W fields are edited. Not interactive, so hovers and
 // clicks reach the saved-region boxes underneath.
 const BBOX_RECT_STYLE = { color: REGION_ACCENT, weight: 2, dashArray: '6 4', fill: false, interactive: false };

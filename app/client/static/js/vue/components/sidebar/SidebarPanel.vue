@@ -1,121 +1,66 @@
 <template>
-  <!-- Mirrors the original <div class="sidebar expanded" id="sidebar"> structure exactly.
-       All child element IDs are preserved so existing JS (document.getElementById)
-       continues to work during the migration. -->
-  <div class="sidebar" :class="sidebarClass" id="sidebar">
-
-    <!-- Header ─────────────────────────────────────────────────────────────── -->
-    <div class="sidebar-header">
-      <div class="sidebar-title">Region Selection</div>
-      <div class="row-gap6 sidebar-header-actions">
-        <button class="sidebar-header-action-btn"
-                title="Export saved regions to JSON"
-                @click="exportRegions">
-          Export
-        </button>
-        <button class="sidebar-header-action-btn"
-                title="Import regions from JSON"
-                @click="openImportPicker">
-          Import
-        </button>
-        <button class="sidebar-vis-btn" id="bboxVisToggleBtn"
-                title="Show/hide region boxes on map"
-                @click="toggleBboxVis">👁</button>
-        <button class="sidebar-toggle-btn" id="sidebarToggleBtn"
-                :title="`${widthLabel} the region panel`"
-                :aria-label="`${widthLabel} the region panel`"
-                @click="toggleWidth">
-          <span class="state-icon">{{ widthIcon }}</span>
-          <span class="state-label">{{ widthLabel }}</span>
-        </button>
-        <button class="sidebar-hide-btn" id="sidebarHideBtn"
-                title="Hide the region panel"
-                aria-label="Hide the region panel"
-                @click="hideSidebar">✕</button>
+  <!-- The Explore page's left panel (F-UNIFY Phase 6): the region list, the wide table or the
+       region editor. #sidebar and .sidebar stay: view-management.js hides the panel on the
+       Edit/Extrude/tool pages through them, and app.css sizes the page around them. -->
+  <div class="sidebar sbp" :class="sidebarClass" id="sidebar">
+    <RegionEditor v-if="regions.editingName && mode !== 'expanded'" />
+    <template v-else>
+      <div class="sbp-head">
+        <h2 class="sbp-title">{{ mode === 'expanded' ? 'All regions' : 'Regions' }}</h2>
+        <RegionsMenu @wide="toggleWidth" @hide="hideSidebar" />
+        <button id="bboxVisToggleBtn" type="button" class="sbp-ib" :class="{ on: regions.boxesVisible }"
+                :aria-pressed="regions.boxesVisible"
+                :title="regions.boxesVisible ? 'Hide region boxes on the map' : 'Show region boxes on the map'"
+                :aria-label="regions.boxesVisible ? 'Hide region boxes on the map' : 'Show region boxes on the map'"
+                @click="regions.boxesVisible = !regions.boxesVisible">{{ regions.boxesVisible ? '👁' : '🙈' }}</button>
+        <button id="sidebarToggleBtn" type="button" class="sbp-ib" :class="{ on: mode === 'expanded' }"
+                :title="`${widthLabel} the region panel`" :aria-label="`${widthLabel} the region panel`"
+                @click="toggleWidth">⤢</button>
+        <button id="sidebarHideBtn" type="button" class="sbp-ib" title="Hide the region panel"
+                aria-label="Hide the region panel" @click="hideSidebar">✕</button>
       </div>
-      <input
-        ref="regionImportInput"
-        class="hidden"
-        type="file"
-        accept="application/json,.json"
-        @change="handleRegionImport"
-      />
-    </div>
-
-    <!-- Content ─────────────────────────────────────────────────────────────── -->
-    <div class="sidebar-content">
-
-      <!-- Compact list (normal mode); the region editor replaces it while open -->
-      <SidebarListView :visible="mode === 'normal' && !editViewOpen" />
-
-      <!-- Region editor (opened by a row's ✎ button, region-editor.js) -->
-      <SidebarEditView :visible="editViewOpen" @back="setRegionEditorOpen(false)" />
-
-      <!-- Expanded table (expanded mode) -->
-      <RegionListTable v-show="mode === 'expanded'" />
-
-    </div>
+      <RegionTable v-if="mode === 'expanded'" />
+      <RegionList v-else />
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useAppStore } from '../../stores/app';
+import { useRegionsStore } from '../../stores/regions';
+import RegionEditor from '../../explore/RegionEditor.vue';
+import RegionList from '../../explore/RegionList.vue';
+import RegionsMenu from '../../explore/RegionsMenu.vue';
+import RegionTable from '../../explore/RegionTable.vue';
 
-import SidebarListView      from './SidebarListView.vue';
-import SidebarEditView      from './SidebarEditView.vue';
-import RegionListTable      from './RegionListTable.vue';
+const app = useAppStore();
+const regions = useRegionsStore();
 
-const store = useAppStore();
-
-// Mirror Pinia sidebarMode → local ref for immediate reactivity
-const mode       = computed(() => store.sidebarMode);
-const editViewOpen = ref(false);
-const regionImportInput = ref<HTMLInputElement | null>(null);
-
-// `normal` was never emitted, which left the `.sidebar.normal` rules in
-// app.css matching nothing.
+const mode = computed(() => app.sidebarMode as 'expanded' | 'normal' | 'hidden');
 const sidebarClass = computed(() => ({
   expanded: mode.value === 'expanded',
   normal: mode.value === 'normal',
   collapsed: mode.value === 'hidden',
 }));
-
-// The panel is on the left, so widening moves its right edge right.
-const widthIcon  = computed(() => (mode.value === 'expanded' ? '«' : '»'));
 const widthLabel = computed(() => (mode.value === 'expanded' ? 'Narrow' : 'Widen'));
 
-// Restored by the floating "Regions" button, so hiding and reopening the panel
-// does not quietly change its width.
+// Restored by the floating "Regions" button, so hiding and reopening the panel does not
+// quietly change its width.
 let lastVisibleMode: 'expanded' | 'normal' = 'normal';
 
-// One control for width and one for hiding. The single three-state cycle these
-// replace ran expanded -> hidden -> normal -> expanded, so from the default
-// width the button offering to change the panel made it wider, and hiding took
-// two clicks through a state the user had not asked for.
-function toggleWidth() {
-  setSidebarMode(mode.value === 'expanded' ? 'normal' : 'expanded');
-}
-
-function hideSidebar() {
-  setSidebarMode('hidden');
-}
+function toggleWidth() { setSidebarMode(mode.value === 'expanded' ? 'normal' : 'expanded'); }
+function hideSidebar() { setSidebarMode('hidden'); }
 
 function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
   if (newMode !== 'hidden') lastVisibleMode = newMode;
-  store.sidebarMode = newMode;
-  // Keep app.js closure in sync until Stage 7
+  app.sidebarMode = newMode;
+  regions.tableOpen = newMode === 'expanded';
   window.setSidebarState?.(newMode);
-  window._setSidebarViews?.(newMode);
-
-  const openBtn = document.getElementById('openSidebarBtn');
-  if (openBtn) {
-    openBtn.classList.toggle('hidden', newMode !== 'hidden');
-  }
-
-  // The width transition runs for 300ms. Relaying out only on the next frame
-  // sizes the map to the width the panel is leaving, not the one it is going
-  // to, so do it again once the transition has finished.
+  // The editor only lives in the narrow panel.
+  if (newMode !== 'normal') regions.editingName = null;
+  document.getElementById('openSidebarBtn')?.classList.toggle('hidden', newMode !== 'hidden');
+  // The width transition runs for 300 ms: re-measure the map when it starts and when it ends.
   const relayout = () => {
     window.getMap?.()?.invalidateSize?.();
     window.emitStackUpdate?.();
@@ -125,63 +70,57 @@ function setSidebarMode(newMode: 'expanded' | 'normal' | 'hidden') {
   window.setTimeout(relayout, 340);
 }
 
-/**
- * Show or hide the region editor. The one way the modules open or close it
- * (region-editor.js opens it; switching views or sidebar width closes it), so
- * this component's state never disagrees with the DOM.
- */
 function setRegionEditorOpen(open: boolean) {
-  editViewOpen.value = open;
+  if (!open) regions.editingName = null;
+  else if (regions.selectedName) regions.editingName = regions.selectedName;
 }
 
-function handleOpenSidebarClick() {
-  setSidebarMode(lastVisibleMode);
+function openRegionEditor(index: number) {
+  const r = regions.regions[index];
+  return r ? regions.openEditor(r.name) : Promise.resolve();
 }
 
-let _openSidebarButton: HTMLElement | null = null;
-
-function toggleBboxVis() {
-  window.toggleBboxLayerVisibility?.();
-}
-
-function exportRegions() {
-  (window as any).exportRegionsJson?.();
-}
-
-function openImportPicker() {
-  regionImportInput.value?.click();
-}
-
-async function handleRegionImport(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  await (window as any).importRegionsJsonFile?.(file);
-  input.value = '';
-}
+function handleOpenSidebarClick() { setSidebarMode(lastVisibleMode); }
+let _openBtn: HTMLElement | null = null;
 
 onMounted(() => {
-  // Start in normal mode so region selection stays compact by default.
   setSidebarMode('normal');
-
-  // The one way for the non-Vue modules to change the mode. They used to set
-  // `sidebar.classList` and the toggle button's text by hand, which left this
-  // component's store stale - the panel then snapped back to whatever the store
-  // still said on its next render.
-  (window as any).setSidebarMode = setSidebarMode;
-  (window as any).setRegionEditorOpen = setRegionEditorOpen;
-
-  _openSidebarButton = document.getElementById('openSidebarBtn');
-  _openSidebarButton?.addEventListener('click', handleOpenSidebarClick);
+  // The one way for the non-Vue modules to change the panel (see view-management.js).
+  const w = window as any;
+  w.setSidebarMode = setSidebarMode;
+  w.setRegionEditorOpen = setRegionEditorOpen;
+  w.openRegionEditor = openRegionEditor;
+  _openBtn = document.getElementById('openSidebarBtn');
+  _openBtn?.addEventListener('click', handleOpenSidebarClick);
 });
 
 onBeforeUnmount(() => {
-  _openSidebarButton?.removeEventListener('click', handleOpenSidebarClick);
-  _openSidebarButton = null;
-  if ((window as any).setSidebarMode === setSidebarMode) {
-    delete (window as any).setSidebarMode;
-  }
-  if ((window as any).setRegionEditorOpen === setRegionEditorOpen) {
-    delete (window as any).setRegionEditorOpen;
-  }
+  _openBtn?.removeEventListener('click', handleOpenSidebarClick);
+  const w = window as any;
+  if (w.setSidebarMode === setSidebarMode) delete w.setSidebarMode;
+  if (w.setRegionEditorOpen === setRegionEditorOpen) delete w.setRegionEditorOpen;
+  if (w.openRegionEditor === openRegionEditor) delete w.openRegionEditor;
 });
 </script>
+
+<style scoped>
+.sbp {
+  display: flex; flex-direction: column; background: var(--panel, #1c1c1e); color: var(--text, #f2f2f7);
+  border-right: 1px solid var(--line, #3a3a3c); min-height: 0; padding: 0; overflow: visible;
+}
+.sbp.normal, .sbp:not(.expanded):not(.collapsed) { width: 300px; }
+.sbp.expanded { width: 520px; }
+.sbp.collapsed { width: 0; visibility: hidden; border-right: 0; }
+.sbp-head { display: flex; align-items: center; gap: 6px; padding: 12px 14px 6px; }
+.sbp-title { flex: 1; margin: 0; font-size: 15px; font-weight: 700; }
+.sbp-ib {
+  width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--card, #2c2c2e);
+  color: var(--dim, #98989f); font-size: 13px; cursor: pointer;
+}
+.sbp-ib:hover { color: #fff; }
+.sbp-ib.on { background: rgba(10, 132, 255, 0.25); color: #fff; }
+@media (max-width: 1200px) {
+  .sbp.normal, .sbp:not(.expanded):not(.collapsed) { width: 260px; }
+  .sbp.expanded { width: 440px; }
+}
+</style>

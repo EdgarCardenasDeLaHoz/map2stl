@@ -88,7 +88,7 @@
     <!-- Map tile / terrain overlay controls mirrored from the Explore tab
          (event-listeners-map.js keeps both copies in sync by id). Display-only,
          so they sit in View (moved from Fetch → Projection). The select and the
-         checkbox stay hidden; map-globe.js unhides the opacity group while the
+         checkbox stay hidden; leafletMap.ts unhides the opacity group while the
          terrain overlay is on. -->
     <select id="mapTileLayer" style="display:none;" aria-label="Map tile layer for edit tab"></select>
     <input  type="checkbox" id="showTerrainOverlay" style="display:none;" aria-label="Show terrain overlay (edit tab)">

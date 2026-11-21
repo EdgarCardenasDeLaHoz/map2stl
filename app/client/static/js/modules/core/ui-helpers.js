@@ -15,7 +15,6 @@
  *   window.setLayerStatus(layer, status)
  *   window.updateLayerStatusUI()
  *   window.updateLayerStatusIndicators()
- *   window.setupCoordinateSearch()
  */
 
 // ============================================================
@@ -305,26 +304,6 @@ window.updateLayerStatusIndicators = function updateLayerStatusIndicators() {
 
         badge.textContent = statusIcons[status];
         badge.title = status;
-    });
-};
-
-// ============================================================
-// COORDINATE SEARCH
-// ============================================================
-
-/**
- * Wire the coordinate search input to filter the region list by name.
- * Guards against double-wiring with a _searchWired flag.
- */
-window.setupCoordinateSearch = function setupCoordinateSearch() {
-    const searchInput = document.getElementById('coordSearch');
-    if (!searchInput || searchInput._searchWired) return;
-    searchInput._searchWired = true;
-
-    // Trigger a full re-render so the pagination in region-ui.js resets and
-    // filters correctly (simple show/hide would break page boundaries).
-    searchInput.addEventListener('input', function () {
-        window.renderCoordinatesList?.();
     });
 };
 

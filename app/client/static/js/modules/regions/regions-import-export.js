@@ -66,6 +66,7 @@ function _validateRegionShape(region) {
             settings: region.settings && typeof region.settings === 'object'
                 ? region.settings
                 : null,
+            notes: typeof region.notes === 'string' ? region.notes : '',
         },
     };
 }
@@ -128,11 +129,19 @@ async function importRegionsJsonFile(file) {
             continue;
         }
 
-        const { settings, ...regionPayload } = checked.region;
+        const { settings, notes, ...regionPayload } = checked.region;
         const { error } = await window.api.regions.create(regionPayload);
         if (error) {
             failed += 1;
             continue;
+        }
+
+        if (notes && notes.trim()) {
+            const { error: notesError } = await window.api.regions.saveNotes(regionPayload.name, notes);
+            if (notesError) {
+                failed += 1;
+                continue;
+            }
         }
 
         if (settings && Object.keys(settings).length > 0) {

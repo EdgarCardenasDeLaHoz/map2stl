@@ -39,22 +39,17 @@ window.setupEventListeners = function setupEventListeners() {
     // bboxVisToggleBtn is handled by SidebarPanel.vue's @click="toggleBboxVis"; a
     // second listener here toggled twice per click, so the button did nothing.
 
-    document.getElementById('sidebarTableSearch')?.addEventListener('input', e => window.renderSidebarTable?.(e.target.value));
-
     window._setupModelExportListeners?.();
     window._setupMapAndDemListeners?.();
 
     window.setupAutoReload?.();
     window.setupStackedLayers?.();
-    window.setupCoordinateSearch?.();
-    window.setupContinentFilter?.();
     window.setupKeyboardShortcuts?.();
 
     window._setupResizablePanel?.();
 
     window.initCurveEditor?.();
     window.initPresetProfiles?.();
-    window.initRegionNotes?.();
     window.enableStackedZoomPan?.();
 
     window._setupSettingsJsonToggle?.();

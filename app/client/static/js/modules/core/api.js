@@ -219,6 +219,16 @@ window.api = (() => {
         /** DELETE /api/regions/{name} */
         delete: (name) => _fetch(`/api/regions/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
+        /** GET /api/regions/{name}/notes -> {name, notes} */
+        getNotes: (name) => _fetch(`/api/regions/${encodeURIComponent(name)}/notes`),
+
+        /** PUT /api/regions/{name}/notes with {notes}; returns {status, name, notes} */
+        saveNotes: (name, notes) => _fetch(`/api/regions/${encodeURIComponent(name)}/notes`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notes }),
+        }),
+
         /** GET /api/regions/{name}/settings */
         getSettings: (name) => _fetch(`/api/regions/${encodeURIComponent(name)}/settings`),
 

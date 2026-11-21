@@ -3,23 +3,27 @@
     <!-- Short title so the header stays on one line from 1024 px up (UI audit 2026-09-30). -->
     <div class="main-title" title="3D Maps: globe &amp; map selector">3D Maps</div>
     <!-- Context pill: what is open (design guidelines §2). Click: back to the region list. -->
-    <button v-if="regionPill" type="button" class="ctx-pill" id="regionContextPill"
-            :title="`${regionPill.name}: choose another region`" @click="goExplore">
-      <span aria-hidden="true">📍</span> <b>{{ regionPill.name }}</b>
-      <span class="ctx-sub">{{ regionPill.size }}</span> <span aria-hidden="true">▾</span>
+    <button type="button" class="ctx-pill" id="regionContextPill"
+            :title="regionPill ? `${regionPill.name}: choose another region` : 'Choose a region'" @click="goExplore">
+      <template v-if="regionPill">
+        <span aria-hidden="true">📍</span> <b>{{ regionPill.name }}</b>
+        <span class="ctx-sub">{{ regionPill.size }}</span>
+      </template>
+      <template v-else>Choose a region</template>
+      <span class="ctx-caret" aria-hidden="true">▾</span>
     </button>
     <div class="tabs">
       <!-- data-view attributes must stay — window.switchView() reads them via querySelector -->
       <button class="tab active" data-view="map" id="tabExplore">
-        <span class="tab-step" id="tabStep1">1</span> Explore
+        <span class="tab-step" id="tabStep1" aria-hidden="true"></span>Explore
       </button>
-      <span class="tab-arrow">›</span>
+      <span class="tab-arrow" aria-hidden="true">›</span>
       <button class="tab" data-view="dem" id="tabEdit">
-        <span class="tab-step" id="tabStep2">2</span> Edit
+        <span class="tab-step" id="tabStep2" aria-hidden="true"></span>Edit
       </button>
-      <span class="tab-arrow">›</span>
+      <span class="tab-arrow" aria-hidden="true">›</span>
       <button class="tab" data-view="model" id="tabExtrude">
-        <span class="tab-step" id="tabStep3">3</span> Extrude
+        <span class="tab-step" id="tabStep3" aria-hidden="true"></span>Extrude
       </button>
     </div>
 
@@ -42,7 +46,7 @@
       </div>
       <!-- Region settings save themselves (modules/ui/presets.js, autosave); this says
            whether they have. No Save button: design guidelines §1.5. -->
-      <span id="saveSettingsStatus" class="save-status" role="status" aria-live="polite"></span>
+      <span id="saveSettingsStatus" class="save-status saved" role="status" aria-live="polite">✓ Saved</span>
       <!-- Account & help: keys, diagnostics, guides, results and docs, as one menu (user,
            2026-10-02). Page settings live in each page's right-hand panel. -->
       <div class="help-menu">
@@ -545,47 +549,48 @@ async function saveTilePath() {
   white-space: nowrap;
   margin-right: 4px;
 }
-.save-status.saved   { color: #30d158; }
+.save-status.saved   { color: var(--text-muted); }
 .save-status.pending { color: var(--text-muted); }
 .save-status.failed  { color: #ff6b6b; }
 
 .ctx-pill {
   display: inline-flex; align-items: center; gap: 6px; flex-shrink: 1; min-width: 0;
-  background: #1c1c1e; color: #f5f5f7; border: 0; border-radius: 999px; padding: 5px 12px;
+  background: #2c2c2e; color: #f5f5f7; border: 0; border-radius: 999px; padding: 6px 12px;
   font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.ctx-pill:hover { background: #2c2c2e; }
+.ctx-pill:hover { background: #3a3a3c; }
+.ctx-caret { font-size: 10px; color: var(--text-muted); }
 .ctx-sub { color: var(--text-muted); }
 .gear-btn {
   width: 32px; height: 32px; border-radius: 999px; border: 0; cursor: pointer;
-  background: #1c1c1e; color: var(--text-muted); font-size: 16px;
+  background: #2c2c2e; color: var(--text-muted); font-size: 14px;
 }
-.gear-btn:hover { background: #2c2c2e; color: #f5f5f7; }
+.gear-btn:hover { background: #3a3a3c; color: #f5f5f7; }
 .help-menu, .tools-menu { position: relative; }
 .tools-btn {
   height: 32px; padding: 0 12px; border-radius: 8px; border: 0; cursor: pointer;
-  background: #1c1c1e; color: #f5f5f7; font-size: 13px; white-space: nowrap;
+  background: #2c2c2e; color: #f5f5f7; font-size: 13px; white-space: nowrap;
 }
-.tools-btn:hover { background: #2c2c2e; }
+.tools-btn:hover { background: #3a3a3c; }
 .tools-btn.on { outline: 2px solid #0a84ff; }
 .tools-btn:focus-visible { outline: 2px solid #0a84ff; }
 .tools-dropdown { width: 310px; }
 .help-item.soon { opacity: 0.55; cursor: default; }
 .help-item.soon:hover { background: none; }
-.help-item.on { background: #2c2c2e; }
+.help-item.on { background: #3a3a3c; }
 .soon-tag { margin-left: auto; font-size: 10px; color: var(--text-muted); border: 1px solid #3a3a3c; border-radius: 999px; padding: 1px 7px; }
 #helpMenuBtn { font-weight: 700; font-size: 15px; }
 .help-dropdown {
   position: absolute; right: 0; top: 40px; z-index: 9000; width: 300px; padding: 6px;
-  background: #1c1c1e; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+  background: #2c2c2e; border-radius: 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
 }
 .help-item {
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0;
   border-radius: 10px; background: none; color: #f5f5f7; text-align: left; text-decoration: none;
   font: inherit; cursor: pointer;
 }
-.help-item:hover, .help-item:focus-visible { background: #2c2c2e; outline: none; }
-.help-ic { width: 26px; height: 26px; border-radius: 8px; background: #2c2c2e; display: grid; place-items: center; flex: none; }
+.help-item:hover, .help-item:focus-visible { background: #3a3a3c; outline: none; }
+.help-ic { width: 26px; height: 26px; border-radius: 8px; background: #3a3a3c; display: grid; place-items: center; flex: none; }
 .help-text { display: flex; flex-direction: column; min-width: 0; }
 .help-n { font-weight: 600; font-size: 13px; }
 .help-d { color: var(--text-muted); font-size: 12px; }

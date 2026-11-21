@@ -21,7 +21,8 @@
  * {phase, place, box, sizeText}; NewRegionCard.vue renders it.
  */
 import { formatBboxDims, bboxSizeKm, placeBox } from '../regions/region-geometry.js';
-import { bedFitMm, parseBedSize } from '../export/print-scale.js';
+import { bedFitMm } from '../export/print-scale.js';
+import { bedAspect, readBedPreference } from './bed-preference.js';
 
 const ACCENT = '#0a84ff';
 
@@ -31,13 +32,9 @@ let _pending = null;      // L.Rectangle in the drawn-items group, editable
 
 const _map = () => window.getMap?.();
 
-function _bed() {
-    const sel = document.getElementById('bedSizeSelect');
-    const bed = parseBedSize(sel?.value, document.getElementById('bedCustomW')?.value,
-        document.getElementById('bedCustomH')?.value);
-    const name = sel?.value === 'custom' ? `${bed.w}×${bed.h} mm bed` : (sel?.selectedOptions?.[0]?.text || 'your bed');
-    return { ...bed, name };
-}
+// The bed chosen in Extrude (a persisted preference; square when none): it only shapes the
+// dashed suggestion box and the printed-size hint. Explore has no bed control (2026-11-13).
+const _bed = () => readBedPreference();
 
 function _boxOf(bounds) {
     return { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() };
@@ -104,7 +101,7 @@ function suggest(place) {
     _removePending();
     _clearSuggestion();
     const bed = _bed();
-    const box = placeBox(place, bed.w / bed.h);
+    const box = placeBox(place, bedAspect(bed));
     _suggestion = L.rectangle([[box.south, box.west], [box.north, box.east]], {
         color: ACCENT, weight: 2, dashArray: '6 6', fillColor: ACCENT, fillOpacity: 0.05, interactive: false,
     }).addTo(map);

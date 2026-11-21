@@ -3,6 +3,31 @@
 Choices about the browser client: framework, state ownership, layer toggles, map overlays and layout
 rules. Related: [composite.md](composite.md), [trails.md](trails.md).
 
+### 2026-11-13 — The Explore page is Vue; the legacy JS keeps only the bridge Edit and Extrude read
+- **Decision:** the region list, wide table, region editor, Map menu, Globe and Leaflet map of the
+  Explore page are Vue components (`app/client/static/js/vue/explore/`,
+  `vue/components/sidebar/SidebarPanel.vue`, `vue/components/views/MapContainer.vue`). One "..." menu
+  (`explore/RegionsMenu.vue`) holds Export / Import / Show boxes / Wide table / Hide panel. Notes
+  live on the server region record (`app/server/routers/regions.py::get_region_notes`,
+  `explore/notesMigration.ts` uploads a leftover localStorage note once). The print bed only sets the
+  aspect of the dashed new-region box (`modules/map/bed-preference.js::bedAspect`). The three hidden
+  floating toggles are gone; the same controls are in the Map menu (`explore/MapMenu.vue`). The globe
+  puts markers where the texture says (`explore/globeMath.ts::latLngToVec`).
+- **Header:** `layout/MainHeader.vue` is the flat header of the approved mockups (01/09): brand, a
+  region context pill (always shown; click returns to Explore), the stepper as plain text where the
+  current page is a pill, a done step gets a green check and the next step a blue underline, then
+  Tools, a "Saved" status and the help menu. Every stepper capability stays (tab switching, step
+  state, `#saveSettingsStatus`). Under 480 px the brand and save text are hidden so nothing overflows.
+- **Why:** F-UNIFY Phase 6, page 1. Edit and Extrude still read `appState` fields, the
+  REGION_SELECTED / BBOX_CHANGED / VIEW_CHANGED events and globals such as `getMap`,
+  `selectCoordinate`, `newRegion.*`, so those stay. Anything the raw-served `modules/**` imports must
+  stay plain `.js` (the static server serves `static/` before `dist/`; a `.ts` import 404s).
+- **Rejected:** an Edit-side REGION_SELECTED listener (Edit keeps `selectCoordinate`'s reset); a bed
+  control on Explore; keeping the legacy globe (markers were mirrored on a textured sphere).
+- **Supersedes / superseded by:** —
+- **Source:** [F-UNIFY](../plans/active/F-UNIFY-one-app.md) Phase 6,
+  [inventory](../plans/active/F-UNIFY-phase6-explore-inventory.md).
+
 ### 2026-10-23 — The satellite image drapes the finished model's ground parts; steep faces stay soil colour
 - **Decision:** with Colours = Satellite image, the City Model's terrain, roads, railways, trails
   and green take the image through planar top-down UVs (`city-fullmodel.js::satelliteUVs`).

@@ -31,17 +31,13 @@ import './modules/export/export-handlers.js';
 import './modules/export/model-viewer.js';
 import './modules/map/compare-view.js';
 import './modules/map/new-region.js';
-import './modules/regions/region-ui.js';
 import './modules/regions/regions-import-export.js';
 import './modules/layers/water-mask.js';
 import './modules/layers/water-hydrology-combined.js';
 import './modules/layers/trails-overlay.js';
 import './modules/layers/borders-overlay.js';
 import './modules/layers/river-lines.js';
-import './modules/map/map-globe.js';
-import './modules/regions/region-boxes.js';
 import './modules/regions/regions.js';
-import './modules/regions/region-editor.js';
 import './modules/regions/region-links.js';     // #region=<name>&tab=<tab> shortcut links
 import './modules/map/bbox-panel.js';
 import './modules/ui/app-setup.js';

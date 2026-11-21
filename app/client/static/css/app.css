@@ -147,7 +147,15 @@
 
         .app-container {
             display: flex;
+            flex-direction: column;
             height: 100vh;
+        }
+
+        /* Sidebar and main column side by side, under the full-width header. */
+        .app-body {
+            flex: 1;
+            display: flex;
+            min-height: 0;
         }
 
         .main-content {
@@ -287,9 +295,10 @@
         }
 
         .main-header {
-            padding: 4px 12px;
-            background-color: #2d2d2d;
-            border-bottom: 1px solid #404040;
+            padding: 0 16px;
+            min-height: 47px;
+            background-color: #1c1c1e;
+            border-bottom: 1px solid #2c2c2e;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -300,110 +309,81 @@
         }
 
         .main-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-muted);
+            font-size: 15px;
+            font-weight: 700;
+            color: #f5f5f7;
             white-space: nowrap;
             flex-shrink: 0;
         }
 
         .tabs {
             display: flex;
-            gap: 3px;
+            gap: 4px;
             align-items: center;
             flex-wrap: nowrap;
             flex-shrink: 0;
         }
 
+        /* Flat tabs: the current page is a pill, the others are plain text. */
         .tab {
-            padding: 5px 12px;
-            background-color: #404040;
+            padding: 6px 14px;
+            background: none;
             border: none;
-            color: #e0e0e0;
+            color: var(--text-muted, #98989f);
             cursor: pointer;
-            border-radius: 4px 4px 0 0;
-            transition: all 0.2s ease;
-            font-size: 12px;
+            border-radius: 8px;
+            transition: background 0.15s, color 0.15s;
+            font-size: 13px;
             font-weight: 500;
             white-space: nowrap;
         }
 
         .tab:hover {
-            background-color: #505050;
+            color: #f5f5f7;
         }
 
         .tab.active {
-            background-color: #007acc;
-            color: white;
+            background-color: #2c2c2e;
+            color: #f5f5f7;
         }
 
+        /* Step state without numbers: a green tick when the step is done, a blue
+           underline on the step still to act on (set by _updateWorkflowStepper). */
         .tab-step {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.15);
-            font-size: 11px;
-            font-weight: 700;
-            margin-right: 3px;
-            vertical-align: middle;
-            transition: background 0.25s, color 0.25s;
+            display: none;
         }
 
-        .tab.active .tab-step {
-            background: rgba(255, 255, 255, 0.3);
-        }
-
-        /* UX10: completed step — green badge with checkmark */
         .tab.step-done .tab-step {
-            background: #2ecc71;
-            color: #111;
-            font-size: 11px;
+            display: inline;
+            color: #30d158;
+            margin-right: 5px;
+            font-size: 12px;
         }
 
         .tab.step-done .tab-step::after {
-            content: '✓';
-        }
-
-        /* Hide the number text when showing checkmark */
-        .tab.step-done .tab-step {
-            font-size: 0;
-        }
-
-        .tab.step-done .tab-step::after {
-            font-size: 11px;
+            content: '\2713';
         }
 
         .tab-arrow {
-            color: var(--text-dim);
-            font-size: 16px;
+            color: #48484a;
+            font-size: 14px;
             line-height: 1;
             align-self: center;
             user-select: none;
         }
 
-        /* Arrow turns green when left step is done */
         .tab.step-done+.tab-arrow {
-            color: #2ecc71;
+            color: #30d158;
             opacity: 0.6;
         }
 
-        /* The step still to act on. This replaces the workflow hint bar, whose
-           three labels repeated the tab strip immediately above it; the wording
-           it carried is now each tab's title attribute. */
         .tab.step-next {
-            box-shadow: inset 0 -2px 0 #4a8ae8;
-        }
-
-        .tab.step-next .tab-step {
-            background: #4a8ae8;
-            color: #fff;
+            box-shadow: inset 0 -2px 0 #0a84ff;
         }
 
         .content-area {
             flex: 1;
+            position: relative;
             padding: 0;
             overflow: hidden;
             background-color: var(--bg-dark);
@@ -468,55 +448,8 @@
             color: white;
         }
 
-        /* Map Settings Panel (opens from ⚙️ floating button) */
-        .map-settings-panel {
-            position: absolute;
-            top: 10px;
-            right: 54px;
-            z-index: 1001;
-            background: rgba(28, 28, 28, 0.97);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-            min-width: 220px;
-            font-size: 12px;
-        }
-
-        .map-settings-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 7px 10px 6px;
-            border-bottom: 1px solid var(--bg-light);
-            color: #ccc;
-            font-weight: 600;
-        }
-
-        .map-settings-close {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            font-size: 14px;
-            padding: 0 2px;
-            line-height: 1;
-        }
-
         .map-settings-close:hover {
             color: #fff;
-        }
-
-        .map-settings-body {
-            padding: 8px 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .map-settings-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
 
         .map-settings-row label {
@@ -524,16 +457,6 @@
             font-size: 11px;
             white-space: nowrap;
             flex-shrink: 0;
-        }
-
-        .map-settings-select {
-            flex: 1;
-            background: var(--bg-light);
-            color: #ccc;
-            border: 1px solid var(--border-light);
-            border-radius: 3px;
-            padding: 3px 5px;
-            font-size: 11px;
         }
 
         /* Bottom-centre map actions: "+ New Region" and, with a region
@@ -2001,136 +1924,6 @@
             font-weight: 500;
         }
 
-        /* Sidebar expanded table view */
-        .sidebar-table-view {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 11px;
-            table-layout: fixed;
-        }
-
-        .sidebar-table-view th {
-            background: #252525;
-            color: var(--text-dim);
-            font-weight: 600;
-            padding: 4px 3px;
-            border-bottom: 1px solid var(--border);
-            text-align: left;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-        }
-
-        .sidebar-table-view td {
-            padding: 3px 3px;
-            border-bottom: 1px solid #282828;
-            color: #ccc;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .sidebar-table-view tbody tr {
-            cursor: pointer;
-        }
-
-        .sidebar-table-view tbody tr:hover td {
-            background: #2e2e2e;
-        }
-
-        .sidebar-table-view tr.selected td {
-            background: #1a3a5c;
-            color: #9cf;
-        }
-
-        .sidebar-table-view .tbl-name {
-            font-weight: 500;
-            color: #ddd;
-        }
-
-        .sidebar-table-view .tbl-coord {
-            font-family: monospace;
-            font-size: 11px;
-            color: #7ab;
-            text-align: right;
-        }
-
-        .sidebar-table-view .tbl-actions {
-            white-space: nowrap;
-            text-align: center;
-        }
-
-        .sidebar-table-view .tbl-btn {
-            padding: 1px 4px;
-            font-size: 11px;
-            border: 1px solid var(--border);
-            border-radius: 3px;
-            background: var(--bg-mid);
-            color: #bbb;
-            cursor: pointer;
-            margin: 0;
-            line-height: 1.2;
-        }
-
-        .sidebar-table-view .tbl-btn:hover {
-            background: #3a3a3a;
-            color: #fff;
-        }
-
-        .sidebar-table-view .tbl-btn.edit {
-            background: #1a3a5c;
-            border-color: #2a5a8c;
-            color: #8cf;
-        }
-
-        .sidebar-table-view .tbl-btn.edit:hover {
-            background: #2a5a8c;
-        }
-
-        /* Grouped sidebar table headers */
-        .tbl-group-header td {
-            background: #1e1e1e;
-            color: var(--text-muted);
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            padding: 4px 3px;
-            border-top: 2px solid var(--bg-light);
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .tbl-group-header:first-child td {
-            border-top: none;
-        }
-
-        .tbl-group-header:hover td {
-            background: #252525;
-            color: #aaa;
-        }
-
-        .tbl-group-header.collapsed td::before {
-            content: '▶ ';
-        }
-
-        .tbl-group-header:not(.collapsed) td::before {
-            content: '▼ ';
-        }
-
-        .tbl-group-count {
-            background: var(--bg-light);
-            color: var(--text-muted);
-            font-size: 11px;
-            padding: 1px 5px;
-            border-radius: 8px;
-            margin-left: 4px;
-            font-weight: 400;
-        }
-
         #sidebarTableView {
             display: flex;
             flex-direction: column;
@@ -2195,53 +1988,6 @@
 
         .coordinate-item.selected .coordinate-item-meta {
             color: rgba(255, 255, 255, 0.7);
-        }
-
-        /* Continent groups in sidebar coordinate list */
-        .continent-header-sidebar {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 8px;
-            cursor: pointer;
-            background: #252525;
-            border-bottom: 1px solid #2e2e2e;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-            user-select: none;
-        }
-
-        .continent-header-sidebar:hover {
-            background: #2c2c2c;
-        }
-
-        .continent-arrow-sidebar {
-            font-size: 11px;
-            color: var(--text-dim);
-            transition: transform 0.15s;
-        }
-
-        .continent-header-sidebar.collapsed .continent-arrow-sidebar {
-            transform: rotate(-90deg);
-        }
-
-        .continent-label-sidebar {
-            flex: 1;
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .continent-count-sidebar {
-            font-size: 11px;
-            color: var(--text-dim);
-        }
-
-        .continent-body-sidebar.collapsed {
-            display: none;
         }
 
         /* ✎ button on each region row: opens the region editor (region-editor.js) */
@@ -2728,7 +2474,7 @@
                 --panel-width: 220px;
             }
 
-            .app-container {
+            .app-body {
                 flex-direction: column;
             }
 
@@ -2771,11 +2517,15 @@
 
         /* Mobile: under 480px */
         @media (max-width: 480px) {
+            .main-header { padding: 0 8px; gap: 6px; }
+            .main-header .tab { padding: 6px 8px; }
+            .main-header .main-title { display: none; }
+            .main-header .save-status { display: none; }
             :root {
                 --panel-width: 100vw;
             }
 
-            .app-container {
+            .app-body {
                 flex-direction: column;
             }
 
@@ -3047,42 +2797,11 @@
             font-size: 15px;
         }
 
-        /* Sidebar list-view wrapper */
-        .sidebar-list-view {
-            display: flex;
-            flex-direction: column;
-            flex: 1 1 auto;
-            flex-shrink: 1;
-            min-height: 0;
-        }
-
-        .sidebar-list-view.hidden {
-            display: none;
-        }
-
-        .sidebar-list-filters {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 4px;
-            margin: 4px 6px 4px;
-        }
-
         /* Search input inside the sidebar list */
         .sidebar-search-input {
             margin: 0;
             width: 100%;
             flex-shrink: 0;
-            box-sizing: border-box;
-        }
-
-        .sidebar-continent-filter {
-            width: 100%;
-            padding: 5px 7px;
-            background: var(--bg-mid);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            color: #ddd;
-            font-size: 11px;
             box-sizing: border-box;
         }
 
@@ -3154,18 +2873,6 @@
             padding: 10px;
             font-size: 12px;
             color: #aaa;
-        }
-
-        /* Map settings panel inline overrides */
-        .map-settings-terrain-opacity {
-            flex: 1;
-        }
-
-        .map-settings-opacity-value {
-            font-size: 11px;
-            color: #aaa;
-            min-width: 28px;
-            text-align: right;
         }
 
         /* Sidebar empty-state hint (region list) */
@@ -3300,7 +3007,6 @@
 .map-view-ctl .map-floating-btn:hover { background: rgba(44, 44, 46, 0.96); transform: none; }
 .map-view-ctl .map-floating-btn .btn-label { font-size: 13px; opacity: 1; }
 .map-view-ctl .map-floating-btn.active { background: #0a84ff; }
-.map-settings-panel { top: 52px; right: 10px; border: 0; border-radius: 14px; }
 
 .map-selection-card {
     position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 1000;

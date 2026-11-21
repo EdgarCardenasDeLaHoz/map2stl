@@ -1,8 +1,8 @@
 /**
  * modules/regions/continent.js — heuristic continent for a lat/lon point.
  *
- * Pure (no DOM, no window), so vitest imports it directly. region-ui.js
- * re-exposes it as window.detectContinent for regions.js and the sidebar.
+ * Pure (no DOM, no window), so vitest imports it directly. vue/explore/regionList.ts
+ * imports it for the region list's continent filter.
  *
  * Only used to group saved regions in the sidebar, so the boundaries are
  * coarse polylines, good to roughly 0.1-0.5 degrees. Known conventions and

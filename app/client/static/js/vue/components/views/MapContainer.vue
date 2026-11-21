@@ -1,54 +1,15 @@
 <template>
   <!-- Leaflet map view — IDs must stay for Leaflet init and event listeners -->
   <div id="mapContainer" class="map-container">
-    <div id="map"></div>
+    <ExploreMap />
 
-    <!-- View controls in the map's corner (design guidelines §2 Designer, F-DESIGN): Globe and
-         the map menu. Terrain relief, grid and labels live in that menu; their old floating
-         buttons stay in the DOM (hidden) because event-listeners-map.js / map-globe.js keep
-         their state by id. -->
+    <!-- View controls in the map's corner (mockups 03 and 08): the Globe and the Map menu.
+         Terrain relief, grid lines and place names live in the menu (MapMenu.vue). -->
     <div class="map-floating-controls map-view-ctl">
-      <button id="floatingGlobeToggle"   class="map-floating-btn" title="Switch to 3D Globe view" aria-label="Switch to 3D Globe">🌍 <span class="btn-label">Globe</span></button>
-      <button id="floatingMapSettingsBtn" class="map-floating-btn" title="Map style, terrain relief, grid and labels" aria-label="Map style and layers">🗺 <span class="btn-label">Map ▾</span></button>
-      <button id="floatingTerrainToggle" class="map-floating-btn" hidden title="Terrain relief" aria-label="Terrain relief"></button>
-      <button id="floatingGridToggle"    class="map-floating-btn" hidden title="Grid lines" aria-label="Grid lines"></button>
-      <button id="floatingLabelsToggle"  class="map-floating-btn" hidden title="Map labels" aria-label="Map labels"></button>
-    </div>
-
-    <!-- Map Settings Panel -->
-    <div id="mapSettingsPanel" class="map-settings-panel hidden">
-      <div class="map-settings-header">
-        <span>Map Settings</span>
-        <button id="closeMapSettingsBtn" class="map-settings-close" aria-label="Close map settings" title="Close">✕</button>
-      </div>
-      <div class="map-settings-body">
-        <div class="map-settings-row">
-          <label for="mapTileLayerExplore">Map Style</label>
-          <select id="mapTileLayerExplore" class="map-settings-select">
-            <option value="osm">OpenStreetMap</option>
-            <option value="osm-topo">OpenTopoMap</option>
-            <option value="esri-world">ESRI World Imagery</option>
-            <option value="esri-topo">ESRI World Topo</option>
-            <option value="carto-light">CartoDB Positron</option>
-            <option value="carto-dark">CartoDB Dark Matter</option>
-            <option value="stamen-terrain">Stamen Terrain</option>
-          </select>
-        </div>
-        <div class="map-settings-row">
-          <label><input type="checkbox" id="showTerrainOverlayExplore"> Terrain Overlay</label>
-        </div>
-        <div class="map-settings-row" id="terrainOpacityRowExplore" style="display:none;">
-          <label>Opacity</label>
-          <input type="range" id="terrainOverlayOpacityExplore" min="0" max="100" value="70" class="map-settings-terrain-opacity">
-          <span id="terrainOpacityValueExplore" class="map-settings-opacity-value">70%</span>
-        </div>
-        <div class="map-settings-row">
-          <label><input type="checkbox" id="showGridlinesExplore" checked> Grid Lines</label>
-        </div>
-        <div class="map-settings-row">
-          <label><input type="checkbox" id="showLabelsExplore"> Map Labels</label>
-        </div>
-      </div>
+      <button id="floatingGlobeToggle" type="button" class="map-floating-btn" :class="{ active: globeOpen }"
+              :aria-pressed="globeOpen" title="Switch to the 3D globe" aria-label="Switch to 3D Globe"
+              @click="toggleGlobe">🌍 <span class="btn-label">Globe</span></button>
+      <MapMenu />
     </div>
 
     <!-- Landmark search + named landmarks near the box edge (F-UX batch 2) -->
@@ -56,7 +17,7 @@
     <EdgeLandmarkWarnings fetcher />
 
     <!-- The selected region (design guidelines §2 Manager: details of the selection, one
-         primary action). "+ New region" sits under the region list (SidebarListView.vue). -->
+         primary action). "+ New region" sits under the region list (RegionList.vue). -->
     <!-- New region: a searched place, drawing, or a box being named (new-region.js). -->
     <NewRegionCard />
 
@@ -75,12 +36,14 @@
   </div>
 </template>
 <script setup lang="ts">
-// Leaflet initialises by reading #map after DOMContentLoaded.
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useAppStore } from '../../stores/app';
 import EdgeLandmarkWarnings from './EdgeLandmarkWarnings.vue';
 import LandmarkSearch from './LandmarkSearch.vue';
 import NewRegionCard from './NewRegionCard.vue';
+import ExploreMap from '../../explore/ExploreMap.vue';
+import MapMenu from '../../explore/MapMenu.vue';
+import { globeOpen } from '../../explore/globeState';
 import { formatBboxDims } from '../../../modules/regions/region-geometry.js';
 
 const store = useAppStore();
@@ -101,6 +64,9 @@ const onNewRegion = (e: Event) => { newRegionPhase.value = (e as CustomEvent).de
 onMounted(() => window.addEventListener('map2stl:new-region', onNewRegion));
 onBeforeUnmount(() => window.removeEventListener('map2stl:new-region', onNewRegion));
 
+function toggleGlobe() {
+  (window as any).setGlobeOpen?.(!globeOpen.value);
+}
 function loadDem() {
   (window as any).loadSelectedRegionDem?.();
 }

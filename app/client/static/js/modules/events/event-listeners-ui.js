@@ -2,7 +2,7 @@
  * modules/event-listeners-ui.js
  *
  * Resizable settings panel and settings JSON view toggle.
- * (The sidebar region editor is wired by modules/regions/region-editor.js.)
+ * (The region editor is Vue: vue/explore/RegionEditor.vue.)
  *
  * Exposes on window:
  *   window._setupResizablePanel()

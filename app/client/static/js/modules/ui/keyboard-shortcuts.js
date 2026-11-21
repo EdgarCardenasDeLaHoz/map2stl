@@ -68,7 +68,7 @@ window.setupKeyboardShortcuts = function setupKeyboardShortcuts() {
             document.getElementById('gridPixelModeBtn')?.click();
         }
 
-        // No global ↑/↓: the region list rows move focus themselves (region-ui.js). A
+        // No global ↑/↓: the region list rows move focus themselves (RegionList.vue). A
         // page-wide handler looked up a missing #coordinateList, threw, and stopped
         // arrow-key scrolling everywhere (removed 2026-10-01).
     });

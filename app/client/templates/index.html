@@ -15,6 +15,9 @@
 
 <body>
     <div class="app-container">
+        <!-- MainHeader (title, region pill, tabs, tools, save status) spans the full width: teleported by AppShell.vue -->
+        <div id="vue-main-header"></div>
+        <div class="app-body">
         <button id="openSidebarBtn" class="open-sidebar hidden" title="Open region selection panel">📍 Regions</button>
         <!-- Stage 3: Sidebar replaced by Vue SidebarPanel.vue — teleported here -->
         <div id="vue-sidebar"></div>
@@ -26,10 +29,9 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Stage 5: MainHeader (title + tabs) teleported by AppShell.vue -->
-            <div id="vue-main-header"></div>
             <!-- Stage 6: Content area (map, globe, dem, model) — rendered by ContentArea.vue, teleported here -->
             <div id="vue-content-area"></div>
+        </div>
         </div>
     </div>
 

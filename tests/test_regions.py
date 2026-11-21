@@ -185,3 +185,68 @@ class TestDeleteRegion:
     def test_preloaded_region_can_be_deleted(self, client):
         r = client.delete("/api/regions/TestRegion")
         assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# GET/PUT /api/regions/{name}/notes  (Explore page notes live on the server)
+# ---------------------------------------------------------------------------
+
+class TestRegionNotes:
+    def test_notes_default_empty(self, client):
+        r = client.get("/api/regions/TestRegion/notes")
+        assert r.status_code == 200
+        assert r.json() == {"name": "TestRegion", "notes": ""}
+
+    def test_save_then_read_back(self, client):
+        r = client.put("/api/regions/TestRegion/notes", json={"notes": "good light at dawn"})
+        assert r.status_code == 200
+        assert client.get("/api/regions/TestRegion/notes").json()["notes"] == "good light at dawn"
+
+    def test_notes_in_region_list(self, client):
+        client.put("/api/regions/TestRegion/notes", json={"notes": "n1"})
+        reg = next(g for g in client.get("/api/regions").json()["regions"] if g["name"] == "TestRegion")
+        assert reg["notes"] == "n1"
+
+    def test_unknown_region_404(self, client):
+        assert client.get("/api/regions/Nope/notes").status_code == 404
+        assert client.put("/api/regions/Nope/notes", json={"notes": "x"}).status_code == 404
+
+    def test_bad_body_400(self, client):
+        assert client.put("/api/regions/TestRegion/notes", json={"notes": 5}).status_code == 400
+        assert client.put("/api/regions/TestRegion/notes", json=[1]).status_code == 400
+
+    def test_too_long_413(self, client):
+        r = client.put("/api/regions/TestRegion/notes", json={"notes": "x" * 20001})
+        assert r.status_code == 413
+
+    def test_region_update_keeps_notes(self, client):
+        client.put("/api/regions/TestRegion/notes", json={"notes": "keep me"})
+        reg = client.get("/api/regions").json()["regions"][0]
+        client.put("/api/regions/TestRegion", json={
+            "name": "TestRegion", "north": reg["north"], "south": reg["south"],
+            "east": reg["east"], "west": reg["west"]})
+        assert client.get("/api/regions/TestRegion/notes").json()["notes"] == "keep me"
+
+    def test_rename_moves_notes(self, client):
+        client.put("/api/regions/TestRegion/notes", json={"notes": "moves"})
+        reg = client.get("/api/regions").json()["regions"][0]
+        r = client.put("/api/regions/TestRegion", json={
+            "name": "Renamed", "north": reg["north"], "south": reg["south"],
+            "east": reg["east"], "west": reg["west"]})
+        assert r.status_code == 200
+        assert client.get("/api/regions/Renamed/notes").json()["notes"] == "moves"
+
+    def test_old_database_gets_notes_column(self, tmp_path):
+        import sqlite3
+
+        from app.server.core import db as db_module
+        p = tmp_path / "old.db"
+        con = sqlite3.connect(p)
+        con.execute("CREATE TABLE regions (name TEXT PRIMARY KEY, label TEXT, description TEXT, "
+                    "north REAL NOT NULL, south REAL NOT NULL, east REAL NOT NULL, west REAL NOT NULL)")
+        con.execute("INSERT INTO regions VALUES ('A', NULL, NULL, 2, 1, 2, 1)")
+        con.commit()
+        con.close()
+        db_module.init_db(p)
+        with db_module.get_db(p) as c:
+            assert c.execute("SELECT notes FROM regions").fetchone()[0] in ("", None)

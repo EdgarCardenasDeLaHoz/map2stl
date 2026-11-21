@@ -78,10 +78,11 @@ def test_terrain_fetch_renders_dem(strict_page, live_server_url_testmode):
     page.locator("#tabEdit").click()
 
     # 3. Reveal the Load DEM button (its collapsible section starts collapsed).
-    load_btn = page.locator("#loadDemBtn")
+    # The visible control is the Terrain panel's "Reload terrain" button (#loadDemBtn itself is hidden).
+    load_btn = page.get_by_role("button", name="Reload terrain")
     if not load_btn.is_visible():
-        section = page.locator(".collapsible-section", has=page.locator("#loadDemBtn")).first
-        section.locator(".collapsible-header").first.click()
+        # The Terrain panel keeps it on its "Fetch" tab (View / Fetch / Composite).
+        page.get_by_role("tab", name="Fetch", exact=True).click()
     load_btn.wait_for(state="visible", timeout=10_000)
 
     # 4. Fetch the DEM and assert the (deterministic) endpoint succeeds.
@@ -171,10 +172,11 @@ def test_combined_view_resamples_mismatched_water_mask(strict_page, live_server_
     page.route("**/api/terrain/water-mask*", fulfill_water)
 
     page.locator("#tabEdit").click()
-    load_btn = page.locator("#loadDemBtn")
+    # The visible control is the Terrain panel's "Reload terrain" button (#loadDemBtn itself is hidden).
+    load_btn = page.get_by_role("button", name="Reload terrain")
     if not load_btn.is_visible():
-        section = page.locator(".collapsible-section", has=page.locator("#loadDemBtn")).first
-        section.locator(".collapsible-header").first.click()
+        # The Terrain panel keeps it on its "Fetch" tab (View / Fetch / Composite).
+        page.get_by_role("tab", name="Fetch", exact=True).click()
     load_btn.wait_for(state="visible", timeout=10_000)
     with page.expect_response(lambda r: "/api/terrain/dem" in r.url, timeout=15_000):
         load_btn.click()

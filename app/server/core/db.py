@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS regions (
     base           REAL    DEFAULT 5.0,
     subtract_water INTEGER DEFAULT 1,
     sat_scale      INTEGER DEFAULT 500,
+    notes          TEXT    DEFAULT '',
     CHECK (north > south)
 );
 """
@@ -124,6 +125,10 @@ def init_db(path: Path | None = None) -> None:
     p = path or DB_PATH
     with get_db(p) as conn:
         conn.execute(_CREATE_REGIONS)
+        # Databases made before the Explore page kept notes on the server.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(regions)")}
+        if "notes" not in cols:
+            conn.execute("ALTER TABLE regions ADD COLUMN notes TEXT DEFAULT ''")
         conn.execute(_CREATE_REGION_SETTINGS)
         conn.execute(_CREATE_REGION_LANDMARKS)
         conn.commit()

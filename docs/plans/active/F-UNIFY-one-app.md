@@ -265,6 +265,11 @@ the header, as pages in the same app shell, with the same header, region pill an
   3. Extrude (`model-viewer.js`, 1.9k lines).
 - The bridge is removed at the end. `app.css` (3.4k lines) splits into component styles.
 - Each page migrates only after a screenshot comparison against the current build (no capability lost).
+- **Progress 2026-11-13, page 1 (Explore) migrated** (branch `p6vue`, not committed): list, table,
+  editor, Map menu, Globe, Leaflet map and new-region flow are Vue; `map-globe.js`, `region-boxes.js`,
+  `region-ui.js`, `region-editor.js` and the old sidebar components are deleted. Notes moved to the
+  server. 71 capabilities walked, see the inventory. Not done: the header stepper restyle, Edit and
+  Extrude pages, removing the bridge. Decision: `docs/decisions/frontend.md`.
 
 ## Order and gates
 
